@@ -1,0 +1,12 @@
+.*
+!.gitignore
+
+# Local files
+/archive
+/plans
+/research
+
+# Temporary files
+*.tmp
+*.swp
+*~
