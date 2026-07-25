@@ -1,9 +1,16 @@
 .*
+
+# Build output
+/dist
+/node_modules
 !.gitignore
 
 # Local files
 /archive
+/docs/adr
+/docs/agents
 /plans
+/presentation
 /research
 
 # Temporary files
