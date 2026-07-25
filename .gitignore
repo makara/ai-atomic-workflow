@@ -1,9 +1,11 @@
 .*
+!.gitignore
+
+node_modules
 
 # Build output
 /dist
-/node_modules
-!.gitignore
+/packages/**/dist
 
 # Local files
 /archive

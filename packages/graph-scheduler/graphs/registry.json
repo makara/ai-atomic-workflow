@@ -1,0 +1,14 @@
+{
+  "graphs": [
+    {
+      "name": "e2e-minimal",
+      "path": "e2e-minimal.taskflow.yaml",
+      "description": "Minimal E2E: agent → approval loop"
+    },
+    {
+      "name": "arch-review",
+      "path": "arch-review.taskflow.yaml",
+      "description": "Architecture review: scope detect → grill → markdown report"
+    }
+  ]
+}

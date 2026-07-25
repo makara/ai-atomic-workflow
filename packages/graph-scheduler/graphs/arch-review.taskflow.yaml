@@ -1,0 +1,48 @@
+name: arch-review
+version: 1
+phases:
+  # Detect review scope and confirm with user via interview()
+  - id: scope-detect
+    type: main
+    dependsOn: []
+    task: |
+      Load skill://atom-kernel. Use interview() to confirm architecture review scope.
+
+      1. Search conversation for user-provided scope — topic, domain, feature, problem, goal, or specific paths/files.
+      2. If scope found:
+        - Use interview({ goal: "Confirm review scope", context: <detected scope> }).
+        - Confirm scope topic (domain, feature, problem, or goal — conceptual, not file paths).
+        - Confirm focus dimensions (depth/coupling/testability/naming/duplication).
+        - Confirm output path for final report.
+        - Do NOT ask user for file paths — paths are discovered during review.
+        - Only confirm paths if user explicitly provided specific files to review.
+        - Do NOT add, remove, or re-analyze — user scope is authoritative.
+      3. If scope not found:
+        - Analyze project: read CONTEXT.md for domain model, list docs/adr/ for existing decisions.
+        - Identify conceptual scope — which domain, feature, or problem area to review.
+        - Suggest scope proposal with rationale (conceptual scope, not file paths).
+        - Recommend focus dimensions based on project context.
+        - Use interview({ goal: "Propose and confirm review scope", context: <proposal> }).
+      4. After consensus, write confirmed scope to .taskflow/outputs/scope-detect.output.txt:
+        scope: <confirmed topic — conceptual scope or user-provided paths>
+        focus: <confirmed focus>
+        output: <confirmed output path>
+
+  # Execute architecture review with confirmed scope
+  - id: arch-review
+    type: agent
+    dependsOn: [scope-detect]
+    skill: atom-arch-review
+    task: |
+      Execute architecture review per skill://improve-codebase-architecture.
+
+      Scope: read from .taskflow/outputs/scope-detect.output.txt
+      Output format: markdown (NOT HTML)
+      Output path: read from scope proposal
+
+      For each finding, render markdown card with files, problem, solution,
+      benefits (locality + leverage + testability), and recommendation strength.
+      End with Top recommendation section.
+    context:
+      - .taskflow/outputs/scope-detect.output.txt
+      - CONTEXT.md

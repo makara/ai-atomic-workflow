@@ -1,0 +1,11 @@
+name: e2e-minimal
+version: 1
+phases:
+  - id: agent-echo
+    type: main
+    dependsOn: []
+    task: say hello in a random language.
+
+  - id: approval-review
+    type: approval
+    dependsOn: [agent-echo]
