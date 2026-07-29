@@ -2,7 +2,6 @@
 name: atom-phase-agent
 description: Phase handler for agent type tasks — discover entry skill context requirements, assemble runtime context, dispatch via task(). Dispatched when NextNode.handlerSkill = "atom-phase-agent".
 user-invocable: false
-disable-model-invocation: true
 version: 5.1.0
 last_updated: '2026-07-27'
 ---
@@ -13,7 +12,7 @@ last_updated: '2026-07-27'
 
 # Atom-Phase-Agent
 
-Standardized handler for agent-type phase nodes. Receives NodeDetail, discovers the entry skill's context contract, assembles runtime context from files and conversation, dispatches a sub-agent, collects the result, and lands output to disk.
+Handler for agent-type phase nodes. Receives NodeDetail, discovers entry skill context contract, assembles runtime context from files and conversation, dispatches sub-agent, collects result, lands output to disk.
 
 ## Input
 
@@ -26,6 +25,7 @@ Dispatched when `NextNode.handlerSkill = "atom-phase-agent"`. Receives NodeDetai
 |`entrySkill`|string|yes|Target skill for task() dispatch — loaded via `skill://<entrySkill>`|
 |`context`|string|no|Glob patterns — files to pre-read and prepend to prompt|
 |`agent`|string|no|Agent type for task() dispatch. Default `"task"`.|
+|`when`|string|no|Natural-language skip condition — evaluated upstream by atom-phase-handler|
 
 ## Handler Flow
 
@@ -35,16 +35,16 @@ Receive `{ nodeId, task, context?, entrySkill, agent? }` from NodeDetail. Dispat
 
 ### Step 2: Discover
 
-Load `skill://<entrySkill>`. Read the `## Context Requirements` section. Extract:
+Load `skill://<entrySkill>`. Read `## Context Requirements` section. Extract:
 
-- **Files** — glob patterns listing files the entry skill requires (deterministic).
-- **Description** — natural language describing additional context the entry skill needs (LLM judgment).
+- **Files** — glob patterns listing files entry skill requires (deterministic).
+- **Description** — natural language describing additional context entry skill needs (LLM judgment).
 
-If `## Context Requirements` is absent: skip context collection. Proceed to Step 4 with only `node.context` resolved as the prompt prefix. This is the **legacy** backward-compatible path.
+If `## Context Requirements` absent: skip context collection. Proceed to Step 4 with only `node.context` as prompt prefix. This is **legacy** backward-compatible path.
 
 ### Step 3: Collect & Assemble
 
-**3a — Deterministic files.** Merge `node.context` globs (if any) with entry-required `Files`. For each merged glob: expand via `glob` tool, read every resolved file via `read`, truncate each to a reasonable size, format as:
+**3a — Deterministic files.** Merge `node.context` globs (if any) with entry-required `Files`. For each merged glob: expand via `glob` tool, read every resolved file via `read`, truncate each to reasonable size, format as:
 
 ```
 ## File: <path>
@@ -52,9 +52,9 @@ If `## Context Requirements` is absent: skip context collection. Proceed to Step
 <content>
 ```
 
-Collect all file blocks under a `## Context Files` header.
+Collect all file blocks under `## Context Files` header.
 
-**3b — LLM-driven context.** Understand the `Description` text. Search the conversation for relevant information (user args, prior outputs, decisions). Read additional files if needed. Format findings as:
+**3b — LLM-driven context.** Understand `Description` text. Search conversation for relevant information (user args, prior outputs, decisions). Read additional files if needed. Format findings as:
 
 ```
 ## Additional Context
@@ -62,7 +62,7 @@ Collect all file blocks under a `## Context Files` header.
 <content>
 ```
 
-**3c — Assemble final prompt.** Compose the sub-agent prompt:
+**3c — Assemble final prompt.** Compose sub-agent prompt:
 
 ```
 ## Context Files
@@ -97,7 +97,7 @@ After sub-agent completes, write output to disk:
 .taskflow/outputs/<nodeId>.output.txt
 ```
 
-If the file write fails — mark `[FILE MISSING: .taskflow/outputs/<nodeId>.output.txt]` in the prompt, do not crash. The file landing is a convention, not a hard constraint.
+If file write fails — mark `[FILE MISSING: .taskflow/outputs/<nodeId>.output.txt]` in prompt, do not crash. File landing is convention, not hard constraint.
 
 Return to atom-phase-handler:
 
@@ -105,15 +105,17 @@ Return to atom-phase-handler:
 { status: "done" | "failed", output: string, durationMs: number }
 ```
 
+Note: `skip` never present in agent return — handler evaluates `when` before dispatch per ADR 0036 D2.
+
 Caller advances via `graph_advance(runId, nodeId, durationMs)` — output lives in agent session and on disk.
 
 ## Context Requirements
 
-Entry skills declare required runtime context via a `## Context Requirements` section in their SKILL.md. The handler discovers this section at Step 2 and assembles context at Step 3.
+Entry skills declare required runtime context via `## Context Requirements` section in SKILL.md. Handler discovers this section at Step 2 and assembles context at Step 3.
 
 ### Files
 
-A list of file paths or glob patterns the entry skill needs deterministically. The handler resolves these at runtime: `glob` → `read` → inject into the sub-agent prompt.
+List of file paths or glob patterns entry skill needs deterministically. Handler resolves at runtime: `glob` → `read` → inject into sub-agent prompt.
 
 ```markdown
 ### Files
@@ -124,7 +126,7 @@ A list of file paths or glob patterns the entry skill needs deterministically. T
 
 ### Description
 
-Natural language describing additional context the entry skill needs. The handler uses LLM judgment to search the conversation and read extra files.
+Natural language describing additional context entry skill needs. Handler uses LLM judgment to search conversation and read extra files.
 
 ```markdown
 ### Description
@@ -132,7 +134,7 @@ Natural language describing additional context the entry skill needs. The handle
 I need the lint results showing which files have errors, and the project coding standards for reference.
 ```
 
-If the `## Context Requirements` section is absent from the entry skill, the handler falls back to **legacy** behavior: resolve `node.context` globs only, then forward the task verbatim. No context discovery, no assembly.
+If `## Context Requirements` section absent from entry skill, handler falls back to **legacy** behavior: resolve `node.context` globs only, then forward task verbatim. No context discovery, no assembly.
 
 ## Output
 

@@ -2,7 +2,7 @@
  * Graph-Scheduler MCP Server — stdio transport entry point.
  *
  * Exposes 9 MCP tools (One-Per-Action pattern) wrapping SchedulerRuntime.
- * Lifecycle managed by OMP platform via ~/.omp/agent/mcp.json.
+ * Lifecycle managed by platform MCP infrastructure (configured via mcp.json).
  *
  * Environment variables:
  *   GS_DB_PATH      — SQLite database path (default: ":memory:")

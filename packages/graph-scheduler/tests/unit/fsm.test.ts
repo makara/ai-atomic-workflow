@@ -436,6 +436,123 @@ describe('transition()', () => {
       expect(result.nextState.status).toBe('completed');
     });
   });
+
+  describe('COMPLETE with skip (ADR 0036 D2)', () => {
+    it('skip: true → node status = skipped', () => {
+      const g = singleAgentGraph();
+      const startResult = transition({ status: 'idle' }, startEvent(), g, emptyCtx);
+
+      const result = transition(
+        startResult.nextState,
+        { type: 'COMPLETE', phaseId: 'n1', durationMs: 10, skip: true },
+        g,
+        emptyCtx,
+      );
+      expect(result.nextState.status).toBe('completed');
+      const cs = result.nextState as Extract<FsmState, { status: 'completed' }>;
+      expect(cs.phases['n1'].status).toBe('skipped');
+    });
+    it('skip: false → node status = done (normal)', () => {
+      const g = singleAgentGraph();
+      const startResult = transition({ status: 'idle' }, startEvent(), g, emptyCtx);
+
+      const result = transition(
+        startResult.nextState,
+        { type: 'COMPLETE', phaseId: 'n1', durationMs: 10, skip: false },
+        g,
+        emptyCtx,
+      );
+      expect(result.nextState.status).toBe('completed');
+      const cs = result.nextState as Extract<FsmState, { status: 'completed' }>;
+      expect(cs.phases['n1'].status).toBe('done');
+    });
+
+    it('skip absent → node status = done (backward compat)', () => {
+      const g = singleAgentGraph();
+      const startResult = transition({ status: 'idle' }, startEvent(), g, emptyCtx);
+
+      const result = transition(
+        startResult.nextState,
+        { type: 'COMPLETE', phaseId: 'n1', durationMs: 10 },
+        g,
+        emptyCtx,
+      );
+      // single-node graph → completed after node done
+      expect(result.nextState.status).toBe('completed');
+      const completedState = result.nextState as Extract<FsmState, { status: 'completed' }>;
+      expect(completedState.phases['n1'].status).toBe('done');
+    });
+
+    it('skipped node unblocks downstream (counts as completed dep)', () => {
+      const g: TaskflowGraph = {
+        name: 'skip-chain',
+        phases: [
+          { id: 'n1', type: 'agent' },
+          { id: 'n2', type: 'agent', dependsOn: ['n1'] },
+        ],
+      };
+      const startResult = transition({ status: 'idle' }, startEvent(), g, emptyCtx);
+
+      // skip n1
+      const afterSkip = transition(
+        startResult.nextState,
+        { type: 'COMPLETE', phaseId: 'n1', durationMs: 10, skip: true },
+        g,
+        emptyCtx,
+      );
+      const phases = narrowRunning(afterSkip.nextState).phases;
+      expect(phases['n1'].status).toBe('skipped');
+      // n2 should be active (unblocked by n1 skipped)
+      expect(phases['n2'].status).toBe('active');
+    });
+  });
+
+  describe('Cascade-skip for OR-join (ADR 0036 D4)', () => {
+    it('OR-join node auto-skipped when all upstream skipped', () => {
+      const g: TaskflowGraph = {
+        name: 'or-join-cascade',
+        phases: [
+          { id: 'a', type: 'agent' },
+          { id: 'b', type: 'agent' },
+          { id: 'c', type: 'agent', dependsOn: ['a', 'b'], join: 'any' },
+        ],
+      };
+      let state: FsmState = { status: 'idle' };
+      state = transition(state, startEvent(), g, emptyCtx).nextState;
+
+      // skip both upstream
+      state = transition(state, { type: 'COMPLETE', phaseId: 'a', durationMs: 10, skip: true }, g, emptyCtx).nextState;
+      // b is still active, c should not be skipped yet (b is still pending → wait for b)
+      let phases = narrowRunning(state).phases;
+      expect(phases['c'].status).toBe('pending');
+
+      state = transition(state, { type: 'COMPLETE', phaseId: 'b', durationMs: 10, skip: true }, g, emptyCtx).nextState;
+      // both upstream skipped → c cascade-skipped → all terminal → completed
+      expect(state.status).toBe('completed');
+      const completedState = state as Extract<FsmState, { status: 'completed' }>;
+      expect(completedState.phases['c'].status).toBe('skipped');
+    });
+
+    it('OR-join node NOT skipped when one upstream done', () => {
+      const g: TaskflowGraph = {
+        name: 'or-join-partial',
+        phases: [
+          { id: 'a', type: 'agent' },
+          { id: 'b', type: 'agent' },
+          { id: 'c', type: 'agent', dependsOn: ['a', 'b'], join: 'any' },
+        ],
+      };
+      let state: FsmState = { status: 'idle' };
+      state = transition(state, startEvent(), g, emptyCtx).nextState;
+
+      // a done normally, b skipped
+      state = transition(state, { type: 'COMPLETE', phaseId: 'a', durationMs: 10 }, g, emptyCtx).nextState;
+      state = transition(state, { type: 'COMPLETE', phaseId: 'b', durationMs: 10, skip: true }, g, emptyCtx).nextState;
+      const phases = narrowRunning(state).phases;
+      // c should be active (unblocked by a done + OR-join)
+      expect(phases['c'].status).toBe('active');
+    });
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -558,6 +675,17 @@ describe('FsmEvent discriminated union', () => {
       if (ev.type === 'COMPLETE') {
         expect(ev.phaseId).toBe('node-a');
         expect(ev.durationMs).toBe(123);
+      }
+    });
+
+    it('COMPLETE has optional skip flag (ADR 0036 D2)', () => {
+      const evSkip: FsmEvent = { type: 'COMPLETE', phaseId: 'n1', durationMs: 42, skip: true };
+      if (evSkip.type === 'COMPLETE') {
+        expect(evSkip.skip).toBe(true);
+      }
+      const evNoSkip: FsmEvent = { type: 'COMPLETE', phaseId: 'n2', durationMs: 99 };
+      if (evNoSkip.type === 'COMPLETE') {
+        expect(evNoSkip.skip).toBeUndefined();
       }
     });
 

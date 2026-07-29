@@ -77,6 +77,8 @@ export interface IBaseNodeDetail {
   readonly entrySkill: string;
   /** sub-agent type for task() dispatch (e.g. "task", "scout") */
   readonly agent?: string;
+  /** when guard — natural-language skip condition (ADR 0036 D2) */
+  readonly when?: string;
   readonly retryAttempt: number;
 }
 
@@ -110,6 +112,8 @@ export interface INodeDetail {
   readonly routingActions?: ReadonlyArray<IApprovalAction>;
   /** Agent phase — file glob patterns resolved before sub-agent dispatch */
   readonly context?: string[];
+  /** when guard — natural-language skip condition (ADR 0036 D2) */
+  readonly when?: string;
   /** Gate phase (future) — zero-token eval checks */
   readonly eval?: ReadonlyArray<string>;
   readonly retryAttempt: number;

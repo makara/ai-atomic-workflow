@@ -33,7 +33,9 @@ npm list -g graph-scheduler
 
 ### MCP 注册
 
-在 `~/.omp/agent/mcp.json`（用户级）或 `.omp/mcp.json`（项目级）中注册：
+graph-scheduler 通过 MCP stdio 传输与 agent 通信。配置路径因平台而异——配置内容相同：
+
+**OMP**（`~/.omp/agent/mcp.json` 或 `.omp/mcp.json`）：
 
 ```json
 {
@@ -46,7 +48,20 @@ npm list -g graph-scheduler
 }
 ```
 
-OMP 平台自动管理 Graph-Scheduler 进程生命周期：discover → spawn → connect → health check → reconnect。崩溃不影响 OMP session——自动重连。
+**OpenCode**（`opencode.json` 的 `mcpServers` 字段）：
+
+```json
+{
+  "mcpServers": {
+    "graph-scheduler": {
+      "command": "bun",
+      "args": ["run", "./packages/graph-scheduler/server.ts"]
+    }
+  }
+}
+```
+
+平台 MCP infrastructure 自动管理 Graph-Scheduler 进程生命周期：discover → spawn → connect → health check → reconnect。崩溃不影响 session——自动重连。
 
 ### 环境变量
 

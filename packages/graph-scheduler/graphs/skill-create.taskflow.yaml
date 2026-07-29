@@ -1,0 +1,143 @@
+name: skill-create
+version: 1
+phases:
+  - id: scope-confirm
+    type: main
+    dependsOn: []
+    task: |
+      Load skill://atom-kernel. Conduct consensus interview per atom-kernel §interview() behavior contract to confirm skill scope.
+
+      1. Search conversation for user-provided skill description — name, purpose, inputs, outputs, trigger phrases.
+      2. Ask clarifying questions (one-at-a-time, recommendation-first) per interview() behavior contract:
+        - Skill name and purpose
+        - Scope — what problem it solves
+        - Input/output contract — what files/types it needs and produces
+        - Dependencies — other skills it loads via skill://
+        - DDD impact — does it change domain concepts?
+        - Save location — where SKILL.md should be written
+      3. Assess plan completeness:
+        - Plan is "complete" if scope, requirements, structure, and save location are all confirmed
+        - Mark plan_complete: true/false in output
+      4. Mark ddd_needed: true/false based on user's DDD impact response
+      5. Write output to .taskflow/outputs/scope-confirm.output.txt:
+        - confirmed scope (name, purpose, inputs, outputs)
+        - plan_complete: true/false
+        - ddd_needed: true/false
+        - save_location: <path>
+
+  - id: requirement-analysis
+    type: agent
+    dependsOn: [scope-confirm]
+    when: 'scope-confirm output shows plan_complete: false — plan incomplete, further analysis needed'
+    task: |
+      Analyze skill requirements based on scope-confirm output.
+
+      Read scope-confirm output from .taskflow/outputs/scope-confirm.output.txt.
+      Complete the plan:
+      - Define full skill structure — sections, sub-sections
+      - List all skill:// references needed
+      - Specify Context Requirements — Files and Description
+      - Determine trigger phrases for description frontmatter
+      - Map DDD impact if ddd_needed is true
+      Write completed plan to .taskflow/outputs/requirement-analysis.output.txt.
+    context:
+      - .taskflow/outputs/scope-confirm.output.txt
+
+  - id: plan-confirm
+    type: main
+    dependsOn: [scope-confirm, requirement-analysis]
+    when: 'requirement-analysis was executed — need to confirm analysis results'
+    task: |
+      Load skill://atom-kernel. Conduct consensus interview per atom-kernel §interview() behavior contract to confirm requirements analysis.
+
+      Read analysis results from .taskflow/outputs/requirement-analysis.output.txt.
+      Present completed plan to user — confirm each point per interview() behavior contract:
+      - Skill structure and sections
+      - Skill references
+      - Context Requirements
+      - Trigger phrases
+      Confirm or revise.
+      Write confirmed plan to .taskflow/outputs/plan-confirm.output.txt.
+
+  - id: ddd-update
+    type: agent
+    dependsOn: [plan-confirm]
+    when: 'scope-confirm output shows ddd_needed: true — DDD documents need updating'
+    task: |
+      Update DDD documents based on confirmed plan.
+
+      Read plan from .taskflow/outputs/plan-confirm.output.txt.
+      Read scope from .taskflow/outputs/scope-confirm.output.txt.
+      Identify domain concept changes.
+      Update relevant domain docs (graph-builtin or graph-workflow).
+      Write change summary to .taskflow/outputs/ddd-update.output.txt.
+    context:
+      - .taskflow/outputs/scope-confirm.output.txt
+      - .taskflow/outputs/plan-confirm.output.txt
+      - docs/domains/
+
+  - id: skill-write
+    type: agent
+    dependsOn: [ddd-update]
+    skill: atom-skill-create
+    task: |
+      Write skill per confirmed plan.
+
+      Read plan from context files.
+      Load skill://atom-skill-writer as reference.
+      Draft complete SKILL.md following all atom-skill-writer rules.
+      Write SKILL.md to path specified in plan.
+      Output path and summary to .taskflow/outputs/skill-write.output.txt.
+    context:
+      - .taskflow/outputs/plan-confirm.output.txt
+      - .taskflow/outputs/ddd-update.output.txt
+      - .taskflow/outputs/scope-confirm.output.txt
+
+  - id: skill-review
+    type: agent
+    dependsOn: [skill-write]
+    skill: atom-dual-review
+    task: |
+      Review generated SKILL.md for compliance and completeness.
+
+      Artifact: SKILL.md path from skill-write output. Locate path in .taskflow/outputs/skill-write.output.txt.
+      Standards: packages/graph-workflow/skills/atom-skill-writer/SKILL.md — 15 structural rules (frontmatter×6 + body×5 + language×2 + reference×2).
+      Spec: .taskflow/outputs/scope-confirm.output.txt — check skill matches confirmed scope (name, purpose, inputs, outputs, dependencies).
+
+      Read all three files. Execute 6-step linear flow: Read Artifact → Load Standards → Load Spec → Standards Audit (check every rule: pass/violation/warning) → Spec Audit (check every requirement: pass/violation/not_applicable) → Output structured YAML report.
+
+      Output machine-parseable YAML with overall: pass | fail. Write to .taskflow/outputs/skill-review.output.txt.
+    context:
+      - .taskflow/outputs/skill-write.output.txt
+      - .taskflow/outputs/scope-confirm.output.txt
+      - packages/graph-workflow/skills/atom-skill-writer/SKILL.md
+  - id: skill-accept
+    type: approval
+    dependsOn: [skill-review]
+    routing:
+      actions:
+        - action: continue
+          label: 'Accept skill'
+          description: 'Skill is ready — proceed to output examples'
+        - action: retry
+          label: 'Revise skill'
+          description: 'Skill needs changes — re-run skill-write with review feedback'
+        - action: jump
+          label: 'Revise plan'
+          description: 'Fundamental plan issues — revise requirements'
+    context:
+      - .taskflow/outputs/skill-review.output.txt
+
+  - id: output-examples
+    type: main
+    dependsOn: [skill-accept]
+    task: |
+      Generate usage examples for the new skill.
+
+      Read generated skill from skill-write output path.
+      Read review report from skill-review output.
+      Produce 2-3 concrete invocation examples showing typical usage.
+      Write to .taskflow/outputs/output-examples.output.txt.
+    context:
+      - .taskflow/outputs/skill-write.output.txt
+      - .taskflow/outputs/skill-review.output.txt

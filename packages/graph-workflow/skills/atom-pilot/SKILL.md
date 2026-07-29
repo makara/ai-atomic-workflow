@@ -3,12 +3,11 @@ name: atom-pilot
 description: Graph lifecycle manager — execute→advance loop. Dispatch via skill://atom-phase-handler — single entry point, routes by node.type internally. Use when running taskflow graphs, mentions /skill:atom-pilot, graph execution, run workflow, taskflow run.
 argument-hint: '<graph-name> [--verbose] [--debug]'
 user-invocable: true
-disable-model-invocation: true
-version: 3.2.1
-last_updated: '2026-07-28'
+version: 3.3.0
+last_updated: '2026-07-29'
 ---
 
-> **Runtime constraints** — load `skill://atom-kernel` for task() contract and question() decision UI. Load `skill://atom-phase-handler` for {node, snapshot?} data handling, single-node dispatch, and error handling. Graph-Scheduler MCP tools via `xd://mcp__graph_scheduler_*`.
+> **Runtime constraints** — load `skill://atom-kernel` for task() contract and question() decision UI. Load `skill://atom-phase-handler` for {node, snapshot?} data handling, single-node dispatch, and error handling. Detect graph-scheduler MCP tools at runtime — see `skill://atom-tool-detection`.
 
 > **Layer**: atom — graph lifecycle manager
 
@@ -30,17 +29,19 @@ Execution flow:
 
 1. Load `skill://atom-kernel` — task() contract + skip-checkpoint mode
 2. Load `skill://atom-phase-handler` — node dispatch schema
-3. Call `write xd://mcp__graph_scheduler_graph_start { graphName }` → get `{ runId, next }`
+3. Detect graph-scheduler MCP tools per §Graph-Scheduler Tool Detection — then call graph_start { graphName } → get { runId, next }
 4. Enter execute→advance loop per Loop Mechanics
 
 Verbosity: `--verbose` show MCP call summaries + eval details. `--debug` add raw MCP JSON. Default quiet.
 
 ---
 
-# Graph Resolution
+# Graph-Scheduler Tool Detection
+
+Detect graph-scheduler MCP tools at runtime — see `skill://atom-tool-detection`. Tool parameter and return value schemas unchanged (see §MCP Tool Reference).
 
 ```
-write xd://mcp__graph_scheduler_graph_start { graphName } → { runId, next: NextNode }
+graph_start { graphName } → { runId, next: NextNode }
 ```
 
 Scheduler resolve graph name via merged registry. Return `runId` + first `NextNode`. Agent hold `runId` for all subsequent calls.
@@ -63,7 +64,7 @@ Scheduler resolve graph name via merged registry. Return `runId` + first `NextNo
 
 Three verbosity tiers. `--verbose` flag enable Verbose. `--debug` flag enable Debug (implies Verbose). Default Quiet.
 
-OMP harness auto-display raw `write` and `question()` tool I/O — beyond agent control. Agent control only own prose per tiers below.
+Platform harness auto-display raw tool I/O — beyond agent control. Agent control only own prose per tiers below.
 
 ## Quiet (default)
 
@@ -74,6 +75,13 @@ Per-node status line + final result table.
 ```
 ── [N/M] <nodeId> · agent ──
    ✅ "<output snippet>"  ⚡<N>ms
+```
+
+### Skipped node
+
+```
+── [N/M] <nodeId> · <skill> ──
+   ⏭ <when guard text>  ⚡<N>ms
 ```
 
 ### Approval node
@@ -118,7 +126,7 @@ Quiet + MCP call summaries (`>>>`/`<<<`).
 Verbose + raw MCP JSON, `retryAttempt` per node, internal state changes.
 
 ```
-   >>> RAW REQUEST:  xd://mcp__graph_scheduler_<tool>
+   >>> RAW REQUEST:  <detected-tool-name>
    >>> RAW PAYLOAD:   <full JSON>
    <<< RAW RESPONSE:  <full JSON>
 ```
@@ -127,19 +135,19 @@ Verbose + raw MCP JSON, `retryAttempt` per node, internal state changes.
 
 # MCP Tool Reference
 
-All via `xd://mcp__graph_scheduler_<tool>`. Write JSON args.
+Tool names detected at runtime per §Graph-Scheduler Tool Detection. Parameter schema:
 
-|tool|xd:// path|purpose|
+|tool|purpose|key params|
 |-|-|-|
-|graph_start|`xd://mcp__graph_scheduler_graph_start`|create run, get first node|
-|graph_advance|`xd://mcp__graph_scheduler_graph_advance`|report result + get next node|
-|graph_status|`xd://mcp__graph_scheduler_graph_status`|query run state|
-|graph_list|`xd://mcp__graph_scheduler_graph_list`|list all runs|
-|graph_force_end|`xd://mcp__graph_scheduler_graph_force_end`|force end run|
-|graph_jump|`xd://mcp__graph_scheduler_graph_jump`|jump to node|
-|graph_init|`xd://mcp__graph_scheduler_graph_init`|init graph config|
-|graph_clean_completed|`xd://mcp__graph_scheduler_graph_clean_completed`|clean completed runs|
-|graph_clean_all|`xd://mcp__graph_scheduler_graph_clean_all`|clean all runs|
+|graph_start|create run, get first node|graphName, args?|
+|graph_advance|report result + get next node|runId, nodeId, durationMs, skip?|
+|graph_status|query run state|runId|
+|graph_list|list all runs|—|
+|graph_force_end|force end run|runId|
+|graph_jump|jump to node|runId, targetPhaseId|
+|graph_init|init graph config|—|
+|graph_clean_completed|clean completed runs|before?|
+|graph_clean_all|clean all runs|—|
 
 `graph_start` return `{ runId, next }`. `graph_advance` return `NextNode` or `"done"`.
 
@@ -155,10 +163,10 @@ Execute→advance cycle:
 │      skill://atom-phase-handler ({node, snapshot?})│
 │      Handler routes by node.type internally       │
 │                                                  │
-│  (b) Collect: { status, output, durationMs }     │
+│  (b) Collect: { status, output, durationMs, skip? } │
 │                                                  │
-│  (c) write xd://mcp__graph_scheduler_graph_advance│
-│      { runId, nodeId, durationMs }               │
+│  (c) call graph_advance                         │
+│      { runId, nodeId, durationMs, skip }           │
 │      → NextNode | "done"                         │
 │                                                  │
 │  (d) "done" → report results → exit              │
@@ -168,7 +176,7 @@ Execute→advance cycle:
 
 `graph_advance` merge notify + next into one call — report node result AND fetch next pending node. For approval nodes, path diverges — see §Approval Decision Processing.
 
-> **Note:** `output` collected in (b) for display only. `graph_advance` receives `{ runId, nodeId, durationMs }` — `output` stays in agent session. Exception: approval `output` (IApprovalDecision) drives routing; not passed to graph_advance.
+> **Note:** `output` collected in (b) for display only. `graph_advance` receives `{ runId, nodeId, durationMs, skip }` — `output` stays in agent session. Exception: approval `output` (IApprovalDecision) drives routing; not passed to graph_advance.
 
 ## Node Execution
 

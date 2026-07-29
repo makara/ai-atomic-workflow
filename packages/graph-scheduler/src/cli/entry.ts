@@ -1,8 +1,8 @@
-import { initConfig } from './init/init';
-import { showConfig } from './show/show';
-import { validateConfig } from './validate/validate';
+import { initConfig } from './init.js';
+import { showConfig } from './show.js';
+import { validateConfig } from './validate.js';
 
-const HELP_TEXT = `graph-config <command> [options]
+const HELP_TEXT = `atom-graph-config <command> [options]
 
 Commands:
   init [--cwd <path>]      Initialize .graph-scheduler/ directory

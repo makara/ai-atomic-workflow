@@ -1,16 +1,16 @@
 name: arch-review
 version: 1
 phases:
-  # Detect review scope and confirm with user via interview()
+  # Detect review scope and confirm with user via consensus interview
   - id: scope-detect
     type: main
     dependsOn: []
     task: |
-      Load skill://atom-kernel. Use interview() to confirm architecture review scope.
+      Load skill://atom-kernel. Conduct consensus interview per atom-kernel §interview() behavior contract to confirm architecture review scope.
 
       1. Search conversation for user-provided scope — topic, domain, feature, problem, goal, or specific paths/files.
       2. If scope found:
-        - Use interview({ goal: "Confirm review scope", context: <detected scope> }).
+        - Conduct consensus interview: confirm scope per interview() behavior contract.
         - Confirm scope topic (domain, feature, problem, or goal — conceptual, not file paths).
         - Confirm focus dimensions (depth/coupling/testability/naming/duplication).
         - Confirm output path for final report.
@@ -22,7 +22,7 @@ phases:
         - Identify conceptual scope — which domain, feature, or problem area to review.
         - Suggest scope proposal with rationale (conceptual scope, not file paths).
         - Recommend focus dimensions based on project context.
-        - Use interview({ goal: "Propose and confirm review scope", context: <proposal> }).
+        - Conduct consensus interview: propose and confirm scope per interview() behavior contract.
       4. After consensus, write confirmed scope to .taskflow/outputs/scope-detect.output.txt:
         scope: <confirmed topic — conceptual scope or user-provided paths>
         focus: <confirmed focus>

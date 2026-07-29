@@ -9,6 +9,16 @@
       "name": "arch-review",
       "path": "arch-review.taskflow.yaml",
       "description": "Architecture review: scope detect → grill → markdown report"
+    },
+    {
+      "name": "skill-create",
+      "path": "skill-create.taskflow.yaml",
+      "description": "Skill creation: interview → analysis → DDD → write → review → approve → examples"
+    },
+    {
+      "name": "skill-edit",
+      "path": "skill-edit.taskflow.yaml",
+      "description": "Skill editing: select → scope → analysis → DDD → in-place write → review → approve → diff"
     }
   ]
 }

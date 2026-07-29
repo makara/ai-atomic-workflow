@@ -12,12 +12,10 @@
  *
  * Event provenance:
  * - START        → api/crud.graphStart()
- * - COMPLETE     → api/crud.graphAdvance() for agent/approval nodes (normal completion)
- * - JUMP         → api/crud.graphJump() on approval REWORK decision
- * - FORCE_END    → api/crud.graphForceEnd() on user abort
+ * - COMPLETE     → api/crud.graphAdvance() for agent/approval nodes (normal completion, or skip:true from when guard)
  */
 export type FsmEvent =
   | { readonly type: 'START'; readonly graphName: string; readonly args?: Record<string, unknown> }
-  | { readonly type: 'COMPLETE'; readonly phaseId: string; readonly durationMs: number }
+  | { readonly type: 'COMPLETE'; readonly phaseId: string; readonly durationMs: number; readonly skip?: boolean }
   | { readonly type: 'JUMP'; readonly targetPhaseId: string }
   | { readonly type: 'FORCE_END' };

@@ -21,7 +21,7 @@ import type { FsmEffect, FsmNodeState } from '../fsm/effects.js';
 import type { FsmEvent } from '../fsm/events.js';
 import { createStateMachine } from '../fsm/state-machine.js';
 import { type FsmState, type TaskflowGraph, type TransitionResult } from '../fsm/transition.js';
-import { FileSystem, loadGraph, loadGraphFromPath } from '../graph-definition.js';
+import { FileSystem, flattenFlowPhases, loadGraph, loadGraphFromPath } from '../graph-definition.js';
 import { AgentRegistryService, type AgentRegistryEntry } from '../lib/agent-registry.js';
 import { GraphRepository, type GraphRun, type NodeStateEntry, type NodeStateUpdate } from '../lib/db/repository.js';
 import { PhaseHandlerRegistry } from '../phase-handler/registry.js';
@@ -90,11 +90,23 @@ function invalidState(runId: string, currentStatus: string, attemptedAction: str
 
 const graphLoadCache = new Map<string, Taskflow>();
 
+/** Recursively collect all `use` graph names from a Taskflow. */
+function collectFlowRefs(tf: Taskflow, seen: Set<string>): string[] {
+  const refs: string[] = [];
+  for (const phase of tf.phases) {
+    if (phase.type === 'flow' && typeof phase.use === 'string' && !seen.has(phase.use)) {
+      seen.add(phase.use);
+      refs.push(phase.use);
+    }
+  }
+  return refs;
+}
+
 function loadGraphWithRegistry(
   graphName: string,
 ): Effect.Effect<Taskflow, SchedulerError | RegistryLoadError, FileSystem | RegistryLoader> {
   return Effect.gen(function* () {
-    // Try registry resolution — catch failure if graph not in registry
+    // Try registry resolution
     const resolvedPath = yield* Effect.either(
       Effect.gen(function* () {
         const registryLoader = yield* RegistryLoader;
@@ -102,14 +114,41 @@ function loadGraphWithRegistry(
       }),
     );
 
-    if (resolvedPath._tag === 'Right') {
-      return yield* loadGraphFromPath(resolvedPath.right, graphName);
+    const tf: Taskflow =
+      resolvedPath._tag === 'Right'
+        ? yield* loadGraphFromPath(resolvedPath.right, graphName)
+        : yield* loadGraph(graphName);
+
+    // Phase 1 merge-at-load: pre-load all referenced child graphs, then flatten
+    const seen = new Set<string>();
+    let pendingRefs = collectFlowRefs(tf, seen);
+    const childMap = new Map<string, Taskflow>();
+
+    // Load child graphs iteratively (breadth-first for simplicity)
+    while (pendingRefs.length > 0) {
+      for (const refName of pendingRefs) {
+        const childResult = yield* Effect.either(loadGraph(refName));
+        if (childResult._tag === 'Right') {
+          childMap.set(refName, childResult.right);
+        }
+      }
+      // Check newly loaded children for nested flow refs
+      const nextRefs: string[] = [];
+      for (const refName of pendingRefs) {
+        const child = childMap.get(refName);
+        if (child) {
+          const childRefs = collectFlowRefs(child, seen);
+          nextRefs.push(...childRefs);
+        }
+      }
+      pendingRefs = nextRefs;
     }
-    // Fallback: direct load by name → `${graphName}.taskflow.yaml`
-    return yield* loadGraph(graphName);
+
+    const loadChild = (childName: string): Taskflow | null => childMap.get(childName) ?? null;
+    const maxDepth = tf.phases.find((p) => p.type === 'flow')?.maxDepth ?? 5;
+    return flattenFlowPhases(tf, loadChild, 1, maxDepth);
   });
 }
-
 /**
  * Load a graph definition for a run — cache-aware.
  * First call for a run loads from disk; subsequent calls reuse cached.
@@ -181,6 +220,7 @@ export function aggregateNodeMetrics(
   for (const n of nodes) {
     switch (n.status) {
       case 'done':
+      case 'skipped':
         completedCount++;
         break;
       case 'failed':
@@ -239,6 +279,7 @@ function buildNodeDetail(
       handlerSkill: entry.skill,
       entrySkill: phase.skill ?? entry.skill,
       agent: entry.agent,
+      when: phase.when,
       retryAttempt: nodeState.retryCount,
     };
 
@@ -512,11 +553,13 @@ export function graphStart(
  * @param runId      — run identifier
  * @param nodeId     — completed phase identifier
  * @param durationMs — execution duration in milliseconds
+ * @param skip       — mark node as skipped (when guard false). ADR 0036 D2
  */
 export function graphAdvance(
   runId: string,
   nodeId: string,
   durationMs: number,
+  skip?: boolean,
 ): Effect.Effect<
   { snapshot: IGraphSnapshot; node: NodeDetail | null },
   SchedulerError,
@@ -538,8 +581,8 @@ export function graphAdvance(
     const tf = yield* loadGraphForRun(runId, run.graphName);
     const graph = yield* toTaskflowGraph(tf);
 
-    // Always dispatch COMPLETE event — no output, topology-only
-    const event: FsmEvent = { type: 'COMPLETE', phaseId: nodeId, durationMs };
+    // Always dispatch COMPLETE event — output stays in agent session
+    const event: FsmEvent = { type: 'COMPLETE', phaseId: nodeId, durationMs, skip };
     // Route through createStateMachine().dispatch() for single-entry LEGAL_EVENTS validation.
     const sm = createStateMachine(graph, currentState);
     let result: TransitionResult;

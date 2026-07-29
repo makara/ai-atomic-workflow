@@ -1,11 +1,20 @@
 import { constants } from 'node:fs';
 import { access, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { IInitReport } from '../schema/types';
-import { DEFAULT_CONFIG } from './template';
+import { DEFAULT_CONFIG } from './template.js';
 
-// init project config — idempotent create .graph-scheduler/ + config.json
-// never overwrites existing files, only fills gaps
+/** init command output report */
+export interface IInitReport {
+  /** newly created files/directories — relative paths */
+  created: string[];
+  /** already existing files/directories — skipped */
+  existed: string[];
+  /** project root directory operated on */
+  projectRoot: string;
+}
+
+/** init project config — idempotently create .graph-scheduler/ + config.json.
+ *  Never overwrites existing files, only fills gaps. */
 export async function initConfig(cwd: string): Promise<IInitReport> {
   const report: IInitReport = {
     created: [],

@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { ConfigFileSchema } from '../src/schema/config-schema.js';
+import { ConfigFileSchema } from '../src/schemas/index.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

@@ -2,7 +2,6 @@
 name: atom-arch-review
 description: Non-interactive architecture review — explore scope, output markdown report. Dispatched by arch-review graph phase agent node. Trigger: graph-scheduler dispatches atom-phase-agent with entrySkill=atom-arch-review.
 user-invocable: false
-disable-model-invocation: true
 version: 1.0.0
 last_updated: '2026-07-27'
 ---

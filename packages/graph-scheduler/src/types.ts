@@ -37,6 +37,14 @@ export interface GraphDefinitionError {
   readonly violations?: ReadonlyArray<string>;
 }
 
+/** flow phase error — merge-at-load failure. ADR 0043 */
+export interface FlowPhaseError {
+  readonly _tag: 'FlowPhaseError';
+  readonly phaseId: string;
+  readonly code: 'DYNAMIC_EXPRESSION' | 'MAX_DEPTH_EXCEEDED' | 'NAME_CONFLICT' | 'GRAPH_NOT_FOUND';
+  readonly message: string;
+}
+
 /** persistence error — libsql write/read failure */
 export interface PersistenceError {
   readonly _tag: 'PersistenceError';
@@ -47,7 +55,13 @@ export interface PersistenceError {
 
 /** Union of all scheduler operation errors */
 export type SchedulerError =
-  NotFoundError | InvalidStateError | GraphDefinitionError | PersistenceError | FileSystemError | RegistryLoadError;
+  | NotFoundError
+  | InvalidStateError
+  | GraphDefinitionError
+  | FlowPhaseError
+  | PersistenceError
+  | FileSystemError
+  | RegistryLoadError;
 
 /** runtime assembly failure — database open, DDL, or layer wiring */
 export interface ConfigError {

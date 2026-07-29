@@ -133,19 +133,33 @@ export function topoLayers(phases: readonly Phase[]): Phase[][] {
 
 /**
  * Return phases NOT yet in `completed` whose dependencies are all satisfied.
- * A phase is "ready" when every id in its dependsOn is present in `completed`
- * AND the phase itself is not yet completed.
  *
- * @param phases  all phases in the graph
- * @param completed  set of phase ids that have finished execution
+ * Resolution strategy controlled by phase.join field (ADR 0036 D1):
+ * - `all` (default): every dependsOn must be terminal (done or skipped).
+ * - `any`: at least one dependsOn must be done (not just skipped).
+ *
+ * @param phases     all phases in the graph
+ * @param terminal   set of phase ids that have finished execution (done or skipped)
+ * @param phaseMap   phase id → node state for distinguishing done vs skipped (needed for OR-join)
  */
-export function resolveReady(phases: readonly Phase[], completed: ReadonlySet<string>): Phase[] {
+export function resolveReady(
+  phases: readonly Phase[],
+  terminal: ReadonlySet<string>,
+  phaseMap?: Readonly<Record<string, { status: string }>>,
+): Phase[] {
   return phases.filter((p) => {
     // skip already-completed phases
-    if (completed.has(p.id)) return false;
+    if (terminal.has(p.id)) return false;
     const deps = p.dependsOn;
     if (!deps || deps.length === 0) return true;
-    return deps.every((d) => completed.has(d));
+    const join = p.join ?? 'all';
+    if (join === 'any') {
+      // At least one dep must be DONE (not just skipped).
+      // phaseMap is required for correct OR-join resolution — initPhases passes empty terminal.
+      if (!phaseMap) return false;
+      return deps.some((d) => phaseMap[d]?.status === 'done');
+    }
+    return deps.every((d) => terminal.has(d));
   });
 }
 

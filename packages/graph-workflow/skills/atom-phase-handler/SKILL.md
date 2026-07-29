@@ -3,11 +3,11 @@ name: atom-phase-handler
 description: Central dispatch handler — { node, snapshot? } schema and 3-branch routing (main/agent/approval). Use when processing graph_start/graph_advance/graph_jump response, executing phase nodes, routing by node.type.
 argument-hint: none (reference + procedure skill)
 user-invocable: false
-version: 2.2.0
-last_updated: '2026-07-27'
+version: 2.3.0
+last_updated: '2026-07-29'
 ---
 
-> **Runtime constraints** — load `skill://atom-kernel` for task() dispatch and question() decision UI.
+> **Runtime constraints** — load `skill://atom-kernel` for task() dispatch and question() decision UI. Detect graph-scheduler MCP tools at runtime — see `skill://atom-tool-detection`.
 
 # Atom-Phase-Handler
 
@@ -31,6 +31,7 @@ Handle graph-scheduler CRUD API return data — `{ node: NodeDetail | null, snap
 |`entrySkill`|string|`agent` type|Target skill for sub-agent dispatch via `skill://<name>`|
 |`agent`|string?|`agent` type|Agent type for task() dispatch|
 |`retryAttempt`|number|yes|Current retry count, 0-based|
+|`when`|string?|all|Natural-language skip condition — LLM-evaluated before dispatch (ADR 0036 D2)|
 
 ### Type-Specific Fields
 
@@ -45,7 +46,7 @@ Handle graph-scheduler CRUD API return data — `{ node: NodeDetail | null, snap
 
 |Field|Type|Purpose|
 |-|-|-|
-|`action`|`'continue' \| 'retry' \| 'jump'`|Routing semantics — continue/retry never need target; jump points to a target node|
+|`action`|`'continue' \| 'retry' \| 'jump'`|Routing semantics — continue/retry never need target; jump points to target node|
 |`target?`|string|Jump target nodeId — meaningful only when action='jump'|
 |`label`|string|Option label — displayed in question() options[].label|
 |`description`|string|Option description — displayed in question() options[].description|
@@ -109,6 +110,12 @@ receive { node, snapshot? }
   ├── node = null
   │     └── return { done: true, snapshot }
   │
+  ├── node.when is non-empty
+  │     ├── Issue one-shot LLM judgment: completion("Evaluate skip condition: <node.when>. Context: <current state summary>. Answer ONLY 'true' or 'false'.", model="smol")
+  │     ├── Judgment = "false" → advance with skip: graph_advance(runId, nodeId, durationMs: 0, skip: true)
+  │     │     └── return { status: "skipped", output: "Skipped: when guard evaluated false", durationMs: 0, skip: true }
+  │     └── Judgment = "true" → continue normal dispatch
+  │
   ├── node.type = "main"
   │     ├── Execute task inline — full tool access, no sub-agent
   │     ├── Write output: .taskflow/outputs/<nodeId>.output.txt
@@ -143,18 +150,18 @@ receive { node, snapshot? }
         └── return { status: "failed", output: "Unknown phase type: <node.type>", durationMs: 0 }
 ```
 
-> **Note:** handler collects `{ status, output, durationMs }` internally for display. `graph_advance` receives only `{ runId, nodeId, durationMs }` — output stays in agent session, not persisted.
+> **Note:** handler collects `{ status, output, durationMs, skip? }` internally for display. `graph_advance` receives `{ runId, nodeId, durationMs, skip }` — output stays in agent session, not persisted.
 
 ## Return
 
 ```
-{ status: "done" | "failed", output: string, durationMs: number }
+{ status: "done" | "failed" | "skipped", output: string, durationMs: number, skip?: boolean }
 ```
 
 Advance result via `graph_advance`:
 
 ```
-write xd://mcp__graph_scheduler_graph_advance { runId, nodeId, durationMs }
+call graph_advance { runId, nodeId, durationMs, skip }
 ```
 
 ## Dispatch Rules
@@ -171,9 +178,9 @@ write xd://mcp__graph_scheduler_graph_advance { runId, nodeId, durationMs }
 1. Load `skill://<node.handlerSkill>` — scheduler-resolved handler skill path (atom-phase-agent).
 2. Handler receives NodeDetail and executes 5-step flow per atom-phase-agent:
    - Receive → Discover entry Context Requirements → Collect & Assemble → Dispatch task() → Collect & Return
-3. The handler owns context assembly — resolveGlobs, file reads, LLM-driven description understanding.
+3. Handler owns context assembly — resolveGlobs, file reads, LLM-driven description understanding.
 4. Dispatch via task(): target-skill=<entrySkill>, auxiliary-skills=[atom-kernel], input-paths=resolved files, agent=<node.agent>.
-5. Reference: see packages/graph-workflow/skills/atom-phase-agent/SKILL.md for full 5-step flow.
+5. Reference: see skill://atom-phase-agent for full 5-step flow.
 
 ### approval type
 
@@ -185,7 +192,7 @@ write xd://mcp__graph_scheduler_graph_advance { runId, nodeId, durationMs }
    - From snapshot, enumerate nodes where `status ∈ {completed, failed}` AND `nodeId != currentNodeId`.
    - For each action where `action='jump'` with no explicit `target`:
      - Expand inline: one option per eligible node → label `"Jump to <nodeId>"`, description includes status.
-   - `target` already specified on an action → use it directly, no expansion.
+   - `target` already specified on action → use it directly, no expansion.
 4. `node.context` → pre-call text — display before question().
 5. Collect user choice + custom text → output as `IApprovalDecision` JSON:
    - continue: `{ "action": "continue", "note": "<custom text if any>" }`
@@ -218,5 +225,6 @@ Graph complete. Return `{ done: true, snapshot }`.
 |`resolveGlobs()` returns empty with required input|`status: "failed"`, output: "No files matched context: <glob>"|
 |task() dispatch fails|`status: "failed"`, output: "<error text>"|
 |Unknown `node.type`|`status: "failed"`, output: "Unknown phase type: <type>. Supported: main, agent, approval."|
+|Completion fails or judgment ambiguous|Default to "true" (conservative — execute node). Do NOT skip.|
 
 All failures: advance via `graph_advance` with `status: "failed"` — no crash, no loop break.

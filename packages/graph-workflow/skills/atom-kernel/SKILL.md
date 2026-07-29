@@ -11,6 +11,16 @@ last_updated: '2026-07-28'
 
 # Atom-Kernel
 
+## Callable vs Behavior Contract
+
+|Primitive|Type|Maps to|
+|-|-|-|
+|`task()`|**Callable**|`task` tool — dispatches sub-agents|
+|`question()`|**Callable**|`ask` tool — single-decision UI|
+|`interview()`|**Behavior Contract**|Agent-implemented — multi-turn consensus conversation (NOT a runtime function — agent follows rules below)|
+
+> **`task()` and `question()`** are tool-mapped callables — agent invokes them directly and gets a result. **`interview()`** is a behavior contract — agent reads the rules below and implements the multi-turn conversation manually using `question()` (or `ask`) one turn at a time. Attempting to call `interview({goal, context})` as a function will fail with `ReferenceError: interview is not defined`.
+
 ---
 
 # task() — Dispatch
@@ -110,7 +120,7 @@ question({ header: "Token refresh strategy", options: [{ label: "Polling", descr
 
 ---
 
-# interview() — Consensus Interview
+# interview() — Consensus Interview (Behavior Contract — NOT a callable function)
 
 Multi-round consensus conversation. Full implementation of grilling skill behavior contract — every rule below MUST apply on every call.
 

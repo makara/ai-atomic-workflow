@@ -103,11 +103,11 @@ function clonePhases(phases: Record<string, FsmNodeState>): Record<string, FsmNo
   return clone;
 }
 
-/** Collect completed phase ids from phases map. */
-function completedIds(phases: Record<string, FsmNodeState>): Set<string> {
+/** Collect done or skipped phase ids — used for dependency resolution (ADR 0036 D3). */
+function terminalIds(phases: Record<string, FsmNodeState>): Set<string> {
   return new Set(
     Object.entries(phases)
-      .filter(([, ns]) => ns.status === 'done')
+      .filter(([, ns]) => ns.status === 'done' || ns.status === 'skipped')
       .map(([id]) => id),
   );
 }
@@ -190,10 +190,11 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
       const now = new Date().toISOString();
       const phases = clonePhases(state.phases);
 
-      // Mark the completed node done
+      // Mark the completed node — skip flag determines status (ADR 0036 D2)
+      const isSkipped = event.skip === true;
       phases[event.phaseId] = {
         ...nodeState,
-        status: 'done',
+        status: isSkipped ? 'skipped' : 'done',
         completedAt: now,
         durationMs: event.durationMs,
       };
@@ -207,9 +208,47 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
         },
       ];
 
+      // Cascade-skip: if this node was skipped, check downstream OR-join nodes (ADR 0036 D4)
+      if (isSkipped) {
+        const downstreamIds = findDownstream(event.phaseId, graph.phases);
+        // Sort by dependency count (topological depth) — shallower nodes cascade first
+        const sortedIds = [...downstreamIds].sort((a, b) => {
+          const aDeps = graph.phases.find((p) => p.id === a)?.dependsOn?.length ?? 0;
+          const bDeps = graph.phases.find((p) => p.id === b)?.dependsOn?.length ?? 0;
+          return aDeps - bDeps;
+        });
+        for (const dsId of sortedIds) {
+          const ds = phases[dsId];
+          if (!ds || ds.status !== 'pending') continue;
+          const dsPhase = graph.phases.find((p) => p.id === dsId);
+          if (!dsPhase || dsPhase.join !== 'any') continue;
+          const dsDeps = dsPhase.dependsOn ?? [];
+          // Check: all deps terminal AND none done → cascade-skip
+          const allTerminalDeps = dsDeps.every((d) => {
+            const dep = phases[d];
+            return dep && (dep.status === 'done' || dep.status === 'skipped');
+          });
+          const anyDone = dsDeps.some((d) => phases[d]?.status === 'done');
+          if (allTerminalDeps && !anyDone) {
+            phases[dsId] = {
+              ...ds,
+              status: 'skipped',
+              completedAt: now,
+              durationMs: 0,
+            };
+            effects.push({
+              type: 'persist_node_state',
+              runId: state.runId,
+              nodeId: dsId,
+              state: phases[dsId],
+            });
+          }
+        }
+      }
+
       // Find next ready nodes
-      const doneSet = completedIds(phases);
-      const ready = resolveReady(graph.phases, doneSet);
+      const doneSet = terminalIds(phases);
+      const ready = resolveReady(graph.phases, doneSet, phases);
 
       if (ready.length === 0) {
         // No more ready nodes — check if all are terminal
@@ -291,8 +330,8 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
       }
 
       // Activate ready nodes among the reset set
-      const doneSet = completedIds(phases);
-      const ready = resolveReady(graph.phases, doneSet);
+      const doneSet = terminalIds(phases);
+      const ready = resolveReady(graph.phases, doneSet, phases);
 
       const effects: FsmEffect[] = [
         {

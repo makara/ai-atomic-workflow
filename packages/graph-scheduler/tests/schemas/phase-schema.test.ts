@@ -175,3 +175,152 @@ describe('PhaseSchema — boundary', () => {
     expect(result.success).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// ADR 0036 — join mode + when guard
+// ---------------------------------------------------------------------------
+
+describe('PhaseSchema — ADR 0036 join mode', () => {
+  it('parses join: "all" (default)', () => {
+    const raw = { id: 'p1', type: 'agent', join: 'all' };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.join).toBe('all');
+    }
+  });
+
+  it('parses join: "any"', () => {
+    const raw = { id: 'p1', type: 'agent', join: 'any' };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.join).toBe('any');
+    }
+  });
+
+  it('defaults join to "all" when absent', () => {
+    const raw = { id: 'p1', type: 'agent' };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.join).toBe('all');
+    }
+  });
+
+  it('rejects invalid join value', () => {
+    const raw = { id: 'p1', type: 'agent', join: 'none' };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects join that is not a string', () => {
+    const raw = { id: 'p1', type: 'agent', join: 42 };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('PhaseSchema — ADR 0036 when guard', () => {
+  it('parses when string field', () => {
+    const raw = { id: 'p1', type: 'agent', when: 'upstream output indicates skip' };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.when).toBe('upstream output indicates skip');
+    }
+  });
+
+  it('allows absent when field', () => {
+    const raw = { id: 'p1', type: 'agent' };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.when).toBeUndefined();
+    }
+  });
+
+  it('rejects when that is not a string', () => {
+    const raw = { id: 'p1', type: 'agent', when: true };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+  });
+
+  it('allows when with join together', () => {
+    const raw = { id: 'p1', type: 'agent', join: 'any', when: 'condition' };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.join).toBe('any');
+      expect(result.data.when).toBe('condition');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ADR 0043 — flow phase type fields
+// ---------------------------------------------------------------------------
+
+describe('PhaseSchema — ADR 0043 flow phase type', () => {
+  it('parses flow type with use field', () => {
+    const raw = { id: 'skill-ops', type: 'flow', use: 'skill-create', dependsOn: [] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.use).toBe('skill-create');
+    }
+  });
+
+  it('parses flow type with def field', () => {
+    const raw = { id: 'inline', type: 'flow', def: { phases: [{ id: 'a', type: 'agent' }] }, dependsOn: [] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.def).toEqual({ phases: [{ id: 'a', type: 'agent' }] });
+    }
+  });
+
+  it('parses flow type with with and maxDepth', () => {
+    const raw = {
+      id: 'skill-ops',
+      type: 'flow',
+      use: 'skill-create',
+      with: { key: 'value' },
+      maxDepth: 3,
+      dependsOn: [],
+    };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.with).toEqual({ key: 'value' });
+      expect(result.data.maxDepth).toBe(3);
+    }
+  });
+
+  it('defaults maxDepth to 5', () => {
+    const raw = { id: 'skill-ops', type: 'flow', use: 'skill-create', dependsOn: [] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.maxDepth).toBe(5);
+    }
+  });
+
+  it('rejects both use and def together', () => {
+    const raw = { id: 'bad', type: 'flow', use: 'g1', def: { phases: [] }, dependsOn: [] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects flow type without use or def', () => {
+    const raw = { id: 'bad', type: 'flow', dependsOn: [] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts non-flow types without use/def (backward compat)', () => {
+    const raw = { id: 'agent-1', type: 'agent', task: 'do it', dependsOn: [] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+  });
+});

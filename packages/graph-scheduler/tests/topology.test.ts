@@ -131,6 +131,61 @@ describe('resolveReady', () => {
   });
 });
 
+// ── resolveReady — ADR 0036 join mode ──────────────────────────────────────
+
+describe('resolveReady — ADR 0036 join mode', () => {
+  it('join: "all" (default) — all deps must complete', () => {
+    const phases = [
+      { id: 'a', type: 'agent', dependsOn: [] },
+      { id: 'b', type: 'agent', dependsOn: [] },
+      { id: 'c', type: 'agent', dependsOn: ['a', 'b'] },
+    ];
+    // only a done — c still blocked on b
+    expect(resolveReady(phases, new Set(['a'])).map((p) => p.id)).toEqual(['b']);
+  });
+
+  it('join: "any" — one dep completed activates phase', () => {
+    const phases = [
+      { id: 'a', type: 'agent', dependsOn: [] },
+      { id: 'b', type: 'agent', dependsOn: [] },
+      { id: 'c', type: 'agent', dependsOn: ['a', 'b'], join: 'any' as const },
+    ];
+    // only a done — c is ready with join:'any'
+    const phaseMap = { a: { status: 'done' as const }, b: { status: 'active' as const } };
+    const ready = resolveReady(phases, new Set(['a']), phaseMap);
+    expect(ready.map((p) => p.id).sort()).toEqual(['b', 'c']);
+  });
+
+  it('join: "any" — no deps completed, phase not ready', () => {
+    const phases = [
+      { id: 'a', type: 'agent', dependsOn: [] },
+      { id: 'c', type: 'agent', dependsOn: ['a'], join: 'any' as const },
+    ];
+    // nothing completed
+    expect(resolveReady(phases, new Set()).map((p) => p.id)).toEqual(['a']);
+  });
+  it('sibling with different join modes — each resolved correctly', () => {
+    const phases = [
+      { id: 'root', type: 'agent', dependsOn: [] },
+      { id: 'child-all', type: 'agent', dependsOn: ['root'], join: 'all' as const },
+      { id: 'child-any', type: 'agent', dependsOn: ['root'], join: 'any' as const },
+    ];
+    const phaseMap = { root: { status: 'done' as const } };
+    const ready = resolveReady(phases, new Set(['root']), phaseMap);
+    expect(ready.map((p) => p.id).sort()).toEqual(['child-all', 'child-any']);
+  });
+
+  it('join absent — defaults to "all" behavior', () => {
+    const phases = [
+      { id: 'a', type: 'agent', dependsOn: [] },
+      { id: 'b', type: 'agent', dependsOn: [] },
+      { id: 'c', type: 'agent', dependsOn: ['a', 'b'] },
+    ];
+    // only a done — c still blocked (all behavior)
+    expect(resolveReady(phases, new Set(['a'])).map((p) => p.id)).toEqual(['b']);
+  });
+});
+
 // ── findUpstream ───────────────────────────────────────────────────────────
 
 describe('findUpstream', () => {

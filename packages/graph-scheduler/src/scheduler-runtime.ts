@@ -116,16 +116,8 @@ export interface SchedulerRuntime {
 // Config schema — single source of truth for config.json validation
 // ---------------------------------------------------------------------------
 
-/** Zod schema for graph-scheduler config.json. All fields optional — partial config is valid. */
-export const ConfigFileSchema = z.object({
-  dbPath: z.string().min(1).optional(),
-  taskflowDir: z.string().min(1).optional(),
-  registryPaths: z.array(z.string().min(1)).optional(),
-  agentRegistry: z.array(AgentRegistryEntrySchema).optional(),
-});
-
-/** Configuration for createRuntime — inferred from ConfigFileSchema. */
-export type SchedulerConfig = z.infer<typeof ConfigFileSchema>;
+import { ConfigFileSchema, type SchedulerConfig } from './schemas/index.js';
+export { ConfigFileSchema, type SchedulerConfig };
 
 // ---------------------------------------------------------------------------
 // Config loading
