@@ -1,8 +1,38 @@
 {
-  "name": "graph-workflow",
-  "version": "0.0.0",
-  "description": "Graph-workflow domain — built-in skills for graph lifecycle orchestration",
+  "name": "@ai-atomic-workflow/graph-workflow",
+  "version": "0.1.0",
+  "description": "Graph-driven work-order system for AI agents — explicit phases, scoped context, and non-bypassable approval gates.",
+  "keywords": [
+    "graph",
+    "workflow",
+    "dag",
+    "fsm",
+    "taskflow",
+    "agent",
+    "automation",
+    "mcp",
+    "orchestration"
+  ],
+  "homepage": "https://github.com/makara/ai-atomic-workflow#readme",
+  "bugs": {
+    "url": "https://github.com/makara/ai-atomic-workflow/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/makara/ai-atomic-workflow.git",
+    "directory": "packages/graph-workflow"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "makarawang",
+    "email": "makara15@gmail.com"
+  },
   "type": "module",
+  "files": [
+    "skills/",
+    "package.json",
+    "README.md"
+  ],
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
@@ -11,5 +41,8 @@
     "typescript": "^6.0.3",
     "vitest": "^4.1.10",
     "yaml": "2.9.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   }
 }

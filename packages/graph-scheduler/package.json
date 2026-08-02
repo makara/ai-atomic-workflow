@@ -1,16 +1,53 @@
 {
-  "name": "graph-scheduler",
-  "version": "0.0.0",
+  "name": "@ai-atomic-workflow/graph-scheduler",
+  "version": "0.1.0",
+  "description": "Graph-driven work-order system for AI agents — explicit phases, scoped context, and non-bypassable approval gates.",
+  "keywords": [
+    "graph",
+    "workflow",
+    "dag",
+    "fsm",
+    "taskflow",
+    "agent",
+    "automation",
+    "mcp",
+    "orchestration",
+    "mcp-server",
+    "effect-ts"
+  ],
+  "homepage": "https://github.com/makara/ai-atomic-workflow#readme",
+  "bugs": {
+    "url": "https://github.com/makara/ai-atomic-workflow/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/makara/ai-atomic-workflow.git",
+    "directory": "packages/graph-scheduler"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "makarawang",
+    "email": "makara15@gmail.com"
+  },
   "type": "module",
   "bin": {
     "atom-graph-scheduler": "./server.ts"
   },
+  "files": [
+    "server.ts",
+    "src/",
+    "dist/",
+    "graphs/",
+    "package.json",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsup",
+    "prepack": "yarn build && yarn test",
     "start": "bun run server.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
@@ -24,5 +61,9 @@
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
+  },
+  "engines": {
+    "bun": ">=1.0.0",
+    "node": ">=22.0.0"
   }
 }

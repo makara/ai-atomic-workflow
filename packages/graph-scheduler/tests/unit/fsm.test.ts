@@ -576,7 +576,7 @@ describe('transition()', () => {
       // skip both upstream
       state = transition(state, { type: 'COMPLETE', phaseId: 'a', durationMs: 10, skip: true }, g).nextState;
       // b is still active, c should not be skipped yet (b is still pending → wait for b)
-      let phases = narrowRunning(state).phases;
+      const phases = narrowRunning(state).phases;
       expect(phases['c'].status).toBe('pending');
 
       state = transition(state, { type: 'COMPLETE', phaseId: 'b', durationMs: 10, skip: true }, g).nextState;

@@ -106,7 +106,7 @@ function runContractsPass(
   graphName: string,
 ): Effect.Effect<{ tf: Taskflow; warnings: string[] }, GraphDefinitionError, never> {
   return Effect.gen(function* () {
-    const contracts = validateGraphContracts(tf as unknown as Record<string, unknown>, filePath);
+    const contracts = validateGraphContracts(tf, filePath);
     const errors = [...contracts.errors];
     const warnings = [...contracts.warnings];
 
@@ -114,7 +114,7 @@ function runContractsPass(
     if (skillsDir) {
       const alignment = yield* Effect.either(
         Effect.tryPromise(() =>
-          validateEntrySkillContracts([{ filePath, graph: tf as unknown as Record<string, unknown> }], skillsDir, {
+          validateEntrySkillContracts([{ filePath, graph: tf }], skillsDir, {
             checkOrphans: false,
           }),
         ),

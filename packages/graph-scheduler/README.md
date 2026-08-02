@@ -1,169 +1,253 @@
-# Graph-Scheduler
+# graph-scheduler
 
-Taskflow DAG 执行引擎——独立 MCP Server 进程（stdio 传输），提供 9 个 MCP tools。
+> ⚠️ AI-generated README — edit [docs/readme-blueprint.md](../../docs/readme-blueprint.md) instead.
 
-Graph-Scheduler 是 ai-atomic-workflow 的核心域，负责加载 `.taskflow.yaml` 图定义、按拓扑顺序调度节点执行、管理 approval 决策、持久化运行状态。通过 MCP JSON-RPC 2.0 over stdio 与 Skills 域和 Platform-Adapter 域交互——OMP 平台管理其进程生命周期。
+Graph-driven work-order system for AI agents — explicit phases, scoped context, and non-bypassable approval gates.
 
-**技术栈**：bun · Effect-TS · zod v4（数据校验）· libsql（持久化）· MCP SDK
+DAG execution engine as a standalone **MCP Server** (stdio transport) — 9 MCP tools, no network port.
 
-## 前置条件
+graph-scheduler is the infrastructure half of Atomic Workflow. It loads `.taskflow.yaml` graph definitions, schedules phases in topological order, manages approval decisions, and persists run state. The agent does all the actual work; the scheduler only issues work orders and tracks progress.
 
-- [bun](https://bun.sh) ≥ 1.x（运行时）
-- [npm](https://nodejs.org) ≥ 9.x（包管理）
-- 本地已克隆 `ai-atomic-workflow` 仓库
+**Stack**: bun · Effect-TS · zod v4 (validation) · libsql (persistence) · MCP SDK
 
-## 安装
+## Requirements
 
-从本地源码全局安装：
+- [bun](https://bun.sh) ≥ 1.x — runtime (server runs on bun, TS natively)
+- [npm](https://nodejs.org) ≥ 9 — package manager
 
-```bash
-npm install -g ./packages/graph-scheduler
-```
+## Install
 
-验证：
+Global npm install:
 
 ```bash
-npm list -g graph-scheduler
-# 输出: graph-scheduler@0.0.0 -> ./packages/graph-scheduler
+npm install -g @ai-atomic-workflow/graph-scheduler
 ```
 
-> 包无 `bin` 入口——全局安装后不创建 shell 命令。启动通过 npm 执行脚本或 bun 直接运行。
+Verify:
 
-## 配置
+```bash
+npm list -g @ai-atomic-workflow/graph-scheduler
+# @ai-atomic-workflow/graph-scheduler@0.1.0
+```
 
-### MCP 注册
+This installs the `atom-graph-scheduler` bin (bun shebang) — used by the MCP registration below.
 
-graph-scheduler 通过 MCP stdio 传输与 agent 通信。配置路径因平台而异——配置内容相同：
+## MCP Registration
 
-**OMP**（`~/.omp/agent/mcp.json` 或 `.omp/mcp.json`）：
+graph-scheduler speaks MCP JSON-RPC 2.0 over stdio. Register it in your platform's MCP config:
+
+**OMP** (`~/.omp/agent/mcp.json`):
 
 ```json
 {
   "mcpServers": {
     "graph-scheduler": {
-      "command": "bun",
-      "args": ["run", "/path/to/ai-atomic-workflow/packages/graph-scheduler/server.ts"]
+      "command": "atom-graph-scheduler",
+      "args": []
     }
   }
 }
 ```
 
-**OpenCode**（`opencode.json` 的 `mcpServers` 字段）：
+**OpenCode** (`opencode.json`):
 
 ```json
 {
   "mcpServers": {
     "graph-scheduler": {
-      "command": "bun",
-      "args": ["run", "./packages/graph-scheduler/server.ts"]
+      "command": "atom-graph-scheduler",
+      "args": []
     }
   }
 }
 ```
 
-平台 MCP infrastructure 自动管理 Graph-Scheduler 进程生命周期：discover → spawn → connect → health check → reconnect。崩溃不影响 session——自动重连。
+The platform manages the process lifecycle: discover → spawn → connect → health check → reconnect. A crash doesn't kill the session — the platform reconnects automatically.
 
-### 环境变量
+### Environment
 
-|变量|默认值|说明|
+|Variable|Default|Meaning|
 |-|-|-|
-|`GRAPH_SCHEDULER_DB_PATH`|`.graph-scheduler/data.db`|libsql 数据库文件路径——存储 graph_runs 和 node_states 表|
+|`GS_DB_PATH`|`:memory:`|libsql database file — stores `graph_runs` and `node_states` tables. Scaffolded `config.json` supplies `.graph-scheduler/data/graph-scheduler.db`; env overrides config; falls back to `:memory:` when unset everywhere.|
 
-## 启动
+## Project Setup
 
-Graph-Scheduler 使用 **stdio 传输**——通过 stdin/stdout 通信，**不监听网络端口**。
+Initialize a project with the **setup-atomic-workflow** skill (the retired `graph-config` CLI no longer exists):
 
-```bash
-# 全局安装后，在包目录内
-cd packages/graph-scheduler
-npm start
-
-# 或直接运行（任意目录）
-bun run packages/graph-scheduler/server.ts
+```
+Use setup-atomic-workflow to initialize this project
 ```
 
-启动后，MCP client（如 OMP 平台）通过 stdio pipe 建立 JSON-RPC 连接。无需配置端口或防火墙。生产环境中由 OMP 平台通过 `mcp.json` 自动 spawn 进程——无需手动启动。
+The skill runs a four-step flow (explore → present → confirm → write) and scaffolds `.graph-scheduler/`:
+
+- `config.json` — dbPath, taskflowDir, registryPaths, optional skillsDir (graph-workflow skills package dir, used for entry-skill alignment checks)
+- `graphs/` — where your custom `.taskflow.yaml` files live
+- `constraints.md` — rules enforced on every graph run
+
+Idempotent: never overwrites existing files. Re-running writes nothing.
+
+## Graph Format
+
+A `.taskflow.yaml` graph declares phases and their dependencies:
+
+```yaml
+name: e2e-minimal
+phases:
+  - id: agent-echo
+    type: main
+    dependsOn: []
+    task: say hello in a random language.
+
+  - id: approval-review
+    type: approval
+    dependsOn: [agent-echo]
+    task: 'Approval Review'
+    routing:
+      actions:
+        - action: continue
+          label: 'Accept output'
+          description: 'Output OK — proceed'
+        - action: retry
+          target: agent-echo
+          label: 'Regenerate output'
+          description: 'Output needs changes — re-run agent-echo with feedback'
+```
+
+### Phase fields
+
+|Field|Meaning|
+|-|-|
+|`id`|Unique phase id — referenced by `dependsOn` and `routing.target`|
+|`type`|`main` (inline execution), `approval` (decision gate), `flow` (composition — referenced sub-graph via `use`, flattened into the parent at load)|
+|`dependsOn`|Declared upstream phases — the graph runs a phase only when all of them completed|
+|`task`|Main: the work order — exact prompt for the agent, `{args.key}` templates interpolated at run time. Approval: decision-card topic|
+|`skill`|Execution skill for this phase (e.g. `code-review`) — how the phase's work gets done|
+|`agent`|Priority hints — `string[]` of agent types (e.g. `[reviewer, task]`); advisory, consumed by skills when they dispatch sub-agents (main type only)|
+|`channels`|Main-type context patterns — skill names, file globs, or `node:<id>` refs, resolved against the execution skill's Context Requirements contract|
+|`preText`|Approval-type decision-card pre-call text — displayed before `question()`, never channel-resolved|
+|`join`|Dependency resolution — `all` (default: every dep must complete) or `any` (one dep sufficient)|
+|`when`|Natural-language skip guard — LLM-evaluated before execution; report `skip: true` via `graph_advance` when it evaluates false|
+|`eval`|Approval-type auto-decision rules — agent evaluates before `question()`; first match short-circuits (`continue` / `retry` / `jump`)|
+|`use`|Flow type — referenced graph name to compose in (required when `type: flow`)|
+|`routing`|Approval actions — `continue`, `retry`, `jump`; `retry` / `jump` carry an explicit `target` phase|
 
 ## MCP Tools
 
-9 个 tools——One-Per-Action 模式。每 tool 有独立 JSON Schema inputSchema。
+9 tools, one action per tool, each with its own JSON Schema:
 
-|Tool|参数|说明|
+|Tool|Parameters|What it does|
 |-|-|-|
-|`graph_start`|`graphName: string`, `args?: object`|创建新 run，立即返回首个待执行节点（NextNode）|
-|`graph_advance`|`runId`, `nodeId`, `durationMs`|汇报节点完成。output 不传入——留存在 agent 会话或落盘文件——并获取下一个待执行节点。一步完成 notify + askNext|
-|`graph_jump`|`runId: string`, `targetPhaseId: string`|定向跳转到指定节点——用于 approval REWORK 决策后重跑特定 phase|
-|`graph_force_end`|`runId: string`|强制终止图运行——所有未完成节点标记为 skipped，run status 设为 terminated。**不可逆**|
-|`graph_status`|`runId: string`|查询 run 完整状态快照——各 phase 状态、重试次数、时间戳|
-|`graph_list`|无|列出全部 run 摘要（runId、graphName、status、startedAt），最新在前|
-|`graph_init`|无|初始化数据库——创建表 + 执行 migration。幂等|
-|`graph_clean_completed`|`before?: string`|清理已完成的 run 记录。可指定截止时间（ISO 8601）|
-|`graph_clean_all`|无|清理全部 run 记录——含 running/blocked/terminated。**危险操作**|
+|`graph_start`|`graphName: string`, `args?: object`|Create a run, return the first ready node (NextNode)|
+|`graph_advance`|`runId`, `nodeId`, `durationMs`, `skip?`|Report a node complete — notify + ask next in one step. `skip: true` marks a node skipped when its when-guard evaluated false. Output is not passed in — it lives in the agent session or on disk|
+|`graph_jump`|`runId`, `targetPhaseId`|Jump to a specific phase — re-run it after an approval REWORK decision|
+|`graph_force_end`|`runId`|Force-terminate a run — remaining nodes marked skipped, run marked terminated. **Irreversible**|
+|`graph_status`|`runId`|Full run snapshot — per-phase status, retry counts, timestamps|
+|`graph_list`|—|All run summaries (runId, graphName, status, startedAt), newest first|
+|`graph_init`|—|Initialize the database (create tables + run migration) plus a full health check — entry-skill contract alignment with orphan detection + config health report. Idempotent|
+|`graph_clean_completed`|`before?: string`|Delete completed run records, optionally before an ISO 8601 date|
+|`graph_clean_all`|—|Delete ALL run records — running/blocked/terminated. **Dangerous**|
 
-### NextNode 类型
+### NextNode types
 
-`graph_start` / `graph_advance` 返回的 NextNode 包含两种类型：
+`graph_start` / `graph_advance` return a NextNode:
 
-|type|含义|agent 行为|
+|type|Meaning|Agent behavior|
 |-|-|-|
-|`agent`|普通执行节点|执行 task 字段指定的 sub-agent（含已插值模板）|
-|`approval`|人工决策节点|呈现 Decision Card 给用户并收集选择|
+|`main`|Execution node|Execute the task inline — context assembled from `channels`, `## Agent hints:` injected when declared|
+|`approval`|Human decision node|Present a Decision Card and collect the choice|
 
-### 典型调用流程
+`flow` is a load-time composition type, not a dispatch type — sub-graphs via `use` are flattened into the parent graph before execution (depth cap 5). `graph_start` / `graph_advance` only ever return `main` / `approval` nodes.
+
+### Typical call flow
 
 ```
-graph_start({ graphName: "ci-pipeline" })
-  → NextNode { nodeId: "lint", type: "agent" }
-  → agent 执行 lint
-  → graph_advance({ runId, nodeId: "lint", durationMs: 1234 })
-  → NextNode { nodeId: "test", type: "agent" }
-  → agent 执行 test
-  → graph_advance({ runId, nodeId: "test", durationMs: 5678 })
-  → ...循环至 NextNode 返回 null（图完成）
+graph_start({ graphName: "e2e-minimal" })
+  → { runId, node: { nodeId: "agent-echo", type: "main", task: "say hello in a random language.", ... } }
+  → agent executes the task
+  → graph_advance({ runId, nodeId: "agent-echo", durationMs: 1234 })
+  → { snapshot, node: { nodeId: "approval-review", type: "approval", routingActions: [...], ... } }
+  → ... loop until node is null (graph complete)
 ```
 
-## 开发
+## Built-in Graphs
+
+12 graphs ship with the package (in `graphs/`, registered in `graphs/registry.json`). The project's `.graph-scheduler/graphs/` is searched first — a project graph with the same name overrides a built-in.
+
+|Graph|What it does|
+|-|-|
+|**e2e-minimal**|Minimal E2E: main → approval loop, for learning|
+|**arch-review**|Architecture review: scope detect → review report|
+|**arch-review-to-spec**|Composed pipeline: architecture review → decision gate (spec or document only) → optional spec generation|
+|**openspec-create**|OpenSpec spec creation: scope interview with input source detection → approval gate → arch-decision step → openspec propose CLI|
+|**openspec-apply**|OpenSpec apply: apply change → dual review → bounded auto-rework gate → archive|
+|**openspec-pipeline**|OpenSpec lifecycle: spec creation (openspec-create) → human approval gate → implementation (openspec-apply)|
+|**plan-generate**|Generic plan generation: scope interview → to-spec PRD → optional tickets split. Reusable via flow type|
+|**skill-author**|Skill authoring: create or edit — scope → write → review → approval → output|
+|**skill-delete**|Skill deletion: select → impact analysis → confirm → execute → review → approval|
+|**skill-change-workflow**|Orchestrated skill change: plan → flow phases (author + delete + doc) → cross review → approval|
+|**graph-generate**|Graph generation: interview → design → write → review → approval → examples|
+|**doc-update**|Document update: interview → analyze → confirm → write → review → approval|
+
+## Making Skills and Graphs with Graphs
+
+Atomic Workflow bootstraps itself — the meta-workflows for authoring skills and graphs are built-in graphs:
+
+**Create or edit a skill** — `skill-author` takes an idea through scope confirmation, write, review, and approval:
+
+```
+Use atom-pilot to run skill-author: make a skill that auto-generates changelogs from git history.
+```
+
+**Delete a skill** — `skill-delete` runs impact analysis and confirmation before executing:
+
+```
+Use atom-pilot to run skill-delete: remove the changelog skill.
+```
+
+**Orchestrated skill change** — `skill-change-workflow` plans a change, then runs author + delete + doc phases, a cross review, and an approval gate:
+
+```
+Use atom-pilot to run skill-change-workflow: rework the changelog skill to support conventional commits.
+```
+
+**Generate a graph** — `graph-generate` is the meta-graph: interview → design → write → review → approval. It produces a valid `.taskflow.yaml` from a plain-language description:
+
+```
+Use atom-pilot to run graph-generate: generate a workflow for release notes from merged PRs.
+```
+
+**Update docs** — `doc-update` runs interview → analyze → confirm → write → review → approval for project documents.
+
+All of them are driven by `atom-pilot` from [graph-workflow](../graph-workflow/README.md).
+
+## Development
 
 ```bash
 cd packages/graph-scheduler
 
-# 安装依赖
-npm install
-
-# 构建（tsup）
-npm run build
-
-# 运行测试（vitest）
-npm test
-
-# 类型检查
-npm run typecheck
-
-# 启动开发模式
-npm start
+npm install        # install dependencies
+npm run build      # build (tsup)
+npm test           # run tests (vitest)
+npm run typecheck  # type check
+npm start          # start the server
 ```
 
-测试文件位于 `tests/` 目录，覆盖 types、topology、state-persistence、scheduler-runtime、graph-execution、graph-definition 及集成测试。`src/schemas/` 目录下的 zod v4 schema 均有独立单元测试（合法/非法/边界）。
+Tests live in `tests/`, covering types, topology, state persistence, scheduler runtime, graph execution, graph definitions, and integration. Every zod schema in `src/schemas/` has unit tests (valid / invalid / boundary).
 
 ## FAQ
 
-### graph_start 返回 NextNode 后 agent 无响应？
+### graph_start returns a node but the agent doesn't respond?
 
-检查 MCP 连接状态。确认 `mcp.json` 中 `command` 和 `args` 路径正确。确认 Graph-Scheduler 进程未崩溃——检查 OMP 平台 MCP health check 日志。
+Check the MCP connection. Confirm `command`/`args` in your `mcp.json` resolve, and that the scheduler process is alive (platform MCP health-check logs).
 
-### 如何查看运行历史？
+### How do I see run history?
 
-使用 `graph_list` 获取全部 run 摘要，再用 `graph_status({ runId })` 查看具体 run 的 phase 级详情。
+`graph_list` for run summaries, then `graph_status({ runId })` for phase-level detail.
 
-### 如何中止卡住的 run？
+### How do I abort a stuck run?
 
-使用 `graph_force_end({ runId })`。**注意**——此操作不可逆，run 状态标记为 `terminated` 后无法恢复。
+`graph_force_end({ runId })`. **Irreversible** — the run is marked `terminated` and cannot be recovered.
 
-### libsql 数据库文件在哪？
+### Where is the database?
 
-默认路径：`packages/graph-scheduler/.graph-scheduler/data.db`（相对于 server.ts 工作目录）。可通过环境变量 `GRAPH_SCHEDULER_DB_PATH` 自定义。
-
-数据库包含两张表：
-
-- `graph_runs`——run 级元数据（runId、graphName、status、timestamps）
-- `node_states`——节点级状态记录（nodeId、status、retry count、duration）。output 不持久化——留存在 agent 会话或落盘文件
+Scaffolded `config.json` sets `.graph-scheduler/data/graph-scheduler.db` (relative to the working directory). Override with `GS_DB_PATH` (beats config.json); unset everywhere → in-memory. Two tables: `graph_runs` (run metadata) and `node_states` (per-node status, retry count, timestamps; duration is computed from timestamps, not stored). Output is **not** persisted — it lives in the agent session or on disk.

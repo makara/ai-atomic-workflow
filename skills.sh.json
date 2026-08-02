@@ -1,0 +1,25 @@
+{
+  "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
+  "notGrouped": "bottom",
+  "groupings": [
+    {
+      "title": "Graph Workflow",
+      "description": "Graph-workflow domain — built-in skills for graph lifecycle orchestration (CRUD-driven loop via graph-scheduler MCP tools)",
+      "skills": [
+        "atom-doc-spec",
+        "atom-doc-writer",
+        "atom-graph-design",
+        "atom-graph-spec",
+        "atom-graph-writer",
+        "atom-kernel",
+        "atom-openspec-archive",
+        "atom-phase-handler",
+        "atom-pilot",
+        "atom-scope-interview",
+        "atom-skill-spec",
+        "atom-skill-writer",
+        "setup-atomic-workflow"
+      ]
+    }
+  ]
+}

@@ -1,86 +1,261 @@
-# ai-atomic-workflow
+# Atomic Workflow ![alpha](https://img.shields.io/badge/status-alpha-orange)
 
-> AI 辅助开发工作流规范项目——纯文档仓库，仅本地 Git 管理。
+> ⚠️ AI-generated README — edit [docs/readme-blueprint.md](docs/readme-blueprint.md) instead.
+
+**Languages**: English (this file) · [中文](docs/README.zh-CN.md)
+
+**Graph is just a tool; Attention is all you need.**
+
+Graph-driven work-order system for AI agents — explicit phases, scoped context, and non-bypassable approval gates.
+
+![alpha](https://img.shields.io/badge/status-alpha-orange) ![license](https://img.shields.io/badge/license-MIT-blue) ![platform](https://img.shields.io/badge/platform-OMP%20%7C%20OpenCode-lightgrey)
 
 ---
 
-## 目录结构
+## The Problem
+
+AI agents skip steps silently, lose context between stages, can't express conditional branches, and lack structured approval gates. These failures share a root cause: **the agent has no work-order system**. It's told "build this feature" and left to improvise. When it misses a review step or forgets to update docs, nothing in the execution model prevents it — because there _is_ no execution model. Atomic Workflow gives agents one: explicit phases, declared dependencies, runtime context injection, and non-bypassable approval gates.
+
+---
+
+## How It Works
+
+**Runtime work orders with graph.** Each phase is a self-contained work order. Your agent pulls the next ready order, executes it, reports back; the scheduler advances the graph. The graph only tracks progress and reminds what's next — it executes nothing. A DAG captures what linear chains can't: conditional branches, approval gates, parallel fan-outs.
+
+**Scoped context with channels.** Each work order carries the exact prompt, the right skill, and a context "channel" built from upstream phase outputs — declared per phase as channel patterns: skill names, file globs, or upstream node references, resolved against the execution skill's context contract. A channel is just a concept: a focused slice of relevant decisions and artifacts, nothing heavy. No more "where are we?" or "what was decided earlier?" — your agent gets exactly what it needs for _this_ step.
+
+**Hints, not controls — the graph never dispatches.** A graph says _what_ each phase needs — skills, context, and, optionally, agent-type preferences in priority order. Dispatch itself stays in your agent's hands: when a skill fans out sub-agents, it follows the hints, not the graph's command. The graph is a work-order board, not a manager.
+
+**Your agent still does everything.** No code execution, no hidden engine, no new runtime language. The agent keeps its full toolkit — skills, tools, files — and does all the work. The graph only issues orders and tracks progress. That's the whole mechanism.
+
+**Attention is all you need.** Agents fail from lost focus, not incapability. "Build this feature" is too big; "Write the User model type definition, given the schema from the previous step" is just right. A clear work order with bounded context eliminates the ambiguity that causes skipped steps, forgotten reviews, and drifting scope.
+
+---
+
+## Installation
+
+### graph-scheduler
+
+One package, two capabilities: the **MCP Server** (9 tools, stdio transport) and the `atom-graph-scheduler` bin. Two install routes — **the runtime matches the installer**:
+
+**Option A: npm + Node runtime**
+
+```bash
+npm install -g @ai-atomic-workflow/graph-scheduler
+```
+
+Runtime: [Node](https://nodejs.org) ≥ 22. The package runs from its compiled entry — resolve the global path and register:
+
+```bash
+npm root -g   # → <npm-root>, e.g. /usr/local/lib/node_modules
+```
+
+```json
+{
+  "mcpServers": {
+    "graph-scheduler": {
+      "command": "node",
+      "args": ["<npm-root>/@ai-atomic-workflow/graph-scheduler/dist/server.js"]
+    }
+  }
+}
+```
+
+**Option B: bun**
+
+```bash
+bun add -g @ai-atomic-workflow/graph-scheduler
+```
+
+Runtime: [bun](https://bun.sh) ≥ 1. bun executes the TypeScript entry directly:
+
+```bash
+bun pm root -g   # → <bun-root>, e.g. ~/.bun/install/global/node_modules
+```
+
+```json
+{
+  "mcpServers": {
+    "graph-scheduler": {
+      "command": "bun",
+      "args": ["<bun-root>/@ai-atomic-workflow/graph-scheduler/server.ts"]
+    }
+  }
+}
+```
+
+Config file locations: OMP → `~/.omp/agent/mcp.json`, OpenCode → `opencode.json`. Full details → [packages/graph-scheduler/README.md](packages/graph-scheduler/README.md).
+
+### graph-workflow
+
+Two install channels — pick one (all 13 built-in skills are required for graph execution):
+
+**Option A: Claude Code marketplace**
+
+```bash
+/marketplace install makara/ai-atomic-workflow
+```
+
+**Option B: skills.sh** (third-party CLI, 76+ agent platforms — OpenCode / Codex / Cursor etc.)
+
+```bash
+# Full install (13 graph-workflow skills + legacy skills)
+npx skills add makara/ai-atomic-workflow
+
+# graph-workflow only — 13 built-in skills (tree-subpath source, no marketplace.json dependency)
+npx skills add https://github.com/makara/ai-atomic-workflow/tree/main/packages/graph-workflow/skills
+```
+
+Common flags: `-a <agent>` pick platform (`-a '*'` all), `-g` global install, `-y` non-interactive, `-l` preview without installing.
+
+### Dependencies
+
+Two prerequisites for the openspec graphs and the parent skill chain:
+
+- **OpenSpec CLI** — `npm install -g @fission-ai/openspec@latest`, then `openspec init` inside your project. → [installation docs](https://github.com/Fission-AI/OpenSpec/blob/main/docs/installation.md)
+- **mattpocock/skills** — parent skills (grilling, domain modeling, TDD, code review): `npx skills add mattpocock/skills`. → [README](https://github.com/mattpocock/skills/blob/main/README.md)
+
+## Setup
+
+Initialize a project with the **setup-atomic-workflow** skill (the retired `graph-config` CLI no longer exists):
 
 ```
-ai-atomic-workflow/
-├── core/              ← 平台无关规范（设计目标、哲学、反馈架构、三层工作流、约束等）
-├── skills/            ← 8 自有 skill（英文编写）+ 12 父 skill（mattpocock/skills）
-├── standards/         ← AI 行为基线（通用 + JS/TS + Python）
-├── templates/         ← standards/ 部署模板（中文/英文各一套）
-├── scripts/           ← deploy-global.sh / deploy-project.sh / validate.sh
-├── guides/            ← 安装和配置指南
-├── docs/              ← agents/ 领域文档 + adr/ 架构决策 + skill-design-reference.md
-├── .scratch/          ← Issue 追踪（本地 markdown，gitignored）
-├── plans/             ← 运行时计划草稿（gitignored）
-└── archive/           ← 已归档产物（gitignored）
+Use setup-atomic-workflow to initialize this project
 ```
 
+It scaffolds `.graph-scheduler/` — `config.json` (db path, taskflow dir, registry paths), `graphs/`, and `constraints.md`. Idempotent: never overwrites existing files. Re-running it writes nothing.
+
 ---
 
-## 三层架构
+## Quick Start
+
+With graph-workflow skills installed, drive the built-in graphs with `atom-pilot` — it handles the full execution loop (`graph_start` → phase dispatch → `graph_advance`) and presents approval gates.
+
+**How to read this section**: code blocks are **prompts** you send to your agent (verbatim); plain text is explanation. Every prompt follows one template; `<angle brackets>` are the parts you fill in:
 
 ```
-顶层编排（orchestrate → main-flow → finalize）    ← 入口路由 + idea 四步流程 + 质量门控
-中层拆解（to-spec → to-tickets）                  ← 需求综合为 spec，拆分为独立 issue
-底层执行（execute → implement → review → compress） ← 单 issue 实施 + 三轴审查 + 返工路由
+Use atom-pilot to run <graph name>: <your goal in plain language>
 ```
 
-详见 `core/layered-workflow.md`。
+**1. Find problems or refine an idea** — run arch-review:
+
+```
+Use atom-pilot to run arch-review: analyze this codebase for structure, coupling hotspots, and dead code.
+```
+
+**2. Turn the result into a change** — two routes:
+
+**One step** — run the full lifecycle:
+
+```
+Use atom-pilot to run openspec-pipeline: spec creation, human approval, and implementation in one run.
+```
+
+**Multi-step** — compose the pipeline yourself:
+
+- `openspec-create` — turn the review report into an OpenSpec change (spec)
+- (optional) `plan-generate` — generate implementation tickets from the spec
+- Implement the spec or tickets however you like — plain session, mattpocock/skills, your own flow
+- `openspec-apply` — apply the change: dual review, bounded rework, archive
+
+**3. Make a graph or a skill** — the meta-workflows are built-in graphs, driven the same way:
+
+- `graph-generate` — turn a plain-language description into a `.taskflow.yaml`:
+
+```
+Use atom-pilot to run graph-generate: generate a workflow for release notes from merged PRs.
+```
+
+- `skill-author` — create or edit a SKILL.md:
+
+```
+Use atom-pilot to run skill-author: make a skill that auto-generates changelogs from git history.
+```
+
+**Raw MCP tools?** The loop behind all of this is `graph_start` → execute the returned work order → `graph_advance` → repeat until null. If you want to drive the MCP tools directly instead of via atom-pilot, see the call-flow example in [packages/graph-scheduler/README.md](packages/graph-scheduler/README.md).
+
+**Want to go deeper?** → [packages/graph-scheduler/README.md](packages/graph-scheduler/README.md) for the graph format and all tools, [packages/graph-workflow/README.md](packages/graph-workflow/README.md) for the skill system, [docs/technical-overview.md](docs/technical-overview.md) for the execution model.
 
 ---
 
-## Skill 体系
+## Architecture
 
-### 自有 skill（8 个，英文编写）
+Two packages:
 
-| 层级 | Skill | 角色 |
-|------|-------|------|
-| 顶层编排 | `orchestrate` | 入口路由——场景检测 + 约束注入 + 引导文件头部 |
-| 顶层编排 | `main-flow` | idea→ship 主流程——四步工作流（需求澄清→原型验证→产出转换→收尾审查） |
-| 底层执行 | `execute` | 执行闭环——implement → review → compress，用户三选一门控 |
-| 底层审查 | `review` | 三轴审查——Standards + Spec + Best-practice + 返工路由 |
-| 顶层收尾 | `finalize` | 架构级质量门控 + 文档同步 |
-| 自有工具 | `asset-inventory` | 资产盘点 + gap 分析 |
-| 自有工具 | `constraint-configuration` | 约束配置管理 |
-| 自有工具 | `content-authoring` | 非代码内容起草 |
+|Package|Role|
+|-|-|
+|**graph-scheduler**|Infrastructure. MCP Server (DAG execution engine, 9 tools) + built-in graphs shipped in the package.|
+|**graph-workflow**|Skill system. `atom-pilot` (lifecycle loop), `atom-phase-handler` (dispatch by phase type), entry and reference skills.|
 
-### 父 skill（12 个，mattpocock/skills）
+**Built-in graphs** — ready to run out of the box:
 
-`grilling`、`domain-modeling`、`prototype`、`to-spec`、`to-tickets`、`implement`、`tdd`、`code-review`、`diagnosing-bugs`、`improve-codebase-architecture`、`codebase-design`、`triage`
-
----
-
-## 核心目录说明
-
-| 目录 | 内容 | 用途 |
-|------|------|------|
-| `core/` | 10 个规范文件：设计目标、设计哲学、反馈架构、三层工作流约定、约束分层、部署约定、步骤粒度、需求等 | 平台无关规范——人类维护者阅读，AGENTS.md 引用 |
-| `skills/` | 8 个 SKILL.md（英文编写） | 步骤类型定义——每个 skill 即为该步骤类型的规范文档 |
-| `standards/` | 通用 AI 行为基线 + JS/TS + Python 补充 | AI 运行时指令——通过 opencode.json 加载 |
-| `templates/` | standards-zh/ + standards-en/（各 6 文件） | 部署模板——deploy-project.sh 按 --lang 参数选择 |
-| `scripts/` | deploy-global.sh / deploy-project.sh / validate.sh | 部署和校验——`--dry-run` / `--apply` 门控 |
-| `guides/` | 12 个安装和配置指南 | OpenCode 工具链环境搭建 |
-| `docs/` | agents/（3 文件）+ adr/（5 ADR）+ skill-design-reference.md | 领域文档 + 架构决策记录 + skill 设计参考 |
+|Graph|What it does|
+|-|-|
+|**arch-review-to-spec**|Composed pipeline: architecture review → decision gate → optional spec generation|
+|**arch-review**|Architecture review: scope detect → review report|
+|**doc-update**|Document update: interview → analyze → confirm → write → review → approval|
+|**graph-generate**|Meta-graph: generates a `.taskflow.yaml` from a plain-language description|
+|**openspec-apply**|OpenSpec apply: apply change → dual review → bounded rework → archive|
+|**openspec-create**|OpenSpec spec creation: scope interview → approval → arch decision → propose CLI|
+|**openspec-pipeline**|OpenSpec lifecycle: spec creation → human approval → implementation|
+|**plan-generate**|Generic plan generation: scope interview → PRD → optional tickets split|
+|**skill-author**|Skill authoring: create or edit — scope → write → review → approval|
+|**skill-change-workflow**|Orchestrated skill change: plan → author + delete + doc → cross review → approval|
+|**skill-delete**|Skill deletion: select → impact analysis → confirm → execute → review → approval|
+|**e2e-minimal**|Minimal E2E: main → approval loop, for learning|
 
 ---
 
-## 快速开始
+## Status & Roadmap
 
-1. **安装父 skill**：`npx skills add mattpocock/skills` → 详见 `guides/mattpocock-skills-setup.md`
-2. **部署自有 skill**：`scripts/deploy-global.sh --apply`
-3. **引导新工作**：使用 `orchestrate` skill（自动检测场景，路由到 main-flow / diagnosing-bugs / triage）
+Atomic Workflow is in **alpha**.
+
+**Stable** (implemented, no planned breaking changes before v1.0):
+
+- graph-scheduler FSM engine and 9 MCP tools
+- `.taskflow.yaml` graph format and phase schema (main/approval + flow composition, when-guards, join modes, channels, agent hints)
+- CRUD execution loop (`graph_start` → `graph_advance` → `graph_jump`, plus `graph_status` / `graph_list`)
+- setup-atomic-workflow project initialization
+- 12 built-in graphs and 13 built-in skills
+
+**Active development** (may change):
+
+- More control-flow features — when-guards, join modes, routing actions
+- More built-in graphs / workflows
+- Data maintenance tools (current `graph_clean_*` are minimal) — the MCP tool interface may change
+
+### Roadmap to v1.0
+
+- [ ] skill-edit graph (alpha)
+- [ ] cross-platform MCP support + phase schema v1 freeze (v1.0)
+
+<!-- → See [ROADMAP.md](ROADMAP.md) for full details. -->
 
 ---
 
-## 关键约定
+## Contributing
 
-- **语言**：中文——AI 对话界面和产出
-- **无 git**：AI 会话和脚本中不涉及 git 操作
-- **用户驱动**：用户显式触发每个步骤，AI 不自动推进
-- **三层架构**：编排 → 拆解 → 执行，详见 `core/layered-workflow.md`
-- **Skill 体系**：8 自有 skill + 12 父 skill（mattpocock/skills），英文编写，无 zh/en wrapper
+Bug reports and pull requests welcome. See [CONTEXT.md](CONTEXT.md) for the architecture overview and [docs/adr/](docs/adr/) for architectural decision records. More → [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Dependencies
+
+- [OpenSpec CLI](https://github.com/Fission-AI/OpenSpec/blob/main/docs/installation.md) — spec lifecycle for the openspec graphs
+- [mattpocock/skills](https://github.com/mattpocock/skills/blob/main/README.md) — parent skills for grilling, domain modeling, TDD, and more
+
+## Thanks
+
+- [taskflow](https://heggria.github.io/taskflow) — DAG execution model inspiration
+- [Oh My Pi](https://omp.sh/) — agent harness platform
+
+---
+
+## Further Reading
+
+|Document|For|
+|-|-|
+|[packages/graph-scheduler/README.md](packages/graph-scheduler/README.md)|Graph format, all 9 MCP tools, built-in graphs, making skills/graphs with graphs|
+|[packages/graph-workflow/README.md](packages/graph-workflow/README.md)|Skill system, full skill list, how skills drive graph execution|
+|[docs/technical-overview.md](docs/technical-overview.md)|Graph execution model, phase types, when-guards, skill system|
+|[docs/glossary.md](docs/glossary.md)|Terminology reference|
+|[ROADMAP.md](ROADMAP.md)|Planned milestones and v1.0 goals|
+|[CONTEXT.md](CONTEXT.md)|Internal architecture reference for contributors|

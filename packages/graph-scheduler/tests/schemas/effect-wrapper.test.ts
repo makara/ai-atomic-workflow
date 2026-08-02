@@ -12,10 +12,8 @@
  */
 import { Cause, Effect, Exit } from 'effect';
 import { describe, expect, it } from 'vitest';
-// eslint-disable-next-line import/no-unresolved -- TDD red: module not created yet
-import { parseWithEffect, ValidationError } from '../../src/schemas/effect-wrapper.js';
-// eslint-disable-next-line import/no-unresolved -- TDD red: zod/v4 not installed yet
 import { z } from 'zod/v4';
+import { parseWithEffect, ValidationError } from '../../src/schemas/effect-wrapper.js';
 
 // ── Test schemas ────────────────────────────────────────────────────────────────
 

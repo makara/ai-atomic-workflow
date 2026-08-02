@@ -37,7 +37,7 @@ export interface GraphDefinitionError {
 /** flow flattening error — dynamic expression, max depth, name conflict, missing child graph.
  *  Error subclass — carries .stack/.name, satisfies instanceof Error guards. */
 export class FlowPhaseError extends Error {
-  readonly _tag: 'FlowPhaseError' = 'FlowPhaseError';
+  readonly _tag = 'FlowPhaseError' as const;
   constructor(
     readonly phaseId: string,
     readonly code: 'DYNAMIC_EXPRESSION' | 'MAX_DEPTH_EXCEEDED' | 'NAME_CONFLICT' | 'GRAPH_NOT_FOUND',

@@ -5,6 +5,34 @@ __metadata:
   version: 10
   cacheKey: 10c0
 
+"@ai-atomic-workflow/graph-scheduler@workspace:packages/graph-scheduler":
+  version: 0.0.0-use.local
+  resolution: "@ai-atomic-workflow/graph-scheduler@workspace:packages/graph-scheduler"
+  dependencies:
+    "@modelcontextprotocol/sdk": "npm:1.30.0"
+    "@types/node": "npm:^26.1.2"
+    effect: "npm:3.22.1"
+    libsql: "npm:0.5.29"
+    tsup: "npm:^8.5.1"
+    typescript: "npm:^6.0.3"
+    vitest: "npm:^4.1.10"
+    yaml: "npm:2.9.0"
+    zod: "npm:4.4.3"
+  bin:
+    atom-graph-scheduler: ./server.ts
+  languageName: unknown
+  linkType: soft
+
+"@ai-atomic-workflow/graph-workflow@workspace:packages/graph-workflow":
+  version: 0.0.0-use.local
+  resolution: "@ai-atomic-workflow/graph-workflow@workspace:packages/graph-workflow"
+  dependencies:
+    typescript: "npm:^6.0.3"
+    vitest: "npm:^4.1.10"
+    yaml: "npm:2.9.0"
+  languageName: unknown
+  linkType: soft
+
 "@emnapi/core@npm:2.0.0-alpha.3":
   version: 2.0.0-alpha.3
   resolution: "@emnapi/core@npm:2.0.0-alpha.3"
@@ -2028,34 +2056,6 @@ __metadata:
   checksum: 10c0/386d011a553e02bc594ac2ca0bd6d9e4c22d7fa8cfbfc448a6d148c59ea881b092db9dbe3547ae4b88e55f1b01f7c4a2ecc53b310c042793e63aa44cf6c257f2
   languageName: node
   linkType: hard
-
-"graph-scheduler@workspace:packages/graph-scheduler":
-  version: 0.0.0-use.local
-  resolution: "graph-scheduler@workspace:packages/graph-scheduler"
-  dependencies:
-    "@modelcontextprotocol/sdk": "npm:1.30.0"
-    "@types/node": "npm:^26.1.2"
-    effect: "npm:3.22.1"
-    libsql: "npm:0.5.29"
-    tsup: "npm:^8.5.1"
-    typescript: "npm:^6.0.3"
-    vitest: "npm:^4.1.10"
-    yaml: "npm:2.9.0"
-    zod: "npm:4.4.3"
-  bin:
-    atom-graph-scheduler: ./server.ts
-  languageName: unknown
-  linkType: soft
-
-"graph-workflow@workspace:packages/graph-workflow":
-  version: 0.0.0-use.local
-  resolution: "graph-workflow@workspace:packages/graph-workflow"
-  dependencies:
-    typescript: "npm:^6.0.3"
-    vitest: "npm:^4.1.10"
-    yaml: "npm:2.9.0"
-  languageName: unknown
-  linkType: soft
 
 "has-symbols@npm:^1.1.0":
   version: 1.1.0

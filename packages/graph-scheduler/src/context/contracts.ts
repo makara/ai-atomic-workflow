@@ -148,8 +148,7 @@ export function validateGraphContracts(
           // re-runs unchanged artifacts — same verdict, wasted cycle. Integrity
           // gates (scope-confirm/spec-scope style writers) are not reviewers.
           const isReviewNode =
-            targetPhase !== undefined &&
-            (str((targetPhase as Record<string, unknown>).skill, '') === 'code-review' || targetId.includes('review'));
+            targetPhase !== undefined && (str(targetPhase.skill, '') === 'code-review' || targetId.includes('review'));
           if (isReviewNode && depends.includes(targetId)) {
             warnings.push(
               `${prefix} — eval retry targets reviewer node '${targetId}' (the approval's direct dependency); re-running the reviewer over unchanged artifacts reproduces the same verdict — target the writer node instead per atom-graph-spec §Auto-Rework (eval) Rules.`,
