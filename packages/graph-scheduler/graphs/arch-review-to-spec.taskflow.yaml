@@ -1,0 +1,37 @@
+name: arch-review-to-spec
+phases:
+  # Stage 1: Review — composed arch-review graph (scope-detect + arch-review)
+  - id: review
+    type: flow
+    use: arch-review
+    dependsOn: []
+
+  # Stage 2: Decision gate — spec generation or document only?
+  - id: review-accept
+    type: approval
+    dependsOn: [review]
+    routing:
+      actions:
+        - action: continue
+          label: 'Generate formal spec'
+          description: 'Feed review findings into openspec-create — produce delta specs (proposal, specs, design, tasks)'
+        - action: continue
+          label: 'Document only'
+          description: 'Stop after review — report is sufficient. No spec generation.'
+        - action: retry
+          target: review
+          label: 'Revise review'
+          description: 'Review needs corrections — re-run arch-review'
+
+  # Stage 3: Spec generation via openspec-create — when-guarded by persisted approval decision
+  - id: spec-generate
+    type: flow
+    use: openspec-create
+    dependsOn: [review-accept]
+    when: 'review-accept output shows decision label is NOT "Document only" — spec generation chosen; execute openspec-create (true=execute, false=skip)'
+
+  # Stage 4: Pipeline end — runs after spec-generate (or cascade-skip if document-only)
+  - id: pipeline-spec-done
+    type: main
+    dependsOn: [spec-generate]
+    task: 'Pipeline complete. Review report saved at confirmed path. Spec generation: see upstream flow phase status.'

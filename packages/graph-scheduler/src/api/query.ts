@@ -5,7 +5,7 @@
  *
  * Dependencies:
  * - Layer 3: lib/db/repository (GraphRepository), types (SchedulerError)
- * - Internal: api/crud (IGraphSnapshot)
+ * - Internal: api/snapshot (IGraphSnapshot)
  *
  * @module
  */
@@ -15,41 +15,31 @@ import { Effect } from 'effect';
 import type { NodeStateEntry } from '../lib/db/repository.js';
 import { GraphRepository } from '../lib/db/repository.js';
 import type { PersistenceError, SchedulerError } from '../types.js';
-import type { IGraphSnapshot } from './crud.js';
-import { aggregateNodeMetrics } from './crud.js';
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
+import { assembleSnapshot, type IGraphSnapshot, type ISnapshotNode } from './snapshot.js';
 
 /**
  * Build a full GraphSnapshot from a repository GraphRun + NodeStateEntry array.
- * Delegates metric computation to shared aggregateNodeMetrics from crud.ts.
+ * Shares shape assembly with snapshot.ts assembleSnapshot().
  */
 function buildFullSnapshot(
   runId: string,
   graphName: string,
   fsmState: string,
+  createdAt: string,
+  updatedAt: string,
   nodeStates: ReadonlyArray<NodeStateEntry>,
 ): IGraphSnapshot {
-  const nodes = nodeStates.map((ns) => ({ nodeId: ns.nodeId, status: ns.status }));
-  const metrics = aggregateNodeMetrics(nodes, fsmState);
+  const nodes: ISnapshotNode[] = nodeStates.map((ns) => ({
+    nodeId: ns.nodeId,
+    status: ns.status,
+    retryCount: ns.retryCount,
+    startedAt: ns.startedAt,
+    completedAt: ns.completedAt,
+    durationMs: ns.startedAt && ns.completedAt ? Date.parse(ns.completedAt) - Date.parse(ns.startedAt) : null,
+  }));
 
-  return {
-    runId,
-    graphName,
-    fsmState,
-    currentPhaseId: metrics.currentPhaseId,
-    nodeCount: metrics.nodeCount,
-    completedCount: metrics.completedCount,
-    failedCount: metrics.failedCount,
-    updatedAt: new Date().toISOString(),
-  };
+  return assembleSnapshot({ runId, graphName, fsmState, createdAt, updatedAt }, nodes);
 }
-
-// ---------------------------------------------------------------------------
-// Public API — read operations
-// ---------------------------------------------------------------------------
 
 /**
  * Get the full status snapshot of a graph run.
@@ -66,7 +56,7 @@ export function graphStatus(runId: string): Effect.Effect<IGraphSnapshot, Schedu
 
     const nodeStates = yield* repo.getNodeStates(runId);
 
-    return buildFullSnapshot(run.runId, run.graphName, run.fsmState, nodeStates);
+    return buildFullSnapshot(run.runId, run.graphName, run.fsmState, run.createdAt, run.updatedAt, nodeStates);
   });
 }
 

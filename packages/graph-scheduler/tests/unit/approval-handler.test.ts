@@ -13,6 +13,7 @@
 import { describe, expect, it } from 'vitest';
 import type { IApprovalAction, IApprovalDecision } from '../../src/phase-handler/types.js';
 import type { Phase } from '../../src/schemas/index.js';
+import { PhaseSchema } from '../../src/schemas/index.js';
 
 // ---------------------------------------------------------------------------
 // IApprovalAction — discriminated union
@@ -152,8 +153,87 @@ describe('DEFAULT_APPROVAL_ACTIONS', () => {
 });
 
 // ---------------------------------------------------------------------------
-// INodeDetail — routes removed, routingActions added
+// extendNodeDetail — preText fallback chain + field surface (DEBT #1)
 // ---------------------------------------------------------------------------
+
+describe('approvalPhaseHandler.extendNodeDetail', () => {
+  const base = {
+    nodeId: 'approval-node',
+    type: 'approval',
+    handlerSkill: 'atom-phase-handler',
+    skill: 'atom-phase-handler',
+    constraints: [],
+    retryAttempt: 0,
+  };
+  const nodeState = { status: 'active', retryCount: 0, startedAt: null, completedAt: null, durationMs: null };
+
+  it('surfaces explicit preText when declared', async () => {
+    const phase = { id: 'a', type: 'approval', task: 'Decide', preText: 'custom pre-call text' } as Phase;
+    const result = (await import('../../src/phase-handler/approval-handler.js')).approvalPhaseHandler.extendNodeDetail(
+      base,
+      phase,
+      nodeState,
+    );
+    expect(result.preText).toBe('custom pre-call text');
+  });
+
+  it('falls back to default pre-call text when neither declared', async () => {
+    const phase = { id: 'a', type: 'approval', task: 'Decide' } as Phase;
+    const result = (await import('../../src/phase-handler/approval-handler.js')).approvalPhaseHandler.extendNodeDetail(
+      base,
+      phase,
+      nodeState,
+    );
+    expect(result.preText).toBe('Phase: a. Output is ready for review.');
+  });
+
+  it('never falls back to a legacy routing.context array — preText is the single declaration site', async () => {
+    const phase = { id: 'a', type: 'approval', task: 'Decide' } as Phase;
+    const result = (await import('../../src/phase-handler/approval-handler.js')).approvalPhaseHandler.extendNodeDetail(
+      base,
+      phase,
+      nodeState,
+    );
+    expect(result.preText).toBe('Phase: a. Output is ready for review.'); // default, never routing.context
+  });
+
+  it('never emits legacy context field on NodeDetail', async () => {
+    const phase = { id: 'a', type: 'approval', task: 'Decide', preText: 'x' } as Phase;
+    const result = (await import('../../src/phase-handler/approval-handler.js')).approvalPhaseHandler.extendNodeDetail(
+      base,
+      phase,
+      nodeState,
+    );
+    expect(result).not.toHaveProperty('context');
+  });
+});
+
+describe('field-type contract — mis-typed fields rejected at parse time', () => {
+  it('rejects approval phase declaring channels — schema parse error naming the field', () => {
+    const phase = { id: 'a', type: 'approval', task: 'Decide', channels: ['node:some-node'] };
+    const result = PhaseSchema.safeParse(phase);
+    expect(result.success).toBe(false);
+    const messages = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('\n');
+    expect(messages).toContain('approval');
+    expect(messages).toContain('channels');
+  });
+
+  it('rejects main phase declaring preText — schema parse error naming the field', () => {
+    const phase = { id: 'a', type: 'main', task: 'do it', preText: 'custom pre-call text' };
+    const result = PhaseSchema.safeParse(phase);
+    expect(result.success).toBe(false);
+    const messages = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('\n');
+    expect(messages).toContain('main');
+    expect(messages).toContain('preText');
+  });
+
+  it('accepts approval with preText and main with channels — one field per type', () => {
+    expect(PhaseSchema.safeParse({ id: 'a', type: 'approval', task: 'Decide', preText: 'x' }).success).toBe(true);
+    expect(
+      PhaseSchema.safeParse({ id: 'a', type: 'main', task: 'do it', channels: ['skill:atom-graph-spec'] }).success,
+    ).toBe(true);
+  });
+});
 
 describe('INodeDetail routing fields', () => {
   it('routingActions field accepts IApprovalAction array', () => {

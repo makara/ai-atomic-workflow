@@ -12,29 +12,16 @@ export type DebugPhase = 'load' | 'runtime';
 export interface IDebugEntry {
   ts: string;
   phase: DebugPhase;
-  /** Milliseconds since module init, 3 decimal places. */
+  /** Milliseconds since module init (monotonic clock), 3 decimal places. */
   elapsed: string;
   /** Caller basename parsed from Error().stack, or "unknown". */
   file: string;
   payload?: unknown;
 }
 
-// ── Module init timestamp (monotonic clock) ──────────────────
-
-/** True when OMP_DEBUG environment variable is set to a truthy value. */
-export function isDebugEnabled(): boolean {
-  try {
-    return process.env.OMP_DEBUG !== undefined && process.env.OMP_DEBUG !== '0' && process.env.OMP_DEBUG !== 'false';
-  } catch {
-    return false;
-  }
-}
 const moduleInitTime = performance.now();
 
-// ── Per-file sequence counter (keyed by caller basename) ─────
 const seqCounter = new Map<string, number>();
-
-// ── Caller detection via Error().stack ───────────────────────
 
 /** Stack lines matching common V8/Bun formats. */
 const STACK_LINE_RE = /(?:at\s+(?:.*?\s+)?\(?(.+?):(\d+):(\d+)\)?)/;
@@ -67,8 +54,6 @@ function getCallerFile(): string {
     return 'unknown';
   }
 }
-
-// ── Public API ────────────────────────────────────────────────
 
 /**
  * Emit a structured debug log line to stderr.
@@ -104,9 +89,4 @@ export function debugLog(phase: DebugPhase, payload?: unknown): void {
   } catch {
     // fire-and-forget — never let debug output break the caller
   }
-}
-
-/** Reset per-file sequence counters. Exported for test isolation only. */
-export function resetDebugCounters(): void {
-  seqCounter.clear();
 }

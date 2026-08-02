@@ -1,0 +1,167 @@
+name: skill-author
+phases:
+  # Mode detection: create vs edit
+  # create path: scope-confirm → skill-write → skill-review → skill-accept → output-examples
+  # edit path: skill-select → edit-scope-confirm → skill-edit-write → skill-review → skill-accept → output-examples
+
+  # --- Shared entry: scope confirmation ---
+  - id: scope-confirm
+    type: main
+    dependsOn: []
+    skill: atom-scope-interview
+    channels:
+      - ./CONTEXT.md
+    task: |
+      Execute scope interview per skill://atom-scope-interview (load atom-kernel).
+      Flow context: prefer upstream plan-parse skill_create_name (injected when orchestrated); else interview (skill Step 1).
+
+      Topics: skill name and purpose; scope (what problem it solves); input/output contract (files/types needed and produced); dependencies (skills loaded via skill://); save location.
+
+      Output: confirmed scope (name, purpose, inputs, outputs), full skill plan (sections, references, context requirements, trigger phrases), scope_complete: true, save_location.
+
+  # --- Create path: write new skill ---
+  - id: skill-write
+    type: main
+    dependsOn: [scope-confirm]
+    skill: atom-skill-writer
+    when: 'scope-confirm output shows save_location and no skill_path — create mode'
+    task: |
+      Write skill per confirmed plan using atom-kernel solve() for content confirmation.
+
+      Load atom-kernel (injected) for solve() behavior contract.
+      Read scope-confirm output (injected).
+      Execute solve({ goal: "write SKILL.md for confirmed scope", research: true, context }):
+
+      confirm(goal): Confirm writing scope with user — verify plan still accurate.
+
+      research: Load atom-skill-spec (injected). Look up frontmatter format rules, body content rules, language constraints, reference constraints.
+
+      think: Draft complete SKILL.md — frontmatter (name, description, version), body sections per plan, context requirements. Validate every atom-skill-spec rule.
+
+      interview(details): Present content decisions one at a time — frontmatter fields, section structure, trigger phrases. User rejects → return to think.
+
+      Output: When all confirmed, write SKILL.md to save_location. Write output path + summary (main agent collects).
+    channels:
+      - skill:atom-skill-spec
+
+  # --- Edit path: select existing skill ---
+  - id: skill-select
+    type: main
+    dependsOn: [scope-confirm]
+    when: 'scope-confirm output shows skill_path — edit mode'
+    task: |
+      Load atom-kernel (injected). Conduct consensus interview per atom-kernel §interview() to confirm edit target.
+
+      1. Accept skill path or name from user input.
+      2. Load existing SKILL.md — read frontmatter + body structure.
+      3. Present current state to user: name, description, sections.
+      4. Confirm: "This is the skill you want to edit?"
+      5. Write target (main agent collects):
+        - skill_path: <path>
+        - skill_name: <name>
+        - current_frontmatter: <summary>
+        - current_sections: [list]
+
+  # --- Edit path: confirm edit scope ---
+  - id: edit-scope-confirm
+    type: main
+    dependsOn: [skill-select]
+    task: |
+      Load atom-kernel (injected). Interview to confirm edit scope per skill://atom-scope-interview. If plan incomplete, continue solve() loop until scope_complete: true.
+
+      Read skill-select output (injected via dependsOn implicit context).
+      Interview per atom-kernel §interview() — one-at-a-time, recommendation-first:
+      - What to change: description, trigger phrases, body sections, remove sections?
+      - Scope of each change: full rewrite or incremental?
+      - Any new skill:// dependencies to add or remove?
+      Assess plan completeness:
+      - Plan "complete" if all changes specified with clear diff plan
+      - If scope_complete: false → continue solve() loop: research atom-skill-spec rules → think diff plan → interview → repeat until scope_complete: true
+      Write output (main agent collects):
+        - scope_complete: true
+        - changes: [list of change descriptions]
+        - diff_plan: [detailed section-by-section diff]
+        - dependencies: [skill:// refs to add/remove]
+        - trigger_phrases: [updates]
+
+  # --- Edit path: apply edits ---
+  - id: skill-edit-write
+    type: main
+    dependsOn: [edit-scope-confirm]
+    skill: atom-skill-writer
+    task: |
+      Modify SKILL.md per confirmed diff plan using atom-kernel solve() for content confirmation.
+
+      Load atom-kernel (injected) for solve() behavior contract.
+      Read skill-select output, edit-scope-confirm output (both injected).
+      Execute solve({ goal: "apply edits to SKILL.md as planned", research: true, context }):
+
+      confirm(goal): Confirm edit scope with user — verify plan still accurate.
+
+      research: Load atom-skill-spec (injected). Verify edit plan complies with all atom-skill-spec rules.
+
+      think: Perform in-place edits — frontmatter changes, section updates, section removals. Validate modified skill against every atom-skill-spec rule.
+
+      interview(details): Present edit results one at a time — changed sections, new content. User rejects → return to think.
+
+      Output: When all confirmed, write modified SKILL.md (overwrite existing — backup original). Write before/after diff (main agent collects).
+    channels:
+      - node:skill-select
+      - skill:atom-skill-spec
+
+  # --- Shared: review (create or edit output) ---
+  - id: skill-review
+    type: main
+    dependsOn: [skill-write, skill-edit-write]
+    join: any
+    skill: code-review
+    agent: [reviewer, task]
+    task: |
+      Review SKILL.md per code-review (use ## Agent hints for axis sub-agents).
+
+      Artifact: SKILL.md path from skill-write or skill-edit-write output (injected).
+      Standards: atom-skill-spec (injected) — structural rules (frontmatter + body + language + reference).
+      Spec: scope-confirm output (injected) — skill matches confirmed scope. Edit mode: additionally read the edit-scope-confirm upstream output (present only in edit mode) — check frontmatter consistency, section structure integrity, no orphan references.
+
+      Output machine-parseable YAML with overall: pass | fail. Write report (main agent collects).
+    channels:
+      - node:scope-confirm
+      - skill:atom-skill-spec
+
+  # --- Shared: approval gate ---
+  # Dual-writer graph (create skill-write / edit skill-edit-write, mutually
+  # exclusive via when guards) — no single rework point: eval omitted, FAIL
+  # falls through to human gate with per-mode retry targets
+  # (atom-graph-spec §Auto-Rework (eval) Rules — single-writer scope).
+  - id: skill-accept
+    type: approval
+    dependsOn: [skill-review]
+    routing:
+      actions:
+        - action: continue
+          label: 'Accept skill'
+          description: 'Skill ready — proceed'
+        - action: retry
+          target: skill-write
+          label: 'Revise new skill'
+          description: 'Created skill needs changes — re-run skill-write with review feedback'
+        - action: retry
+          target: skill-edit-write
+          label: 'Revise edited skill'
+          description: 'Edited skill needs changes — re-run skill-edit-write with review feedback'
+        - action: jump
+          target: scope-confirm
+          label: 'Revise plan'
+          description: 'Fundamental plan issues — revise requirements'
+
+  # --- Shared: output ---
+  - id: output-examples
+    type: main
+    dependsOn: [skill-accept]
+    task: |
+      Generate usage examples for the skill.
+
+      Read skill-write / skill-edit-write / skill-review upstream output files.
+      If create mode: produce 2-3 concrete invocation examples.
+      If edit mode: produce before/after diff summary.
+      Write output (main agent collects).

@@ -9,19 +9,13 @@
  */
 import type { NodeState } from '../schemas/index.js';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 /** Per-node FSM state — canonical NodeState sans runId (FSM is run-scoped). */
 export type FsmNodeState = Omit<NodeState, 'runId'>;
 
-/** Run-level status values used by persist_run_state effect. */
-export type FsmRunStatus = 'running' | 'completed' | 'terminated';
-
-// ---------------------------------------------------------------------------
-// FsmEffect
-// ---------------------------------------------------------------------------
+/** Run-level status values used by persist_run_state effect.
+ *  Derived from FsmStatus (transition.ts) — single source, no parallel enum.
+ *  idle excluded: only running/completed/terminated ever reach persistence. */
+export type FsmRunStatus = Exclude<import('./transition.js').FsmStatus, 'idle'>;
 
 /**
  * FSM side-effect descriptor — 3 kinds of work the api/ layer must carry out.

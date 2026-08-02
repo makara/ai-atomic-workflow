@@ -1,26 +1,26 @@
 /**
  * Unit tests for PhaseSchema — zod schema for a single phase/node definition.
  *
- * TDD red phase: PhaseSchema does not exist yet. These tests define the expected
- * API contract. Phase 3 implementation should make all tests pass.
+ * Covers: closed type enum (main/approval/flow), removed fields (retry/def/
+ * with/maxDepth/topic/context — rejected loudly), flow use
+ * requirement, type-semantics superRefine (single enforcement point).
  */
 import { describe, expect, it } from 'vitest';
 import { PhaseSchema, type Phase } from '../../src/schemas/phase.js';
 
 // ---------------------------------------------------------------------------
-// Happy path — agent and approval type with complete fields
+// Happy path — main and approval type with complete fields
 // ---------------------------------------------------------------------------
 
 describe('PhaseSchema — happy path', () => {
-  it('parses agent type with all fields', () => {
+  it('parses main type with all fields', () => {
     const raw = {
       id: 'agent-a',
-      type: 'agent',
+      type: 'main',
       dependsOn: ['phase-0'],
-      agent: 'my-agent',
+      agent: ['reviewer', 'task'],
       skill: 'skill://my-agent',
       task: 'Run analysis task',
-      retry: { max: 3, backoffMs: 200, factor: 2 },
     };
 
     const result = PhaseSchema.safeParse(raw);
@@ -28,12 +28,11 @@ describe('PhaseSchema — happy path', () => {
     if (result.success) {
       const p: Phase = result.data;
       expect(p.id).toBe('agent-a');
-      expect(p.type).toBe('agent');
+      expect(p.type).toBe('main');
       expect(p.dependsOn).toEqual(['phase-0']);
-      expect(p.agent).toBe('my-agent');
+      expect(p.agent).toEqual(['reviewer', 'task']);
       expect(p.skill).toBe('skill://my-agent');
       expect(p.task).toBe('Run analysis task');
-      expect(p.retry?.max).toBe(3);
     }
   });
 
@@ -43,7 +42,7 @@ describe('PhaseSchema — happy path', () => {
       type: 'approval',
       dependsOn: ['agent-a', 'agent-b'],
       task: 'Review the output and decide',
-      retry: { max: 2 },
+      routing: { actions: [{ action: 'continue', label: 'Go', description: 'Advance' }] },
     };
 
     const result = PhaseSchema.safeParse(raw);
@@ -55,12 +54,12 @@ describe('PhaseSchema — happy path', () => {
   });
 
   it('parses minimal phase — only id + type', () => {
-    const raw = { id: 'step-1', type: 'agent' };
+    const raw = { id: 'step-1', type: 'main' };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.id).toBe('step-1');
-      expect(result.data.type).toBe('agent');
+      expect(result.data.type).toBe('main');
       expect(result.data.dependsOn).toBeUndefined();
     }
   });
@@ -71,10 +70,16 @@ describe('PhaseSchema — happy path', () => {
 // ---------------------------------------------------------------------------
 
 describe('PhaseSchema — invalid input', () => {
-  it('accepts any type string — validation deferred to PhaseHandlerRegistry (ADR 0025)', () => {
+  it('rejects unknown type string — closed enum', () => {
     const raw = { id: 'p1', type: 'unknown' };
     const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects removed agent type', () => {
+    const raw = { id: 'p1', type: 'agent' };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
   });
 
   it('rejects type that is not a string', () => {
@@ -84,25 +89,25 @@ describe('PhaseSchema — invalid input', () => {
   });
 
   it('rejects missing id', () => {
-    const raw = { type: 'agent' };
+    const raw = { type: 'main' };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
   });
 
   it('rejects id that is not a string', () => {
-    const raw = { id: null, type: 'agent' };
+    const raw = { id: null, type: 'main' };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
   });
 
   it('rejects dependsOn that is not an array', () => {
-    const raw = { id: 'p1', type: 'agent', dependsOn: 'phase-0' };
+    const raw = { id: 'p1', type: 'main', dependsOn: 'phase-0' };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
   });
 
   it('rejects dependsOn containing non-string elements', () => {
-    const raw = { id: 'p1', type: 'agent', dependsOn: ['valid', 42] };
+    const raw = { id: 'p1', type: 'main', dependsOn: ['valid', 42] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
   });
@@ -114,25 +119,101 @@ describe('PhaseSchema — invalid input', () => {
     expect(PhaseSchema.safeParse(undefined).success).toBe(false);
     expect(PhaseSchema.safeParse([]).success).toBe(false);
   });
+});
 
-  it('rejects retry with missing max', () => {
+// ---------------------------------------------------------------------------
+// Removed fields — rejected loudly, never functional
+// ---------------------------------------------------------------------------
+
+describe('PhaseSchema — removed fields rejected loudly', () => {
+  it('rejects retry — no retry config surface', () => {
+    const raw = { id: 'p1', type: 'main', task: 'x', retry: { max: 3 } };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(result.error.issues.some((i) => i.path.join('.') === 'retry')).toBe(true);
+  });
+
+  it('rejects topic — approval title comes from task', () => {
+    const raw = { id: 'approval-1', type: 'approval', topic: 'My Topic' };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(result.error.issues.some((i) => i.path.join('.') === 'topic')).toBe(true);
+  });
+
+  it('rejects legacy context field', () => {
+    const raw = { id: 'p1', type: 'main', task: 'x', context: ['legacy'] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(result.error.issues.some((i) => i.path.join('.') === 'context')).toBe(true);
+  });
+
+  it('rejects flow with/maxDepth/def — flow requires use only', () => {
+    const raw = { id: 'f1', type: 'flow', use: 'child', with: { k: 'v' }, maxDepth: 3, def: { phases: [] } };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    const paths = result.error.issues.map((i) => i.path.join('.'));
+    expect(paths).toContain('with');
+    expect(paths).toContain('maxDepth');
+    expect(paths).toContain('def');
+  });
+
+  it('rejects routing.context', () => {
     const raw = {
-      id: 'p1',
-      type: 'agent',
-      retry: { backoffMs: 100 },
+      id: 'approval-1',
+      type: 'approval',
+      routing: { actions: [{ action: 'continue', label: 'Go', description: 'Advance' }], context: ['legacy'] },
     };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(result.error.issues.some((i) => i.path.join('.') === 'routing.context')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Type-semantics superRefine — single enforcement point
+// ---------------------------------------------------------------------------
+
+describe('PhaseSchema — type semantics', () => {
+  it('rejects preText on main type', () => {
+    const raw = { id: 'p1', type: 'main', task: 'x', preText: 'card text' };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
   });
 
-  it('rejects retry.max that is not a number', () => {
+  it('rejects channels on approval type', () => {
+    const raw = { id: 'approval-1', type: 'approval', channels: ['x'] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects agent hints on approval type', () => {
+    const raw = { id: 'approval-1', type: 'approval', agent: ['reviewer', 'task'] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    const messages = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('\n');
+    expect(messages).toContain('approval');
+    expect(messages).toContain('agent');
+  });
+
+  it('rejects eval on main type — approval-only field', () => {
     const raw = {
       id: 'p1',
-      type: 'agent',
-      retry: { max: 'three' },
+      type: 'main',
+      task: 'x',
+      eval: [{ when: 'x', action: 'retry', target: 'w' }],
     };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
+    expect(result.error.issues.some((i) => i.path.join('.') === 'eval')).toBe(true);
+  });
+
+  it('accepts eval on approval type', () => {
+    const raw = {
+      id: 'a1',
+      type: 'approval',
+      eval: [{ when: 'x', action: 'retry', target: 'w' }],
+    };
+    expect(PhaseSchema.safeParse(raw).success).toBe(true);
   });
 });
 
@@ -142,7 +223,7 @@ describe('PhaseSchema — invalid input', () => {
 
 describe('PhaseSchema — boundary', () => {
   it('allows empty dependsOn array', () => {
-    const raw = { id: 'p1', type: 'agent', dependsOn: [] };
+    const raw = { id: 'p1', type: 'main', dependsOn: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -151,7 +232,7 @@ describe('PhaseSchema — boundary', () => {
   });
 
   it('allows absent skill field', () => {
-    const raw = { id: 'p1', type: 'agent' };
+    const raw = { id: 'p1', type: 'main' };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -159,30 +240,21 @@ describe('PhaseSchema — boundary', () => {
     }
   });
 
-  it('allows absent agent field on approval type', () => {
-    const raw = { id: 'approval-1', type: 'approval' };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.agent).toBeUndefined();
-    }
-  });
-
   it('allows empty string id', () => {
     // zod string() allows empty strings by default — no min(1) constraint
-    const raw = { id: '', type: 'agent' };
+    const raw = { id: '', type: 'main' };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
   });
 });
 
 // ---------------------------------------------------------------------------
-// ADR 0036 — join mode + when guard
+// join mode + when guard
 // ---------------------------------------------------------------------------
 
-describe('PhaseSchema — ADR 0036 join mode', () => {
+describe('PhaseSchema — join mode', () => {
   it('parses join: "all" (default)', () => {
-    const raw = { id: 'p1', type: 'agent', join: 'all' };
+    const raw = { id: 'p1', type: 'main', join: 'all' };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -191,7 +263,7 @@ describe('PhaseSchema — ADR 0036 join mode', () => {
   });
 
   it('parses join: "any"', () => {
-    const raw = { id: 'p1', type: 'agent', join: 'any' };
+    const raw = { id: 'p1', type: 'main', join: 'any' };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -200,7 +272,7 @@ describe('PhaseSchema — ADR 0036 join mode', () => {
   });
 
   it('defaults join to "all" when absent', () => {
-    const raw = { id: 'p1', type: 'agent' };
+    const raw = { id: 'p1', type: 'main' };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -209,21 +281,21 @@ describe('PhaseSchema — ADR 0036 join mode', () => {
   });
 
   it('rejects invalid join value', () => {
-    const raw = { id: 'p1', type: 'agent', join: 'none' };
+    const raw = { id: 'p1', type: 'main', join: 'none' };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
   });
 
   it('rejects join that is not a string', () => {
-    const raw = { id: 'p1', type: 'agent', join: 42 };
+    const raw = { id: 'p1', type: 'main', join: 42 };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
   });
 });
 
-describe('PhaseSchema — ADR 0036 when guard', () => {
+describe('PhaseSchema — when guard', () => {
   it('parses when string field', () => {
-    const raw = { id: 'p1', type: 'agent', when: 'upstream output indicates skip' };
+    const raw = { id: 'p1', type: 'main', when: 'upstream output indicates skip' };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -232,7 +304,7 @@ describe('PhaseSchema — ADR 0036 when guard', () => {
   });
 
   it('allows absent when field', () => {
-    const raw = { id: 'p1', type: 'agent' };
+    const raw = { id: 'p1', type: 'main' };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -241,27 +313,17 @@ describe('PhaseSchema — ADR 0036 when guard', () => {
   });
 
   it('rejects when that is not a string', () => {
-    const raw = { id: 'p1', type: 'agent', when: true };
+    const raw = { id: 'p1', type: 'main', when: true };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
-  });
-
-  it('allows when with join together', () => {
-    const raw = { id: 'p1', type: 'agent', join: 'any', when: 'condition' };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.join).toBe('any');
-      expect(result.data.when).toBe('condition');
-    }
   });
 });
 
 // ---------------------------------------------------------------------------
-// ADR 0043 — flow phase type fields
+// flow phase type — use required
 // ---------------------------------------------------------------------------
 
-describe('PhaseSchema — ADR 0043 flow phase type', () => {
+describe('PhaseSchema — flow phase type', () => {
   it('parses flow type with use field', () => {
     const raw = { id: 'skill-ops', type: 'flow', use: 'skill-create', dependsOn: [] };
     const result = PhaseSchema.safeParse(raw);
@@ -271,55 +333,14 @@ describe('PhaseSchema — ADR 0043 flow phase type', () => {
     }
   });
 
-  it('parses flow type with def field', () => {
-    const raw = { id: 'inline', type: 'flow', def: { phases: [{ id: 'a', type: 'agent' }] }, dependsOn: [] };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.def).toEqual({ phases: [{ id: 'a', type: 'agent' }] });
-    }
-  });
-
-  it('parses flow type with with and maxDepth', () => {
-    const raw = {
-      id: 'skill-ops',
-      type: 'flow',
-      use: 'skill-create',
-      with: { key: 'value' },
-      maxDepth: 3,
-      dependsOn: [],
-    };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.with).toEqual({ key: 'value' });
-      expect(result.data.maxDepth).toBe(3);
-    }
-  });
-
-  it('defaults maxDepth to 5', () => {
-    const raw = { id: 'skill-ops', type: 'flow', use: 'skill-create', dependsOn: [] };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.maxDepth).toBe(5);
-    }
-  });
-
-  it('rejects both use and def together', () => {
-    const raw = { id: 'bad', type: 'flow', use: 'g1', def: { phases: [] }, dependsOn: [] };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects flow type without use or def', () => {
+  it('rejects flow type without use — def removed, use mandatory', () => {
     const raw = { id: 'bad', type: 'flow', dependsOn: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
   });
 
-  it('accepts non-flow types without use/def (backward compat)', () => {
-    const raw = { id: 'agent-1', type: 'agent', task: 'do it', dependsOn: [] };
+  it('accepts non-flow types without use (backward compat)', () => {
+    const raw = { id: 'agent-1', type: 'main', task: 'do it', dependsOn: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
   });

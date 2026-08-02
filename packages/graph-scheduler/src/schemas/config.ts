@@ -1,5 +1,4 @@
 import { z } from 'zod/v4';
-import { AgentRegistryEntrySchema } from './registry-entry.js';
 
 /**
  * Zod schema for graph-scheduler config.json.
@@ -8,24 +7,42 @@ import { AgentRegistryEntrySchema } from './registry-entry.js';
  *
  * This is the single source of truth shared by:
  * - MCP Server (scheduler-runtime.ts → resolveConfig)
- * - CLI (src/cli/validate.ts, src/cli/show.ts)
+ * - setup-atomic-workflow skill seed (derived from createDefaultConfig)
  */
-export const ConfigFileSchema = z.object({
-  /** libsql database file path — relative to project root */
-  dbPath: z.string().min(1).optional(),
+export const ConfigFileSchema = z
+  .object({
+    /** libsql database file path — relative to project root */
+    dbPath: z.string().min(1).optional(),
 
-  /** graph definition file directory — FileSystem layer base path */
-  taskflowDir: z.string().min(1).optional(),
+    /** graph definition file directory — FileSystem layer base path */
+    taskflowDir: z.string().min(1).optional(),
 
-  /** registry.json search paths — later entries override earlier ones */
-  registryPaths: z.array(z.string().min(1)).optional(),
+    /** registry.json search paths — later entries override earlier ones */
+    registryPaths: z.array(z.string().min(1)).optional(),
 
-  /**
-   * node type → agent config registry — project ∪ builtin merge.
-   * Each entry: { type, skill, agent? } — no strategy field (ADR 0028).
-   */
-  agentRegistry: z.array(AgentRegistryEntrySchema).optional(),
-});
+    /**
+     * graph-workflow skills package directory — load-time entry-skill alignment
+     * and graph_init validation prefer it; absent → repo-root + package-sibling
+     * probing. Global installs point this at the skills package.
+     */
+    skillsDir: z.string().min(1).optional(),
+
+    /**
+     * Removed field — declared so legacy configs fail loudly with a rename
+     * hint instead of silent strip. Never consumed.
+     */
+    agentRegistry: z.unknown().optional(),
+  })
+  .superRefine((data, ctx) => {
+    // agentRegistry removed — reject explicitly, never strip silently.
+    if (data.agentRegistry !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['agentRegistry'],
+        message: `'agentRegistry' is removed — dispatch handler is the constant atom-phase-handler; delete this field`,
+      });
+    }
+  });
 
 /** Configuration for createRuntime / CLI — inferred from ConfigFileSchema. */
 export type SchedulerConfig = z.infer<typeof ConfigFileSchema>;

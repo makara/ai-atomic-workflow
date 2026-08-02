@@ -1,5 +1,0 @@
-[
-  { "type": "main", "skill": "atom-phase-handler" },
-  { "type": "agent", "skill": "atom-phase-agent", "agent": "task" },
-  { "type": "approval", "skill": "atom-phase-handler" }
-]

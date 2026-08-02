@@ -1,0 +1,5 @@
+{
+  "dbPath": ".graph-scheduler/data/graph-scheduler.db",
+  "taskflowDir": ".graph-scheduler/graphs",
+  "registryPaths": [".graph-scheduler/graphs/registry.json"]
+}

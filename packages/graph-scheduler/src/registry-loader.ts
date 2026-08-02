@@ -11,14 +11,9 @@
 import { Context, Effect } from 'effect';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { debugLog } from './debug.js';
-import { FileSystemError } from './filesystem.js';
-import { FileSystem } from './graph-definition.js';
+import { FileSystem, FileSystemError } from './filesystem.js';
 import { RegistryEntrySchema } from './schemas/index.js';
-import type { GraphDefinitionError, Registry, RegistryEntry, RegistryLoadError } from './types.js';
-
-// ---------------------------------------------------------------------------
-// Tag
-// ---------------------------------------------------------------------------
+import type { GraphDefinitionError, RegistryEntry, RegistryLoadError } from './types.js';
 
 /**
  * RegistryLoader Context.Tag — injectable registry I/O.
@@ -29,11 +24,6 @@ import type { GraphDefinitionError, Registry, RegistryEntry, RegistryLoadError }
 export class RegistryLoader extends Context.Tag('RegistryLoader')<
   RegistryLoader,
   {
-    /** Load and merge registry files into a unified index. */
-    readonly loadRegistries: (
-      paths: ReadonlyArray<string>,
-    ) => Effect.Effect<Map<string, RegistryEntry>, RegistryLoadError, FileSystem>;
-
     /** Resolve graph name → file path via merged registry. */
     readonly resolveGraph: (
       graphName: string,
@@ -43,10 +33,6 @@ export class RegistryLoader extends Context.Tag('RegistryLoader')<
     readonly registry: Effect.Effect<Map<string, RegistryEntry>, RegistryLoadError, FileSystem>;
   }
 >() {}
-
-// ---------------------------------------------------------------------------
-// Internal: merge a single registry file into the accumulator map
-// ---------------------------------------------------------------------------
 
 /**
  * Read and merge one registry.json into `merged`.
@@ -126,43 +112,30 @@ function mergeOneRegistry(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Service factory
-// ---------------------------------------------------------------------------
-
 /**
  * Build a RegistryLoader service from a list of registry paths.
+ *
+ * Registries are re-read on every call — the registry set is small
+ * (~10 entries), so caching buys nothing and stale caches silently
+ * ignore runtime registry.json changes.
  *
  * The returned object conforms to RegistryLoader['Type'] and can be
  * injected via Layer.succeed.
  */
 export function makeRegistryLoader(registryPaths: ReadonlyArray<string>): RegistryLoader['Type'] {
-  let cachedRegistry: Map<string, RegistryEntry> | null = null;
+  const loadAll = (): Effect.Effect<Map<string, RegistryEntry>, RegistryLoadError, FileSystem> =>
+    Effect.gen(function* () {
+      const merged = new Map<string, RegistryEntry>();
+      for (const p of registryPaths) {
+        yield* mergeOneRegistry(merged, p);
+      }
+      return merged;
+    });
 
   return {
-    loadRegistries: (paths: ReadonlyArray<string>) =>
-      Effect.gen(function* () {
-        debugLog('load', { event: 'loadRegistries', paths });
-        const merged = new Map<string, RegistryEntry>();
-        for (const p of paths) {
-          yield* mergeOneRegistry(merged, p);
-        }
-        cachedRegistry = merged;
-        return merged;
-      }),
-
     resolveGraph: (graphName: string) =>
       Effect.gen(function* () {
-        const merged =
-          cachedRegistry ??
-          (yield* Effect.gen(function* () {
-            const m = new Map<string, RegistryEntry>();
-            for (const p of registryPaths) {
-              yield* mergeOneRegistry(m, p);
-            }
-            cachedRegistry = m;
-            return m;
-          }));
+        const merged = yield* loadAll();
 
         const entry = merged.get(graphName);
         if (!entry) {
@@ -176,14 +149,6 @@ export function makeRegistryLoader(registryPaths: ReadonlyArray<string>): Regist
         return entry.path;
       }),
 
-    registry: Effect.gen(function* () {
-      if (cachedRegistry) return cachedRegistry;
-      const m = new Map<string, RegistryEntry>();
-      for (const p of registryPaths) {
-        yield* mergeOneRegistry(m, p);
-      }
-      cachedRegistry = m;
-      return m;
-    }),
+    registry: loadAll(),
   };
 }

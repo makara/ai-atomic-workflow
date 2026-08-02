@@ -1,44 +1,54 @@
 /**
- * PhaseHandler barrel — exports + default registration Layer.
+ * PhaseHandler barrel — exports + static type dispatch.
  *
- * Import registerDefaultPhaseHandlersLayer and compose into createRuntime() envLayer.
- * Replaces legacy registerDefaultPhaseHandlers() (global mutable state).
+ * main/approval handlers are resolved statically by type — no registry
+ * service (registry collapsed). Dispatch helpers live here:
+ * resolvePhaseHandler (throws UnknownPhaseTypeError for unregistered types).
  *
  * @module
  */
 
-export { agentPhaseHandler } from './agent-handler.js';
 export { approvalPhaseHandler } from './approval-handler.js';
+export { PhaseHandlerError, UnknownPhaseTypeError } from './errors.js';
 export { mainPhaseHandler } from './main-handler.js';
-export { makePhaseHandlerRegistryLayer, makePhaseHandlerRegistryService, PhaseHandlerRegistry } from './registry.js';
-export { DuplicatePhaseHandlerError, PhaseHandlerError, UnknownPhaseTypeError } from './types.js';
 export type {
   IApprovalAction,
   IApprovalDecision,
   IBaseNodeDetail,
+  IEvalCondition,
   IFsmNodeState,
   INodeDetail,
   IPhaseHandler,
 } from './types.js';
 
-import { Layer } from 'effect';
-import { agentPhaseHandler } from './agent-handler.js';
+import type { Phase } from '../schemas/index.js';
 import { approvalPhaseHandler } from './approval-handler.js';
+import { UnknownPhaseTypeError } from './errors.js';
 import { mainPhaseHandler } from './main-handler.js';
-import { makePhaseHandlerRegistryService, PhaseHandlerRegistry } from './registry.js';
 import type { IPhaseHandler } from './types.js';
 
 /**
- * Register all built-in phase handlers and return a Layer.
+ * Static handler map — single source for the enabled type set.
  *
- * Creates a fresh Map, registers main/agent/approval handlers directly,
- * and returns a Layer providing the populated PhaseHandlerRegistry.
- * Call once in createRuntime() — each call yields an independent registry.
+ * Built-in dispatch types: main/approval (always present). Flow is a
+ * load-time composition type, not a dispatch type. Unknown types fail
+ * via UnknownPhaseTypeError — never a silent pass-through.
  */
-export function registerDefaultPhaseHandlersLayer(): Layer.Layer<PhaseHandlerRegistry, never, never> {
-  const map = new Map<string, IPhaseHandler>();
-  map.set(mainPhaseHandler.phaseType, mainPhaseHandler);
-  map.set(agentPhaseHandler.phaseType, agentPhaseHandler);
-  map.set(approvalPhaseHandler.phaseType, approvalPhaseHandler);
-  return Layer.succeed(PhaseHandlerRegistry, makePhaseHandlerRegistryService(map));
+const HANDLERS: Readonly<Record<string, IPhaseHandler>> = {
+  main: mainPhaseHandler,
+  approval: approvalPhaseHandler,
+};
+
+/** Resolve a phase handler by type — throws UnknownPhaseTypeError for unknown types. */
+export function resolvePhaseHandler(phaseType: string): IPhaseHandler {
+  const handler = HANDLERS[phaseType];
+  if (!handler) {
+    throw new UnknownPhaseTypeError(phaseType, Object.keys(HANDLERS));
+  }
+  return handler;
+}
+
+/** Run a phase through its handler's validate() — schema parse has already run. */
+export function validatePhase(phase: Phase): Phase {
+  return resolvePhaseHandler(phase.type).validate(phase);
 }

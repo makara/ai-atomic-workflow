@@ -3,22 +3,62 @@
     {
       "name": "e2e-minimal",
       "path": "e2e-minimal.taskflow.yaml",
-      "description": "Minimal E2E: agent → approval loop"
+      "description": "Minimal E2E: main → approval loop"
     },
     {
       "name": "arch-review",
       "path": "arch-review.taskflow.yaml",
-      "description": "Architecture review: scope detect → grill → markdown report"
+      "description": "Architecture review: scope detect -> architecture review report"
     },
     {
-      "name": "skill-create",
-      "path": "skill-create.taskflow.yaml",
-      "description": "Skill creation: interview → analysis → DDD → write → review → approve → examples"
+      "name": "skill-author",
+      "path": "skill-author.taskflow.yaml",
+      "description": "Skill authoring: create or edit — scope → write → review → approve → output"
     },
     {
-      "name": "skill-edit",
-      "path": "skill-edit.taskflow.yaml",
-      "description": "Skill editing: select → scope → analysis → DDD → in-place write → review → approve → diff"
+      "name": "skill-delete",
+      "path": "skill-delete.taskflow.yaml",
+      "description": "Skill deletion: select → impact analysis → confirm → execute → review → approve"
+    },
+    {
+      "name": "graph-generate",
+      "path": "graph-generate.taskflow.yaml",
+      "description": "Graph generation: interview → design → write → review → approve → examples"
+    },
+    {
+      "name": "doc-update",
+      "path": "doc-update.taskflow.yaml",
+      "description": "Document update: interview → analyze → confirm → write → review → approve"
+    },
+    {
+      "name": "plan-generate",
+      "path": "plan-generate.taskflow.yaml",
+      "description": "Generic plan generation: scope interview -> to-spec PRD -> optional to-tickets split. Reusable via flow type by orchestration graphs."
+    },
+    {
+      "name": "openspec-create",
+      "path": "openspec-create.taskflow.yaml",
+      "description": "OpenSpec spec creation pipeline: scope interview with input source detection -> approval gate -> arch-decision step -> openspec propose CLI delegation"
+    },
+    {
+      "name": "arch-review-to-spec",
+      "path": "arch-review-to-spec.taskflow.yaml",
+      "description": "Composed pipeline: architecture review -> decision gate (spec or document only) -> optional spec generation"
+    },
+    {
+      "name": "skill-change-workflow",
+      "path": "skill-change-workflow.taskflow.yaml",
+      "description": "Orchestrated skill change: plan → flow phases (author + delete + doc) → cross review → approval"
+    },
+    {
+      "name": "openspec-apply",
+      "path": "openspec-apply.taskflow.yaml",
+      "description": "OpenSpec apply pipeline: apply change → dual review → bounded auto-rework gate → archive"
+    },
+    {
+      "name": "openspec-pipeline",
+      "path": "openspec-pipeline.taskflow.yaml",
+      "description": "OpenSpec lifecycle pipeline: spec creation (openspec-create) → human approval gate → implementation (openspec-apply)"
     }
   ]
 }

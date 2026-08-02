@@ -1,48 +1,37 @@
 name: arch-review
-version: 1
 phases:
   # Detect review scope and confirm with user via consensus interview
   - id: scope-detect
     type: main
     dependsOn: []
+    skill: atom-scope-interview
+    channels:
+      - ./CONTEXT.md
     task: |
-      Load skill://atom-kernel. Conduct consensus interview per atom-kernel §interview() behavior contract to confirm architecture review scope.
+      Execute scope interview per skill://atom-scope-interview (load atom-kernel).
 
-      1. Search conversation for user-provided scope — topic, domain, feature, problem, goal, or specific paths/files.
-      2. If scope found:
-        - Conduct consensus interview: confirm scope per interview() behavior contract.
-        - Confirm scope topic (domain, feature, problem, or goal — conceptual, not file paths).
-        - Confirm focus dimensions (depth/coupling/testability/naming/duplication).
-        - Confirm output path for final report.
-        - Do NOT ask user for file paths — paths are discovered during review.
-        - Only confirm paths if user explicitly provided specific files to review.
-        - Do NOT add, remove, or re-analyze — user scope is authoritative.
-      3. If scope not found:
-        - Analyze project: read CONTEXT.md for domain model, list docs/adr/ for existing decisions.
-        - Identify conceptual scope — which domain, feature, or problem area to review.
-        - Suggest scope proposal with rationale (conceptual scope, not file paths).
-        - Recommend focus dimensions based on project context.
-        - Conduct consensus interview: propose and confirm scope per interview() behavior contract.
-      4. After consensus, write confirmed scope to .taskflow/outputs/scope-detect.output.txt:
-        scope: <confirmed topic — conceptual scope or user-provided paths>
-        focus: <confirmed focus>
-        output: <confirmed output path>
+      Topics: architecture review domain/feature/problem; focus dimensions (depth/coupling/testability/naming/duplication); output path — MUST be explicitly confirmed by user.
+
+      Output: scope, focus, output.
 
   # Execute architecture review with confirmed scope
   - id: arch-review
-    type: agent
+    type: main
     dependsOn: [scope-detect]
-    skill: atom-arch-review
+    skill: improve-codebase-architecture
+    agent: [scout, task]
+    channels:
+      - ./CONTEXT.md
+      - docs/adr/*.md
+      - skill:codebase-design
     task: |
-      Execute architecture review per skill://improve-codebase-architecture.
+      Execute architecture review per improve-codebase-architecture (use ## Agent hints for the Explore sub-agent).
 
-      Scope: read from .taskflow/outputs/scope-detect.output.txt
-      Output format: markdown (NOT HTML)
-      Output path: read from scope proposal
-
-      For each finding, render markdown card with files, problem, solution,
-      benefits (locality + leverage + testability), and recommendation strength.
-      End with Top recommendation section.
-    context:
-      - .taskflow/outputs/scope-detect.output.txt
-      - CONTEXT.md
+      Scope: read scope-detect output (injected) — confirmed output path + focus.
+      Artifact: review scope (injected); Standards: CONTEXT.md vocabulary + codebase-design terms.
+      Output contract: markdown (NOT HTML) written to confirmed output path.
+      For each finding, render markdown card — Files / Problem / Solution /
+      Benefits (locality + leverage + testability) / Recommendation strength
+      (Strong | Worth exploring | Speculative).
+      End with Top recommendation + Decision Request section (Context,
+      Auto-recorded debt, Blocking findings, Dispatch record, Suggested advance label).

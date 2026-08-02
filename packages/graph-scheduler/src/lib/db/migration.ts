@@ -1,9 +1,10 @@
 /**
- * Versioned database migration — forward-only, idempotent v1 init.
+ * Database initialization — single consolidated version.
  *
  * Tracks applied version in a `schema_version` meta-table.
- * Each migration step is a DDL array executed in order;
- * run from current version up to SCHEMA_VERSION.
+ * v1: full schema (graph_runs + node_states + topo index). Fresh databases
+ * initialize in one step; older databases are disposable run state and are
+ * never upgraded (release recreates them).
  *
  * @module
  */
@@ -13,7 +14,7 @@ import Database from 'libsql';
 import { debugLog } from '../../debug.js';
 import type { PersistenceError } from '../../types.js';
 import { tryDb } from './helpers.js';
-import { SCHEMA_VERSION, V1_DDL, V2_DDL, V3_DDL } from './schema.js';
+import { SCHEMA_VERSION, V1_DDL } from './schema.js';
 
 /** Ensure the schema_version meta-table exists (idempotent). */
 function ensureVersionTable(db: ReturnType<typeof Database>): void {
@@ -24,10 +25,6 @@ function ensureVersionTable(db: ReturnType<typeof Database>): void {
     )
   `);
 }
-
-// ---------------------------------------------------------------------------
-// Public functions
-// ---------------------------------------------------------------------------
 
 /**
  * Query the currently applied schema version.
@@ -47,13 +44,13 @@ export function currentVersion(db: ReturnType<typeof Database>): Effect.Effect<n
 }
 
 /**
- * Apply all pending forward migrations up to SCHEMA_VERSION.
+ * Initialize the database up to SCHEMA_VERSION.
  *
- * Idempotent — skips already-applied versions. Each migration
- * runs inside a transaction.
+ * Idempotent — no-op once the applied version is >= SCHEMA_VERSION.
+ * Runs inside a transaction.
  *
  * @param db — open libsql Database handle
- * @returns Effect that completes when migrations are up to date
+ * @returns Effect that completes when the database is initialized
  */
 export function migrate(db: ReturnType<typeof Database>): Effect.Effect<void, PersistenceError> {
   return Effect.gen(function* () {
@@ -64,46 +61,16 @@ export function migrate(db: ReturnType<typeof Database>): Effect.Effect<void, Pe
       return;
     }
 
-    // v1: initial schema
-    if (version < 1) {
-      yield* tryDb('migrate_v1', () => {
-        db.transaction(() => {
-          for (const ddl of V1_DDL) {
-            db.exec(ddl);
-          }
-          db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (1, ?)').run(new Date().toISOString());
-        })();
-      });
-      debugLog('runtime', { event: 'migration_applied', from: version, to: 1 });
-    }
-
-    // v2: add error column to node_states (idempotent — may already exist from pre-fix V1)
-    if (version < 2) {
-      yield* tryDb('migrate_v2', () => {
-        // Check if error column already exists (e.g. from V1 before schema.ts fix)
-        const cols = db.prepare("PRAGMA table_info('node_states')").all() as ReadonlyArray<{ name: string }>;
-        const hasError = cols.some((c) => c.name === 'error');
-        if (!hasError) {
-          db.exec(V2_DDL[0]);
+    // Single consolidated init — no versioned migration ladder (databases are disposable run state).
+    yield* tryDb('migrate_v1', () => {
+      db.transaction(() => {
+        for (const ddl of V1_DDL) {
+          db.exec(ddl);
         }
-        db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (2, ?)').run(new Date().toISOString());
-      });
-      debugLog('runtime', { event: 'migration_applied', from: version, to: 2 });
-    }
-
-    // v3: drop output and error columns — graph-scheduler tracks topology only
-    if (version < 3) {
-      yield* tryDb('migrate_v3', () => {
-        // Check if output column exists (may have been added by V1)
-        const cols = db.prepare("PRAGMA table_info('node_states')").all() as ReadonlyArray<{ name: string }>;
-        const hasOutput = cols.some((c) => c.name === 'output');
-        const hasError = cols.some((c) => c.name === 'error');
-        if (hasOutput) db.exec(V3_DDL[0]);
-        if (hasError) db.exec(V3_DDL[1]);
-        db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (3, ?)').run(new Date().toISOString());
-      });
-      debugLog('runtime', { event: 'migration_applied', from: version, to: 3 });
-    }
+        db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (1, ?)').run(new Date().toISOString());
+      })();
+    });
+    debugLog('runtime', { event: 'migration_applied', from: version, to: 1 });
 
     debugLog('runtime', { event: 'migration_complete', version: SCHEMA_VERSION });
   });

@@ -1,0 +1,40 @@
+name: openspec-pipeline
+phases:
+  # Stage 1: Spec creation — scope interview → approval gate → arch-decision → spec generation
+  - id: create
+    type: flow
+    use: openspec-create
+    dependsOn: []
+
+  # Stage 2: Middle gate — human decision on generated spec, connects creation to implementation.
+  # No eval: auto-rework would jump into spec-generate whose upstream includes the interactive
+  # spec-accept-scope gate (auto loop stalls at a human question); the gate is inherently the
+  # human's spec-quality decision. Targets use flattened ids for writer precision.
+  - id: pipeline-accept
+    type: approval
+    dependsOn: [create]
+    task: 'Spec approval'
+    preText: |
+      openspec-create generated the change spec. Verify the artifacts
+      (validation_result, delta specs). Continue → openspec-apply
+      implements, dual-reviews, archives. Regenerate → re-run spec
+      generation from the same scope. Restart → re-interview scope.
+    routing:
+      actions:
+        - action: continue
+          label: 'Proceed to implementation'
+          description: 'Spec approved — delegate to openspec-apply'
+        - action: retry
+          target: create/spec-generate
+          label: 'Regenerate spec'
+          description: 'Spec artifacts need regeneration from same scope'
+        - action: jump
+          target: create/spec-scope
+          label: 'Restart from scope'
+          description: 'Scope or inputs wrong — re-run scope interview'
+
+  # Stage 3: Apply — implement → dual review → bounded auto-rework gate → archive
+  - id: apply
+    type: flow
+    use: openspec-apply
+    dependsOn: [pipeline-accept]

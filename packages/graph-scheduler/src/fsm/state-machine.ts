@@ -1,47 +1,15 @@
 /**
- * FSM state machine engine — event validation + transition delegation.
+ * FSM event legality — pure validation helper.
  *
- * Layer 1 — thin wrapper around transition(). Core logic is event legality
- * checking per the state×event matrix. Zero Effect dependency, zero I/O.
- *
- * Dependencies:
- * - Layer 1: fsm/transition (transition, FsmState, TransitionResult, TaskflowGraph)
- * - Layer 1: fsm/events (FsmEvent)
+ * Layer 1 — checks a state×event pair against the legality matrix before
+ * dispatch. The actual transition logic lives in transition(); this module
+ * only answers "is this event legal in this state?". Zero Effect dependency,
+ * zero I/O, no mutable state.
  *
  * @module
  */
 
-import type { FsmEvent } from './events.js';
-import {
-  InvalidStateTransitionError,
-  transition,
-  type FsmState,
-  type TaskflowGraph,
-  type TransitionResult,
-} from './transition.js';
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-/**
- * State machine handle — returned by createStateMachine().
- *
- * dispatch() validates the event against the current state, delegates to
- * transition(), updates internal state, and returns the result.
- * getState() returns a read-only snapshot of the current FSM state.
- */
-export interface IStateMachine {
-  /** Dispatch an event — validates, transitions, updates internal state. */
-  dispatch(event: FsmEvent): TransitionResult;
-
-  /** Return a read-only snapshot of the current FSM state. */
-  getState(): FsmState;
-}
-
-// ---------------------------------------------------------------------------
-// Event legality matrix
-// ---------------------------------------------------------------------------
+import { InvalidStateTransitionError } from './transition.js';
 
 /**
  * State × event legality map.
@@ -60,46 +28,30 @@ const LEGAL_EVENTS: Record<string, ReadonlySet<string>> = {
   terminated: new Set(),
 };
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
+/**
+ * Check whether an event type is legal in a given run state.
+ *
+ * Callers run this check before calling transition() — fail-fast with a
+ * clear error instead of letting transition() reject mid-dispatch.
+ *
+ * @param status    current run status (FsmStatus value)
+ * @param eventType event type to check
+ * @returns true when the event is legal in the given state
+ */
+export function isLegalTransition(status: string, eventType: string): boolean {
+  const legal = LEGAL_EVENTS[status];
+  return legal !== undefined && legal.has(eventType);
+}
 
 /**
- * Create a new FSM state machine instance.
+ * Validate an event against the current state, throwing
+ * InvalidStateTransitionError when illegal.
  *
- * Default initial state is `{ status: 'idle' }`. An optional `initialState`
- * can be passed to reconstruct state from persistence (e.g., for
- * graphAdvance/graphJump/graphForceEnd). The machine holds the current
- * state internally and updates it on each dispatch() call.
- *
- * The graph is passed through to transition() on every dispatch.
- *
- * @param graph         graph definition (phases + metadata)
- * @param initialState  optional initial FSM state; defaults to `{ status: 'idle' }`
- * @returns state machine handle with dispatch() and getState()
+ * Convenience wrapper over isLegalTransition for dispatch paths that want
+ * the error thrown at the call site (e.g. Effect.suspend boundaries).
  */
-export function createStateMachine(graph: TaskflowGraph, initialState?: FsmState): IStateMachine {
-  let currentState: FsmState = initialState ?? { status: 'idle' };
-
-  return {
-    dispatch(event: FsmEvent): TransitionResult {
-      // Validate event legality
-      const legal = LEGAL_EVENTS[currentState.status];
-      if (!legal || !legal.has(event.type)) {
-        throw new InvalidStateTransitionError(currentState.status, event.type);
-      }
-
-      // Delegate to pure transition
-      const result = transition(currentState, event, graph);
-
-      // Update internal state
-      currentState = result.nextState;
-
-      return result;
-    },
-
-    getState(): FsmState {
-      return currentState;
-    },
-  };
+export function assertLegalTransition(status: string, eventType: string): void {
+  if (!isLegalTransition(status, eventType)) {
+    throw new InvalidStateTransitionError(status, eventType);
+  }
 }

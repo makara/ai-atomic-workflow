@@ -10,8 +10,9 @@
 
 import { Effect, Exit, Layer } from 'effect';
 import { describe, expect, it } from 'vitest';
-import { FileSystemError } from '../src/filesystem.js';
-import { FileSystem, loadGraph } from '../src/graph-definition.js';
+import { FileSystem, FileSystemError } from '../src/filesystem.js';
+import { resolveArgs } from '../src/flow-flatten.js';
+import { loadGraph } from '../src/graph-definition.js';
 import type { GraphDefinitionError } from '../src/types.js';
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
@@ -22,13 +23,11 @@ function validTaskflowYaml(): string {
 description: A test graph
 phases:
   - id: agent-init
-    type: agent
-    agent: init-agent
+    type: main
     task: |
       Initialize {args.mode}
   - id: agent-verify
-    type: agent
-    agent: verify-agent
+    type: main
     task: |
       Verify {steps.agent-init.output}
     dependsOn:
@@ -98,5 +97,26 @@ describe('loadGraph', () => {
     if (Exit.isSuccess(exit)) {
       expect(exit.value.name).toBe('test-graph');
     }
+  });
+});
+
+describe('resolveArgs — {args.X} interpolation', () => {
+  it('resolves known keys from run invocation args', () => {
+    const out = resolveArgs('Use change {args.changeName} now', { changeName: 'foo-bar' });
+    expect(out).toBe('Use change foo-bar now');
+  });
+
+  it('keeps unmatched keys as-is for debugging', () => {
+    const out = resolveArgs('Use {args.missing}', { changeName: 'foo' });
+    expect(out).toBe('Use {args.missing}');
+  });
+
+  it('returns text unchanged when args absent', () => {
+    expect(resolveArgs('plain text', undefined)).toBe('plain text');
+    expect(resolveArgs(undefined, { a: 'b' })).toBeUndefined();
+  });
+
+  it('stringifies non-string arg values', () => {
+    expect(resolveArgs('count={args.n}', { n: 3 })).toBe('count=3');
   });
 });

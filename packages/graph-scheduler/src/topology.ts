@@ -19,10 +19,6 @@
 
 import type { Phase } from './types.js';
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
 /**
  * Build adjacency map: key = phase id, value = ids of phases that depend on key.
  * Edge direction: if B depends on A, then A → B (A must run before B).
@@ -55,10 +51,6 @@ function buildIndegree(phases: readonly Phase[]): Map<string, number> {
   }
   return indeg;
 }
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
 
 /**
  * Topologically sort phases into layers using Kahn's algorithm.
@@ -134,7 +126,7 @@ export function topoLayers(phases: readonly Phase[]): Phase[][] {
 /**
  * Return phases NOT yet in `completed` whose dependencies are all satisfied.
  *
- * Resolution strategy controlled by phase.join field (ADR 0036 D1):
+ * Resolution strategy controlled by phase.join field:
  * - `all` (default): every dependsOn must be terminal (done or skipped).
  * - `any`: at least one dependsOn must be done (not just skipped).
  *

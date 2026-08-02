@@ -26,14 +26,14 @@ function makeFixture(): Fixture {
   const taskflowDir = join(tmpdir(), `scenarios-${Math.random().toString(36).slice(2)}`);
   mkdirSync(taskflowDir, { recursive: true });
 
-  // Linear 3-phase agent graph (scenario 1, 4, 5) — JSON is valid YAML subset
+  // Linear 3-phase main graph (scenario 1, 4, 5) — JSON is valid YAML subset
   const linearGraph = {
     name: 'linear-agent-test',
     version: 1,
     phases: [
-      { id: 'phase-1', type: 'agent', task: 'step 1', dependsOn: [] },
-      { id: 'phase-2', type: 'agent', task: 'step 2', dependsOn: ['phase-1'] },
-      { id: 'phase-3', type: 'agent', task: 'step 3', dependsOn: ['phase-2'] },
+      { id: 'phase-1', type: 'main', skill: 'scenario-agent-skill', task: 'step 1', dependsOn: [] },
+      { id: 'phase-2', type: 'main', skill: 'scenario-agent-skill', task: 'step 2', dependsOn: ['phase-1'] },
+      { id: 'phase-3', type: 'main', skill: 'scenario-agent-skill', task: 'step 3', dependsOn: ['phase-2'] },
     ],
   };
   writeFileSync(join(taskflowDir, 'linear-agent-test.taskflow.yaml'), JSON.stringify(linearGraph, null, 2));
@@ -43,9 +43,9 @@ function makeFixture(): Fixture {
     name: 'force-end-test',
     version: 1,
     phases: [
-      { id: 'step-a', type: 'agent', task: 'first', dependsOn: [] },
-      { id: 'step-b', type: 'agent', task: 'second', dependsOn: ['step-a'] },
-      { id: 'step-c', type: 'agent', task: 'third', dependsOn: ['step-b'] },
+      { id: 'step-a', type: 'main', skill: 'scenario-agent-skill', task: 'first', dependsOn: [] },
+      { id: 'step-b', type: 'main', skill: 'scenario-agent-skill', task: 'second', dependsOn: ['step-a'] },
+      { id: 'step-c', type: 'main', skill: 'scenario-agent-skill', task: 'third', dependsOn: ['step-b'] },
     ],
   };
   writeFileSync(join(taskflowDir, 'force-end-test.taskflow.yaml'), JSON.stringify(forceEndGraph, null, 2));
@@ -74,7 +74,6 @@ async function createTestRuntime(fixture: Fixture): Promise<SchedulerRuntime> {
       dbPath: ':memory:',
       taskflowDir: fixture.taskflowDir,
       registryPaths: [fixture.registryPath],
-      agentRegistry: [{ type: 'agent', skill: 'atom-phase-agent' }],
     }),
   );
 }

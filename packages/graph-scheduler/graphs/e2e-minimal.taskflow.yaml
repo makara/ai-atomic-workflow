@@ -1,5 +1,4 @@
 name: e2e-minimal
-version: 1
 phases:
   - id: agent-echo
     type: main
@@ -9,3 +8,13 @@ phases:
   - id: approval-review
     type: approval
     dependsOn: [agent-echo]
+    task: 'Approval Review'
+    routing:
+      actions:
+        - action: continue
+          label: 'Accept output'
+          description: 'Output OK — proceed'
+        - action: retry
+          target: agent-echo
+          label: 'Regenerate output'
+          description: 'Output needs changes — re-run agent-echo with feedback'

@@ -33,7 +33,7 @@ function makeFixture(): Fixture {
     {
       name: 'test-graph',
       version: 1,
-      phases: [{ id: 'a1', type: 'agent', task: 'do thing' }],
+      phases: [{ id: 'a1', type: 'main', skill: 'entry-agent-skill', task: 'do thing' }],
     },
     null,
     2,
@@ -78,7 +78,6 @@ describe('FileSystem absolute path handling (P1 fix)', () => {
         dbPath: ':memory:',
         taskflowDir: fix.taskflowDir,
         registryPaths: [fix.registryPath], // ABSOLUTE path
-        agentRegistry: [{ type: 'agent', skill: 'atom-phase-agent' }],
       }),
     );
 
@@ -94,7 +93,7 @@ describe('FileSystem absolute path handling (P1 fix)', () => {
     const badJson = JSON.stringify({
       name: 'bad-graph',
       version: '1.0',
-      phases: [{ id: 'b1', type: 'agent', task: 'bad' }],
+      phases: [{ id: 'b1', type: 'main', skill: 'entry-agent-skill', task: 'bad' }],
     });
     writeFileSync(join(fix.taskflowDir, 'bad-graph.taskflow.yaml'), badJson);
 
@@ -102,7 +101,6 @@ describe('FileSystem absolute path handling (P1 fix)', () => {
       createRuntime({
         dbPath: ':memory:',
         taskflowDir: fix.taskflowDir,
-        agentRegistry: [{ type: 'agent', skill: 'atom-phase-agent' }],
       }),
     );
 
@@ -123,7 +121,7 @@ describe('FileSystem absolute path handling (P1 fix)', () => {
     // Write graph file in built-in dir
     const graphJson = JSON.stringify({
       name: 'builtin-graph',
-      phases: [{ id: 'b1', type: 'agent', task: 'echo builtin' }],
+      phases: [{ id: 'b1', type: 'main', skill: 'entry-agent-skill', task: 'echo builtin' }],
     });
     writeFileSync(join(builtinGraphsDir, 'builtin-graph.taskflow.yaml'), graphJson);
 
@@ -139,7 +137,6 @@ describe('FileSystem absolute path handling (P1 fix)', () => {
         dbPath: ':memory:',
         taskflowDir: projectTaskflowDir,
         registryPaths: [builtinRegistryPath],
-        agentRegistry: [{ type: 'agent', skill: 'atom-phase-agent' }],
       }),
     );
 

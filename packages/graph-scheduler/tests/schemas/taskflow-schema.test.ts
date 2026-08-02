@@ -5,6 +5,7 @@
  * API contract. Phase 3 implementation should make all tests pass.
  */
 import { describe, expect, it } from 'vitest';
+import { PhaseSchema } from '../../src/schemas/phase.js';
 import { TaskflowSchema, type Taskflow } from '../../src/schemas/taskflow.js';
 
 // ---------------------------------------------------------------------------
@@ -19,10 +20,10 @@ describe('TaskflowSchema — happy path', () => {
       phases: [
         {
           id: 'phase-1',
-          type: 'agent',
-          agent: 'default',
+          type: 'main',
+          agent: ['default'],
           task: 'Execute task A',
-          context: ['file1.txt', 'file2.txt'],
+          channels: ['file1.txt', 'file2.txt'],
           skill: 'custom-skill',
         },
         {
@@ -60,7 +61,7 @@ describe('TaskflowSchema — happy path', () => {
     const raw = {
       phases: [
         { id: 'p1', type: 'main' },
-        { id: 'p2', type: 'agent' },
+        { id: 'p2', type: 'main' },
       ],
     };
 
@@ -169,6 +170,71 @@ describe('TaskflowSchema — boundary', () => {
     const raw = {
       phases: [{ id: 'p1', type: 'main', task: 'run' }],
       extraField: 'should be allowed',
+    };
+    const result = TaskflowSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Flow type phases
+// ---------------------------------------------------------------------------
+
+describe('TaskflowSchema — flow type phases', () => {
+  it('accepts flow phase with use field', () => {
+    const raw = {
+      phase: {
+        id: 'skill-ops',
+        type: 'flow',
+        use: 'skill-delete',
+        dependsOn: [],
+      },
+    };
+    const result = PhaseSchema.safeParse(raw.phase);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.use).toBe('skill-delete');
+    }
+  });
+
+  it('rejects flow phase with def inline — def removed, use mandatory', () => {
+    const raw = {
+      phase: {
+        id: 'inline-ops',
+        type: 'flow',
+        def: {
+          phases: [{ id: 'nested', type: 'main', dependsOn: [], task: 'do work' }],
+        },
+        dependsOn: [],
+      },
+    };
+    const result = PhaseSchema.safeParse(raw.phase);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects flow phase with neither use nor def', () => {
+    const raw = {
+      phase: {
+        id: 'bad-flow',
+        type: 'flow',
+        dependsOn: [],
+      },
+    };
+    const result = PhaseSchema.safeParse(raw.phase);
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts complete flow taskflow with multiple flow phases (no with/def)', () => {
+    const raw = {
+      name: 'orchestrated-workflow',
+      version: 1,
+      phases: [
+        { id: 'plan', type: 'main', dependsOn: [], task: 'plan work' },
+        { id: 'skill-ops', type: 'flow', use: 'skill-delete', dependsOn: ['plan'] },
+        { id: 'doc-ops', type: 'flow', use: 'doc-update', dependsOn: ['plan'] },
+        { id: 'review', type: 'main', skill: 'code-review', dependsOn: ['skill-ops', 'doc-ops'] },
+        { id: 'approve', type: 'approval', dependsOn: ['review'] },
+      ],
     };
     const result = TaskflowSchema.safeParse(raw);
     expect(result.success).toBe(true);

@@ -1,22 +1,16 @@
 /**
- * Approval phase handler — validate, normalize, extendNodeDetail for "approval" type.
+ * Approval phase handler — validate, extendNodeDetail for "approval" type.
  *
  * Approval phases:
- * - No extra validation (task is optional — topic/routingActions/context synthesized)
- * - Default: retry.max = 0
- * - NodeDetail extends: topic, routingActions, context
- * - routingActions replaces the old routes field (IRoute deleted — no backward compat)
+ * - No extra validation (task is optional — topic/routingActions/preText/eval synthesized)
+ * - NodeDetail extends: topic (from task), routingActions, preText, eval
+ * - eval: auto-decision conditions evaluated before question() — match → auto IApprovalDecision
  *
  * @module
  */
 
 import type { Phase } from '../schemas/index.js';
 import type { IApprovalAction, IBaseNodeDetail, IFsmNodeState, INodeDetail, IPhaseHandler } from './types.js';
-import { applyDefaultRetry } from './types.js';
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
 
 /**
  * Default approval actions — used when phase.routing is not configured.
@@ -29,10 +23,6 @@ const DEFAULT_APPROVAL_ACTIONS: ReadonlyArray<IApprovalAction> = [
   { action: 'retry', label: 'Retry', description: 'Re-execute the upstream phase with feedback' },
 ];
 
-// ---------------------------------------------------------------------------
-// Handler
-// ---------------------------------------------------------------------------
-
 export const approvalPhaseHandler: IPhaseHandler = {
   phaseType: 'approval',
 
@@ -41,16 +31,13 @@ export const approvalPhaseHandler: IPhaseHandler = {
     return phase;
   },
 
-  normalize(phase: Phase): Phase {
-    return applyDefaultRetry(phase);
-  },
-
   extendNodeDetail(base: IBaseNodeDetail, phase: Phase, _nodeState: IFsmNodeState): Partial<INodeDetail> {
     const routing = phase.routing;
     return {
       topic: phase.task ?? 'Decision Required',
       routingActions: routing?.actions ?? DEFAULT_APPROVAL_ACTIONS,
-      context: routing?.context ?? [`Phase: ${phase.id}. Output is ready for review.`],
+      preText: phase.preText ?? `Phase: ${phase.id}. Output is ready for review.`,
+      eval: phase.eval,
     };
   },
 };

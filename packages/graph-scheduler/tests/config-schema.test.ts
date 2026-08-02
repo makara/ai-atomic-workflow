@@ -1,7 +1,9 @@
 /**
- * Zod schema tests for config.json — agentRegistry (aligned with AgentRegistryEntrySchema).
+ * Zod schema tests for config.json — agentRegistry removed.
  *
- * ADR 0028 removed strategy field. Schema now: { type, skill, agent? }.
+ * Config no longer accepts an agentRegistry field; dispatch handler is the
+ * constant atom-phase-handler. The field is declared unknown and rejected
+ * loudly with a rename hint — legacy configs fail instead of stripping (never emitted by setup).
  */
 import { describe, expect, it } from 'vitest';
 
@@ -15,127 +17,61 @@ function baseConfig(overrides?: Record<string, unknown>) {
 
 // ── Valid entries ────────────────────────────────────────────────────────────
 
-describe('agentRegistry: valid entries', () => {
-  it('accepts entry with type+skill only (no agent)', () => {
-    const config = baseConfig({
-      agentRegistry: [{ type: 'agent', skill: 'atom-phase-agent' }],
-    });
-
-    const result = ConfigFileSchema.safeParse(config);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.agentRegistry).toHaveLength(1);
-      expect(result.data.agentRegistry![0].type).toBe('agent');
-      expect(result.data.agentRegistry![0].skill).toBe('atom-phase-agent');
-    }
-  });
-
-  it('accepts entry with type+skill+agent', () => {
-    const config = baseConfig({
-      agentRegistry: [{ type: 'review', skill: 'atom-review', agent: 'reviewer' }],
-    });
-
-    const result = ConfigFileSchema.safeParse(config);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.agentRegistry).toHaveLength(1);
-      const entry = result.data.agentRegistry![0];
-      expect(entry.type).toBe('review');
-      expect(entry.skill).toBe('atom-review');
-      expect(entry.agent).toBe('reviewer');
-    }
-  });
-
-  it('accepts multiple entries', () => {
-    const config = baseConfig({
-      agentRegistry: [
-        { type: 'agent', skill: 'atom-phase-agent' },
-        { type: 'approval', skill: 'atom-phase-approval' },
-        { type: 'review', skill: 'atom-review', agent: 'reviewer' },
-      ],
-    });
-
-    const result = ConfigFileSchema.safeParse(config);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.agentRegistry).toHaveLength(3);
-    }
-  });
-
-  it('accepts empty array', () => {
-    const config = baseConfig({ agentRegistry: [] });
-
-    const result = ConfigFileSchema.safeParse(config);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.agentRegistry).toHaveLength(0);
-    }
-  });
-
-  it('accepts missing agentRegistry field (optional)', () => {
-    const config = baseConfig();
-
-    const result = ConfigFileSchema.safeParse(config);
+describe('config: valid shapes', () => {
+  it('accepts minimal config', () => {
+    const result = ConfigFileSchema.safeParse(baseConfig());
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.agentRegistry).toBeUndefined();
     }
   });
+
+  it('accepts dbPath/taskflowDir/registryPaths/skillsDir', () => {
+    const config = baseConfig({
+      dbPath: '.graph-scheduler/data/graph-scheduler.db',
+      taskflowDir: '.graph-scheduler/graphs',
+      registryPaths: ['.graph-scheduler/graphs/registry.json'],
+      skillsDir: 'packages/graph-workflow/skills',
+    });
+
+    const result = ConfigFileSchema.safeParse(config);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.dbPath).toBe('.graph-scheduler/data/graph-scheduler.db');
+      expect(result.data.skillsDir).toBe('packages/graph-workflow/skills');
+    }
+  });
+
+  it('rejects legacy agentRegistry field — loud error, no silent strip', () => {
+    const config = baseConfig({
+      agentRegistry: [{ type: 'main', skill: 'atom-phase-handler' }],
+    });
+
+    const result = ConfigFileSchema.safeParse(config);
+    expect(result.success).toBe(false);
+    const messages = result.error.issues.map((i) => i.message).join('\n');
+    expect(messages).toContain('agentRegistry');
+    expect(messages).toContain('removed');
+  });
 });
 
 // ── Invalid entries ──────────────────────────────────────────────────────────
 
-describe('agentRegistry: invalid entries', () => {
-  it('rejects entry with empty type string', () => {
-    const config = baseConfig({
-      agentRegistry: [{ type: '', skill: 'atom-phase-agent' }],
-    });
-
+describe('config: invalid shapes', () => {
+  it('rejects non-string dbPath', () => {
+    const config = baseConfig({ dbPath: 42 });
     const result = ConfigFileSchema.safeParse(config);
     expect(result.success).toBe(false);
   });
 
-  it('rejects entry with empty skill string', () => {
-    const config = baseConfig({
-      agentRegistry: [{ type: 'agent', skill: '' }],
-    });
-
+  it('rejects empty dbPath', () => {
+    const config = baseConfig({ dbPath: '' });
     const result = ConfigFileSchema.safeParse(config);
     expect(result.success).toBe(false);
   });
 
-  it('rejects entry with missing type', () => {
-    const config = baseConfig({
-      agentRegistry: [{ skill: 'atom-phase-agent' }],
-    });
-
-    const result = ConfigFileSchema.safeParse(config);
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects entry with missing skill', () => {
-    const config = baseConfig({
-      agentRegistry: [{ type: 'agent' }],
-    });
-
-    const result = ConfigFileSchema.safeParse(config);
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects non-array agentRegistry', () => {
-    const config = baseConfig({
-      agentRegistry: { type: 'agent', skill: 'x' },
-    });
-
-    const result = ConfigFileSchema.safeParse(config);
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects entry with agent that is not string', () => {
-    const config = baseConfig({
-      agentRegistry: [{ type: 'agent', skill: 'x', agent: 123 }],
-    });
-
+  it('rejects empty registryPaths array element', () => {
+    const config = baseConfig({ registryPaths: [''] });
     const result = ConfigFileSchema.safeParse(config);
     expect(result.success).toBe(false);
   });

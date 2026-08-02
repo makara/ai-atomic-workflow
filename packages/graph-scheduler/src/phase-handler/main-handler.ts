@@ -1,23 +1,18 @@
 /**
- * Main phase handler — validate, normalize, extendNodeDetail for "main" type.
+ * Main phase handler — validate, extendNodeDetail for "main" type.
  *
  * Main phases:
  * - Execute inline in the main agent process
  * - Require: task (non-empty string)
- * - Default: retry.max = 0
- * - NodeDetail extends: task
+ * - NodeDetail extends: task, channels, agent (priority hint array — injected as
+ *   `## Agent hints:` block by the handler main branch before task execution)
  *
- * @since ADR 0028
  * @module
  */
 
 import type { Phase } from '../schemas/index.js';
+import { PhaseHandlerError } from './errors.js';
 import type { IBaseNodeDetail, IFsmNodeState, INodeDetail, IPhaseHandler } from './types.js';
-import { applyDefaultRetry, PhaseHandlerError } from './types.js';
-
-// ---------------------------------------------------------------------------
-// Handler
-// ---------------------------------------------------------------------------
 
 export const mainPhaseHandler: IPhaseHandler = {
   phaseType: 'main',
@@ -29,13 +24,11 @@ export const mainPhaseHandler: IPhaseHandler = {
     return phase;
   },
 
-  normalize(phase: Phase): Phase {
-    return applyDefaultRetry(phase);
-  },
-
   extendNodeDetail(base: IBaseNodeDetail, phase: Phase, _nodeState: IFsmNodeState): Partial<INodeDetail> {
     return {
       task: phase.task,
+      channels: phase.channels,
+      agent: phase.agent,
     };
   },
 };

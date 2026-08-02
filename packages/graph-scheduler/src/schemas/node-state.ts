@@ -5,13 +5,16 @@ import { z } from 'zod/v4';
  *
  * Tracks only topology state: status, retry count, timestamps.
  * Output and error are NOT persisted — they live in agent session or on-disk files.
- * See docs/reports/atom-phase-handler-task-dispatch-analysis.md §11.0.
+ *
+ * Status enum matches runtime FSM production points (fsm/transition.ts):
+ * pending (START), active (activate), done/skipped (COMPLETE, join dead-branch,
+ * force-end). No failed/blocked node status exists — failures are session-local.
  */
 export const NodeStateSchema = z.object({
   /** parent run identifier */
   runId: z.string(),
-  /** node execution status */
-  status: z.enum(['pending', 'active', 'done', 'blocked', 'skipped']),
+  /** node execution status — runtime FSM produced values only */
+  status: z.enum(['pending', 'active', 'done', 'skipped']),
   /** retry counter — incremented on agent-retry */
   retryCount: z.number(),
   /** execution start time (ISO 8601) */

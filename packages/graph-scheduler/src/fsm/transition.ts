@@ -17,8 +17,6 @@ import { findDownstream, findUpstream, resolveReady } from '../topology.js';
 import type { FsmEffect, FsmNodeState, FsmRunStatus } from './effects.js';
 import type { FsmEvent } from './events.js';
 
-// ---------------------------------------------------------------------------
-// Types
 /** Graph definition — name + phases, enough for topology and state init. */
 export interface TaskflowGraph {
   readonly name: string;
@@ -26,7 +24,7 @@ export interface TaskflowGraph {
 }
 
 /**
- * FSM run-level status — aligned with ADR 0020 state model.
+ * FSM run-level status.
  *
  * State machine legal-event matrix (see fsm/state-machine):
  *   idle       → START
@@ -39,7 +37,7 @@ export type FsmStatus = 'idle' | 'running' | 'completed' | 'terminated';
 /**
  * FSM state — discriminated union on status.
  *
- * - idle: no run exists (initial state after createStateMachine)
+ * - idle: no run exists (initial state)
  * - running: run active, at least one node active or pending
  * - completed: all nodes done (terminal)
  * - terminated: run force-ended (terminal)
@@ -77,10 +75,6 @@ export interface TransitionResult {
   readonly effects: readonly FsmEffect[];
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
 /** Build initial node states — all pending, first ready batch set to active. */
 function initPhases(phases: readonly Phase[], startedAt: string): Record<string, FsmNodeState> {
   const map: Record<string, FsmNodeState> = {};
@@ -103,7 +97,6 @@ function clonePhases(phases: Record<string, FsmNodeState>): Record<string, FsmNo
   return clone;
 }
 
-/** Collect done or skipped phase ids — used for dependency resolution (ADR 0036 D3). */
 function terminalIds(phases: Record<string, FsmNodeState>): Set<string> {
   return new Set(
     Object.entries(phases)
@@ -116,10 +109,6 @@ function terminalIds(phases: Record<string, FsmNodeState>): Set<string> {
 function allTerminal(phases: Record<string, FsmNodeState>): boolean {
   return Object.values(phases).every((ns) => ns.status === 'done' || ns.status === 'skipped');
 }
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
 
 /**
  * Pure state transition — computes next FsmState and effects from current
@@ -137,9 +126,6 @@ function allTerminal(phases: Record<string, FsmNodeState>): boolean {
  */
 export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGraph): TransitionResult {
   switch (event.type) {
-    // ------------------------------------------------------------------
-    // START — initialise a new run
-    // ------------------------------------------------------------------
     case 'START': {
       if (state.status !== 'idle') {
         throw new InvalidStateTransitionError(state.status, 'START');
@@ -163,9 +149,6 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
       return { nextState, effects };
     }
 
-    // ------------------------------------------------------------------
-    // COMPLETE — normal node completion, advance to next
-    // ------------------------------------------------------------------
     case 'COMPLETE': {
       if (state.status !== 'running') {
         throw new InvalidStateTransitionError(state.status, 'COMPLETE');
@@ -190,7 +173,6 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
       const now = new Date().toISOString();
       const phases = clonePhases(state.phases);
 
-      // Mark the completed node — skip flag determines status (ADR 0036 D2)
       const isSkipped = event.skip === true;
       phases[event.phaseId] = {
         ...nodeState,
@@ -208,7 +190,7 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
         },
       ];
 
-      // Cascade-skip: if this node was skipped, check downstream OR-join nodes (ADR 0036 D4)
+      // Cascade-skip: a skipped node may force its downstream `any`-join nodes to skip too
       if (isSkipped) {
         const downstreamIds = findDownstream(event.phaseId, graph.phases);
         // Sort by dependency count (topological depth) — shallower nodes cascade first
@@ -294,9 +276,6 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
       };
     }
 
-    // ------------------------------------------------------------------
-    // JUMP — reset target + downstream, re-activate from target
-    // ------------------------------------------------------------------
     case 'JUMP': {
       if (state.status !== 'running') {
         throw new InvalidStateTransitionError(state.status, 'JUMP');
@@ -309,11 +288,14 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
       const upstreamIds = findUpstream(event.targetPhaseId, graph.phases);
       const resetSet = new Set([event.targetPhaseId, ...upstreamIds]);
 
-      // Reset target + upstream to pending
+      // Reset target + upstream to pending — retryCount increments per jump
+      // re-execution (never zeroed): eval conditions bound auto-rework loops by
+      // referencing retryAttempt, so zeroing would defeat the bound (see
+      // atom-graph-spec §Auto-Rework (eval) Rules).
       for (const id of resetSet) {
         const ns = phases[id];
         if (ns) {
-          phases[id] = { status: 'pending', retryCount: 0 };
+          phases[id] = { status: 'pending', retryCount: ns.retryCount + 1 };
         }
       }
 
@@ -324,7 +306,7 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
         if (!resetSet.has(id)) {
           const ns = phases[id];
           if (ns && (ns.status === 'done' || ns.status === 'active' || ns.status === 'skipped')) {
-            phases[id] = { status: 'pending', retryCount: 0 };
+            phases[id] = { status: 'pending', retryCount: ns.retryCount + 1 };
           }
         }
       }
@@ -377,9 +359,6 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
       return { nextState, effects };
     }
 
-    // ------------------------------------------------------------------
-    // FORCE_END — skip all unfinished, terminate run
-    // ------------------------------------------------------------------
     case 'FORCE_END': {
       if (state.status !== 'running') {
         throw new InvalidStateTransitionError(state.status, 'FORCE_END');

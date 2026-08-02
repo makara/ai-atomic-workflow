@@ -4,8 +4,7 @@
  */
 import { Effect, Layer } from 'effect';
 import { describe, expect, it } from 'vitest';
-import { FileSystemError } from '../src/filesystem.js';
-import { FileSystem } from '../src/graph-definition.js';
+import { FileSystem, FileSystemError } from '../src/filesystem.js';
 import { makeRegistryLoader } from '../src/registry-loader.js';
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -29,7 +28,7 @@ async function runSuccess<A>(program: Effect.Effect<A, unknown, FileSystem>): Pr
   return Effect.runPromise(program);
 }
 
-// ── loadRegistries / resolveGraph ────────────────────────────────
+// ── makeRegistryLoader / resolveGraph ─────────────────────────────
 
 describe('makeRegistryLoader', () => {
   const PATHS = ['reg1.json', 'reg2.json'];
@@ -79,14 +78,14 @@ describe('makeRegistryLoader', () => {
     expect(result).toMatch(/graphs\/v2\.taskflow\.yaml$/);
   });
 
-  it('loadRegistries returns merged map with all entries', async () => {
+  it('registry method returns merged map with all entries', async () => {
     const loader = makeRegistryLoader(PATHS);
     const layer = mockFsLayer({
       'reg1.json': validRegistry([{ name: 'a', path: 'a.json' }]),
       'reg2.json': validRegistry([{ name: 'b', path: 'b.json' }]),
     });
 
-    const result = await runSuccess(loader.loadRegistries(PATHS).pipe(Effect.provide(layer)));
+    const result = await runSuccess(loader.registry.pipe(Effect.provide(layer)));
     expect(result.size).toBe(2);
     expect(result.get('a')!.path).toMatch(/a\.json$/);
     expect(result.get('b')!.path).toMatch(/b\.json$/);
@@ -168,13 +167,13 @@ describe('makeRegistryLoader', () => {
       'reg2.json': validRegistry([]),
     });
 
-    const result = await runSuccess(loader.loadRegistries(PATHS).pipe(Effect.provide(layer)));
+    const result = await runSuccess(loader.registry.pipe(Effect.provide(layer)));
     expect(result.get('a')!.description).toBe('Test graph A');
   });
 
-  // ── Caching ────────────────────────────────────────────────────
+  // ── Fresh reads ────────────────────────────────────────────────
 
-  it('cached registry is reused — resolveGraph loads registries only once', async () => {
+  it('registries are re-read on every call — no stale cache', async () => {
     const loader = makeRegistryLoader(PATHS);
     let readCount = 0;
     const layer = Layer.succeed(FileSystem, {
@@ -190,10 +189,10 @@ describe('makeRegistryLoader', () => {
     expect(readCount).toBe(2);
 
     await runSuccess(loader.resolveGraph('b').pipe(Effect.provide(layer)));
-    expect(readCount).toBe(2);
+    expect(readCount).toBe(4);
   });
 
-  it('registry method returns cached index', async () => {
+  it('registry method returns merged index', async () => {
     const loader = makeRegistryLoader(PATHS);
     const layer = mockFsLayer({
       'reg1.json': validRegistry([{ name: 'a', path: 'a.json' }]),

@@ -1,0 +1,114 @@
+name: graph-generate
+phases:
+  - id: scope-confirm
+    type: main
+    dependsOn: []
+    skill: atom-scope-interview
+    channels:
+      - ./CONTEXT.md
+    task: |
+      Execute scope interview per skill://atom-scope-interview (load atom-kernel).
+
+      Topics: graph name and purpose; scope (start-to-end phases, user interactions, agent tasks); skill dependencies (entry skills for main phases); dependencies (other graphs or skills to reference); save location.
+
+      Output: confirmed graph name and purpose, full phase topology (ids, types, dependsOn edges, when guards, join modes, channels), skill dependencies, scope_complete: true, save_location.
+
+  - id: graph-design
+    type: main
+    dependsOn: [scope-confirm]
+    skill: atom-graph-design
+    channels:
+      - skill:atom-graph-spec
+    task: |
+      Design graph topology using atom-kernel solve() primitive — confirm goal → research specs → think topology → interview decisions → repeat until confirmed.
+
+      Load atom-kernel (injected) for solve() behavior contract.
+      Load atom-graph-spec (injected) as reference.
+      Read scope-confirm output (injected).
+      Execute solve({ goal: "design graph topology for confirmed scope", research: true, context }) per atom-kernel §solve():
+
+      confirm(goal): Confirm design goal with user via interview(). Confirm graph name, purpose, phase count estimate, flow-type sub-graph calls, save location. Never skip — goal consensus required.
+
+      research: Load atom-graph-spec. Look up PhaseSchema fields, topology constraints (acyclic, minimal deps, single entry), when guard rules (deterministic, observable facts), flow phase constraints (use/def, depth cap), approval routing patterns. Scan existing graphs for patterns.
+
+      think: Design complete phase topology — ids (kebab-case), types (main/approval/flow), dependsOn edges (DAG, no cycles), when guards (referencing upstream outputs), join modes (all/any), channels. Validate per atom-graph-spec §Topology Constraints: no cycles, all reachable, guards deterministic, flow phases have use or def.
+
+      interview(details): Present design decisions one at a time via question() — graph name, phase count/types, dependsOn edges, when guards, approval routing. Recommendation first. User rejects → return to think, revise, re-interview affected decisions only.
+
+      Output: When all confirmed, write design (main agent collects) per atom-graph-design output format.
+
+  - id: graph-write
+    type: main
+    dependsOn: [graph-design]
+    skill: atom-graph-writer
+    task: |
+      Generate valid .taskflow.yaml from graph design.
+
+      Read graph-design output (injected).
+      Read scope-confirm output (injected).
+      Load atom-graph-spec (injected) as reference.
+      Generate complete .taskflow.yaml per atom-graph-spec format rules:
+      - Top-level name/version/phases
+      - Block scalar | for task fields
+      - Flow sequences for dependsOn
+      - Block sequences for channels
+      - routing.actions for approval phases
+      Validate against PhaseSchema constraints.
+      Write .taskflow.yaml to path specified in scope-confirm output.
+      Write output path and summary (main agent collects).
+    channels:
+      - node:scope-confirm
+      - skill:atom-graph-spec
+
+  - id: graph-review
+    type: main
+    dependsOn: [graph-write]
+    skill: code-review
+    agent: [reviewer, task]
+    task: |
+      Review generated .taskflow.yaml per code-review (use ## Agent hints for axis sub-agents).
+
+      Artifact: graph-write output (injected); graph-design + scope-confirm outputs (injected).
+      Standards: atom-graph-spec (injected) — schema compliance, topology safety, when guard determinism, join mode validity.
+      Spec: graph matches design — same topology, same guards, same types.
+
+      Output structured YAML report with overall: pass | fail. Write report (main agent collects).
+    channels:
+      - node:graph-design
+      - node:scope-confirm
+      - skill:atom-graph-spec
+
+  - id: graph-accept
+    type: approval
+    dependsOn: [graph-review]
+    eval:
+      - when: 'graph-review output shows overall: fail AND retryAttempt < 2'
+        action: retry
+        target: graph-write
+        note: 'auto: review found blocking issues — fix and re-review'
+    routing:
+      actions:
+        - action: continue
+          label: 'Accept graph'
+          description: 'Graph definition is ready — proceed to output examples'
+        - action: retry
+          target: graph-write
+          label: 'Revise graph'
+          description: 'Graph needs changes — re-run graph-write with review feedback'
+        - action: jump
+          target: graph-design
+          label: 'Revise design'
+          description: 'Fundamental topology issues — redesign phases'
+
+  - id: output-examples
+    type: main
+    dependsOn: [graph-accept]
+    task: |
+      Generate usage examples for the new graph.
+
+      Read graph-write / graph-review upstream output files.
+      Produce 2-3 concrete invocation examples:
+      - How to start the graph (graph_start payload)
+      - Expected phase flow (which phases run in what order)
+      - Sample approval decision
+      Write examples (main agent collects).

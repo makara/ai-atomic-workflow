@@ -8,8 +8,9 @@ import { Effect } from 'effect';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { graphLoadCache, runConstraints } from '../../src/api/run-caches.js';
 import type { SchedulerRuntime } from '../../src/scheduler-runtime.js';
 import { createRuntime } from '../../src/scheduler-runtime.js';
 
@@ -51,11 +52,11 @@ async function makeFixture(graphs: Record<string, string>): Promise<Fixture> {
     writeFileSync(join(taskflowDir, `${name}.taskflow.yaml`), json);
   }
 
+  // Builtin registry covers main + approval — no project override needed.
   const rt = await Effect.runPromise(
     createRuntime({
       dbPath: ':memory:',
       taskflowDir,
-      agentRegistry: [{ type: 'agent', skill: 'atom-phase-agent', agent: 'task' }],
     }),
   );
 
@@ -68,26 +69,38 @@ async function makeFixture(graphs: Record<string, string>): Promise<Fixture> {
   };
 }
 
-/** Minimal two-agent linear graph. */
+/** Minimal two-node linear graph. */
 function linearAgentGraph(): string {
   return JSON.stringify({
     name: 'linear-agent',
     version: 1,
     phases: [
-      { id: 'agent-a', type: 'agent', task: 'do a' },
-      { id: 'agent-b', type: 'agent', task: 'do b', dependsOn: ['agent-a'] },
+      { id: 'agent-a', type: 'main', skill: 'test-agent-skill', task: 'do a' },
+      { id: 'agent-b', type: 'main', skill: 'test-agent-skill', task: 'do b', dependsOn: ['agent-a'] },
     ],
   });
 }
 
-/** Agent graph with per-node skill override on second phase. */
+/** Main graph with per-node skill override on second phase. */
 function skillOverrideGraph(): string {
   return JSON.stringify({
     name: 'skill-override',
     version: 1,
     phases: [
-      { id: 'agent-a', type: 'agent', task: 'do a' },
-      { id: 'agent-b', type: 'agent', task: 'do b', dependsOn: ['agent-a'], skill: 'custom-agent-skill' },
+      { id: 'agent-a', type: 'main', skill: 'test-agent-skill', task: 'do a' },
+      { id: 'agent-b', type: 'main', skill: 'custom-agent-skill', task: 'do b', dependsOn: ['agent-a'] },
+    ],
+  });
+}
+
+/** Graph with agent-hint arrays on main phases. */
+function hintGraph(): string {
+  return JSON.stringify({
+    name: 'hints',
+    version: 1,
+    phases: [
+      { id: 'hinted', type: 'main', skill: 'review-skill', agent: ['reviewer', 'task'], task: 'review' },
+      { id: 'plain', type: 'main', skill: 'other-skill', task: 'plain', dependsOn: ['hinted'] },
     ],
   });
 }
@@ -115,7 +128,7 @@ describe('graphStart', () => {
     expect(result.runId).toMatch(/^[0-9a-f-]{36}$/);
     expect(result.node).not.toBeNull();
     expect(result.node?.nodeId).toBe('agent-a');
-    expect(result.node?.type).toBe('agent');
+    expect(result.node?.type).toBe('main');
   });
 
   it('starts with invocation args available on node', async () => {
@@ -125,9 +138,46 @@ describe('graphStart', () => {
     expect(result.node).not.toBeNull();
   });
 
+  it('NodeDetail carries agent-hint array on main phases, absent otherwise', async () => {
+    fix = await makeFixture({ hints: hintGraph() });
+    const first = await fix.rt.graphStart('hints');
+    expect(first.node?.nodeId).toBe('hinted');
+    expect(first.node?.agent).toEqual(['reviewer', 'task']);
+
+    const second = await fix.rt.graphAdvance(first.runId, 'hinted', 10);
+    expect(second.node?.nodeId).toBe('plain');
+    expect(second.node?.agent).toBeUndefined();
+  });
+
   it('throws when graph file is missing', async () => {
     fix = await makeFixture({});
     await expect(fix.rt.graphStart('missing')).rejects.toThrow();
+  });
+
+  it('NodeDetail carries dependsOn for main phases', async () => {
+    fix = await makeFixture({
+      'dep-graph': JSON.stringify({
+        name: 'dep-graph',
+        version: 1,
+        phases: [
+          { id: 'w', type: 'main', task: 'write' },
+          { id: 'm', type: 'main', task: 'read', dependsOn: ['w'] },
+          { id: 'a', type: 'main', skill: 'test-agent-skill', task: 'dispatch', dependsOn: ['m'] },
+        ],
+      }),
+    });
+
+    const first = await fix.rt.graphStart('dep-graph');
+    expect(first.node?.nodeId).toBe('w');
+    expect(first.node?.dependsOn).toBeUndefined();
+
+    const second = await fix.rt.graphAdvance(first.runId, 'w', 10);
+    expect(second.node?.nodeId).toBe('m');
+    expect(second.node?.dependsOn).toEqual(['w']);
+
+    const third = await fix.rt.graphAdvance(first.runId, 'm', 10);
+    expect(third.node?.nodeId).toBe('a');
+    expect(third.node?.dependsOn).toEqual(['m']);
   });
 
   it('throws on invalid YAML graph file', async () => {
@@ -273,11 +323,96 @@ describe('graphStatus', () => {
     fix = await makeFixture({ 'skill-override': skillOverrideGraph() });
     const startResult = await fix.rt.graphStart('skill-override');
 
-    // First node uses builtin skill mapping (entrySkill from agentRegistry)
-    expect(startResult.node?.entrySkill).toBe('atom-phase-agent');
+    // First node uses phase skill (skill from phase.skill — no registry fallback)
+    expect(startResult.node?.skill).toBe('test-agent-skill');
 
     // Advance to node-b which has per-node skill override
     const advResult = await fix.rt.graphAdvance(startResult.runId, 'agent-a', 50);
-    expect(advResult.node?.entrySkill).toBe('custom-agent-skill');
+    expect(advResult.node?.skill).toBe('custom-agent-skill');
+  });
+
+  it('rejects unregistered agent type at load (GraphDefinitionError)', async () => {
+    const graph = JSON.stringify({
+      name: 'agent-type',
+      version: 1,
+      phases: [{ id: 'a1', type: 'agent', task: 'do a' }],
+    });
+    fix = await makeFixture({ 'agent-type': graph });
+    // Phase type 'agent' is no longer registered — load fails at handler
+    // resolution (UnknownPhaseTypeError → GraphDefinitionError) naming the type.
+    const err = await fix.rt.graphStart('agent-type').then(
+      () => null,
+      (e: { _tag?: string; message?: string }) => e,
+    );
+    expect(err).not.toBeNull();
+    expect(err?._tag).toBe('GraphDefinitionError');
+    expect(String(err?.message)).toContain('agent');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// run caches — lifecycle: created at start, dropped on force-end/cleanup, kept on jump
+// ---------------------------------------------------------------------------
+
+describe('run cache lifecycle', () => {
+  let fix: Fixture;
+
+  afterEach(() => {
+    if (fix?.cleanup) fix.cleanup();
+  });
+
+  it('populates caches at graphStart', async () => {
+    fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
+    const { runId } = await fix.rt.graphStart('linear-agent');
+    expect(runConstraints.has(runId)).toBe(true);
+    expect(graphLoadCache.has(runId)).toBe(true);
+  });
+
+  it('drops caches on graphForceEnd', async () => {
+    fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
+    const { runId } = await fix.rt.graphStart('linear-agent');
+    expect(runConstraints.has(runId)).toBe(true);
+
+    await fix.rt.graphForceEnd(runId);
+    expect(runConstraints.has(runId)).toBe(false);
+    expect(graphLoadCache.has(runId)).toBe(false);
+  });
+
+  it('keeps caches on graphJump — run stays active', async () => {
+    fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
+    const { runId } = await fix.rt.graphStart('linear-agent');
+    await fix.rt.graphJump(runId, 'agent-a');
+    expect(runConstraints.has(runId)).toBe(true);
+    expect(graphLoadCache.has(runId)).toBe(true);
+  });
+
+  it('drops caches for completed runs only on graphCleanCompleted', async () => {
+    fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
+    const { runId: doneRun } = await fix.rt.graphStart('linear-agent');
+    await fix.rt.graphAdvance(doneRun, 'agent-a', 50);
+    await fix.rt.graphAdvance(doneRun, 'agent-b', 50);
+    const { runId: liveRun } = await fix.rt.graphStart('linear-agent');
+    expect(runConstraints.has(doneRun)).toBe(true);
+    expect(runConstraints.has(liveRun)).toBe(true);
+
+    const { deleted } = await fix.rt.graphCleanCompleted();
+    expect(deleted).toBe(1);
+    expect(runConstraints.has(doneRun)).toBe(false);
+    expect(graphLoadCache.has(doneRun)).toBe(false);
+    // live run untouched
+    expect(runConstraints.has(liveRun)).toBe(true);
+    expect(graphLoadCache.has(liveRun)).toBe(true);
+  });
+
+  it('clears all caches on graphCleanAll', async () => {
+    fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
+    const before = runConstraints.size + graphLoadCache.size;
+    await fix.rt.graphStart('linear-agent');
+    await fix.rt.graphStart('linear-agent');
+    expect(runConstraints.size).toBe(before / 2 + 2);
+
+    await fix.rt.graphCleanAll();
+    expect(runConstraints.size).toBe(0);
+    expect(graphLoadCache.size).toBe(0);
   });
 });

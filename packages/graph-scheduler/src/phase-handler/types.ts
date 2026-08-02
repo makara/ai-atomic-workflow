@@ -1,122 +1,110 @@
 /**
  * PhaseHandler types — PhaseHandler interface, BaseNodeDetail, NodeDetail DTO, error types.
  *
- * Core abstraction for phase type plug-in system. Each phase type implements
- * PhaseHandler and registers via PhaseHandlerRegistry at runtime init.
- * FSM/topology/DB layers never reference concrete handlers — only this interface.
+ * Static type dispatch — main/approval handlers resolved by type at
+ * dispatch (no registry service). FSM/topology/DB layers
+ * never reference concrete handlers — only this interface.
  *
  * @module
  */
 
 import type { Phase } from '../schemas/index.js';
 
-// ---------------------------------------------------------------------------
-// PhaseHandler
-// ---------------------------------------------------------------------------
-
 /**
  * Phase handler — implemented once per supported phase type.
  *
- * Registered via PhaseHandlerRegistry at createRuntime(). graph-scheduler core
- * never imports concrete handlers — only this interface.
+ * Resolved statically by type (main/approval) at dispatch — no registry.
  */
 export interface IPhaseHandler {
-  /** Phase type string — e.g. "agent", "approval", "gate", "map" */
+  /** Phase type string — "main" or "approval" */
   readonly phaseType: string;
 
   /**
    * Validate phase-specific fields.
    * Base fields (id, dependsOn) validated by core schema.
-   * Called after schema.parse() but before normalize().
+   * Called after schema.parse().
    * Throws PhaseHandlerError on validation failure.
    */
   validate(phase: Phase): Phase;
 
   /**
-   * Normalize phase — fill defaults, coerce legacy shapes.
-   * Called after validate(), before FSM.
-   */
-  normalize(phase: Phase): Phase;
-
-  /**
    * Extend the base NodeDetail with type-specific fields.
-   * Base fields (nodeId, type, handlerSkill, entrySkill, agent, retryAttempt) set by core.
-   * Handler adds type-specific fields (task, topic, routes, context, eval, etc.).
-   * @since ADR 0028 — `strategy` removed; `skill` split into handlerSkill + entrySkill.
+   * Base fields (nodeId, type, handlerSkill, skill, retryAttempt) set by core.
+   * Handler adds type-specific fields (task, topic, routingActions, preText, channels, eval, etc.).
    */
   extendNodeDetail(base: IBaseNodeDetail, phase: Phase, nodeState: IFsmNodeState): Partial<INodeDetail>;
 }
-
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Apply default retry ({@link RetryConfig.max} = 0) when phase has no retry config.
- * Shared by all phase handler normalize() implementations — avoids DRY violation
- * across handler types.
- */
-export function applyDefaultRetry(phase: Phase): Phase {
-  return {
-    ...phase,
-    retry: phase.retry ?? { max: 0 },
-  };
-}
-
-// ---------------------------------------------------------------------------
-// BaseNodeDetail
-// ---------------------------------------------------------------------------
 
 /** Base NodeDetail — fields common to all phase types, set by graph-scheduler core. */
 export interface IBaseNodeDetail {
   readonly nodeId: string;
   readonly type: string;
-  /** handler skill — handles MCP response data, organizes context, dispatches sub-agents (from agentRegistry.skill) */
+  /** upstream phase ids this phase depends on — from phase.dependsOn, present for all phase types (implicit upstream coverage verifiable at runtime) */
+  readonly dependsOn?: readonly string[];
+  /** handler skill — constant 'atom-phase-handler' */
   readonly handlerSkill: string;
-  /** entry skill — the target skill for task() execution (from phase.skill ?? agentRegistry.skill) */
-  readonly entrySkill: string;
-  /** sub-agent type for task() dispatch (e.g. "task", "scout") */
-  readonly agent?: string;
-  /** when guard — natural-language skip condition (ADR 0036 D2) */
+  /** execution skill — phase.skill, the skill that executes this phase's work (main type; optional) */
+  readonly skill?: string;
+  /** when guard — natural-language skip condition */
   readonly when?: string;
+  /** project constraints — loaded from .graph-scheduler/constraints.md, same level as when */
+  readonly constraints: readonly string[];
   readonly retryAttempt: number;
 }
-
-// ---------------------------------------------------------------------------
-// NodeDetail — unified DTO
-// ---------------------------------------------------------------------------
 
 /**
  * Unified NodeDetail DTO returned by graph_start / graph_advance.
  *
  * All phase-type-specific fields are optional — handler fills what it needs.
- * Was: type field was TypeScript union 'agent' | 'approval'.
- * Now: type is string — PhaseHandlerRegistry is the enforcement mechanism.
+ * type is the closed enum (main/approval/flow — schema-enforced);
+ * handlerSkill is the constant 'atom-phase-handler'.
  */
 export interface INodeDetail {
   readonly nodeId: string;
   readonly type: string;
-  /** handler skill — from agentRegistry.skill (Layer 1+2) */
+  /** upstream phase ids this phase depends on — from phase.dependsOn, present for all phase types */
+  readonly dependsOn?: readonly string[];
+  /** handler skill — constant 'atom-phase-handler' */
   readonly handlerSkill: string;
-  /** entry skill — from phase.skill ?? agentRegistry.skill (Layer 3 override) */
-  readonly entrySkill: string;
-  /** sub-agent type for task() dispatch (e.g. "task", "scout") */
-  readonly agent?: string;
-  /** agent registry name — surfaced by phase handler from base.agent */
-  readonly agentName?: string;
-  /** Agent phase — task instruction text */
+  /** execution skill — from phase.skill; the skill that executes this phase's work */
+  readonly skill?: string;
+  /** Agent hints — priority-ordered sub-agent type preferences for main phases; advisory, consumed by skills when dispatching */
+  readonly agent?: string[];
+  /** main phase — task instruction text */
   readonly task?: string;
   /** Approval phase — decision topic */
   readonly topic?: string;
   /** Approval phase — decision routing actions (replaces deprecated routes) */
   readonly routingActions?: ReadonlyArray<IApprovalAction>;
-  /** Agent phase — file glob patterns resolved before sub-agent dispatch */
-  readonly context?: string[];
-  /** when guard — natural-language skip condition (ADR 0036 D2) */
+  /** Main phase — channel patterns (skill names, file globs, node:<id>) resolved against the execution skill contract before inline context assembly */
+  readonly channels?: string[];
+  /** Approval phase — decision-card pre-call text (never channel-resolved) */
+  readonly preText?: string;
+  /** when guard — natural-language skip condition */
   readonly when?: string;
-  /** Gate phase (future) — zero-token eval checks */
-  readonly eval?: ReadonlyArray<string>;
+  /** project constraints — from .graph-scheduler/constraints.md, all phase types carry */
+  readonly constraints: readonly string[];
+  /** Approval phase — eval conditions for auto-decision before question() */
+  readonly eval?: ReadonlyArray<IEvalCondition>;
   readonly retryAttempt: number;
+}
+
+/**
+ * Eval condition — auto-decision rule evaluated by agent before question().
+ *
+ * When natural-language `when` condition matches upstream review output,
+ * handler auto-produces IApprovalDecision with configured action.
+ * Conditions evaluated in array order — first match short-circuits.
+ */
+export interface IEvalCondition {
+  /** Natural-language condition — evaluated by agent via completion(smol) */
+  readonly when: string;
+  /** Auto-routing action when condition matches */
+  readonly action: 'continue' | 'retry' | 'jump';
+  /** Target node ID for retry or jump. Routing targets SHALL be explicit; absent retry target degrades to continue. */
+  readonly target?: string;
+  /** Auto-decision note — injected as IApprovalDecision.note */
+  readonly note?: string;
 }
 
 /**
@@ -126,9 +114,9 @@ export interface INodeDetail {
  * explicitly so handler never needs to guess intent from label text.
  */
 export interface IApprovalAction {
-  /** Routing semantics: continue → advance, retry → re-execute upstream, jump → go to target node */
+  /** Routing semantics: continue → advance, retry → re-execute target, jump → go to target node */
   readonly action: 'continue' | 'retry' | 'jump';
-  /** Jump target node ID — meaningful only when action='jump' */
+  /** Target node ID for retry or jump. Routing targets SHALL be explicit; absent retry target degrades to continue (pilot fallback). */
   readonly target?: string;
   /** Display label used in question() options[].label */
   readonly label: string;
@@ -144,15 +132,13 @@ export interface IApprovalAction {
 export interface IApprovalDecision {
   /** Chosen routing action */
   readonly action: 'continue' | 'retry' | 'jump';
-  /** Jump target node ID — meaningful only when action='jump' */
+  /** Target node ID for retry or jump. Routing targets SHALL be explicit; absent retry target degrades to continue. */
   readonly target?: string;
   /** Free-text input from question() custom:true text box — semantics vary by action */
   readonly note?: string;
+  /** Chosen routing option label — distinguishes same-action options (e.g. two continues) */
+  readonly label?: string;
 }
-
-// ---------------------------------------------------------------------------
-// FsmNodeState — lightweight subset for handler consumption
-// ---------------------------------------------------------------------------
 
 /** Minimal FSM node state passed to handler.extendNodeDetail(). */
 export interface IFsmNodeState {
@@ -161,37 +147,4 @@ export interface IFsmNodeState {
   readonly startedAt?: string;
   readonly completedAt?: string;
   readonly durationMs?: number;
-}
-
-// ---------------------------------------------------------------------------
-// Error types
-// ---------------------------------------------------------------------------
-
-/** Thrown when an unregistered phase type is resolved. */
-export class PhaseHandlerError extends Error {
-  constructor(
-    message: string,
-    public readonly phaseType: string,
-  ) {
-    super(message);
-    this.name = 'PhaseHandlerError';
-  }
-}
-
-/** Thrown when resolvePhaseHandler encounters an unknown phase type. */
-export class UnknownPhaseTypeError extends PhaseHandlerError {
-  constructor(phaseType: string, registeredTypes: readonly string[]) {
-    const registered = registeredTypes.join(', ');
-    super(`Unknown phase type '${phaseType}'. Registered types: ${registered || '(none)'}`, phaseType);
-    this.name = 'UnknownPhaseTypeError';
-  }
-}
-
-/** Thrown when registerPhaseHandler registers a duplicate phaseType. */
-export class DuplicatePhaseHandlerError extends PhaseHandlerError {
-  constructor(phaseType: string, registeredTypes: readonly string[]) {
-    const registered = registeredTypes.join(', ');
-    super(`Duplicate phase handler for type '${phaseType}'. Already registered: ${registered}`, phaseType);
-    this.name = 'DuplicatePhaseHandlerError';
-  }
 }

@@ -8,10 +8,6 @@
 
 import { Context, Effect } from 'effect';
 
-// ---------------------------------------------------------------------------
-// Error type
-// ---------------------------------------------------------------------------
-
 /** Structured error from file I/O operations (read, not found, permission). */
 export class FileSystemError {
   readonly _tag = 'FileSystemError' as const;
@@ -25,10 +21,6 @@ export class FileSystemError {
     readonly cause?: unknown,
   ) {}
 }
-
-// ---------------------------------------------------------------------------
-// Tag
-// ---------------------------------------------------------------------------
 
 /**
  * FileSystem Context.Tag — injectable I/O seam.

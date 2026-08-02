@@ -1,0 +1,131 @@
+name: skill-change-workflow
+phases:
+  # Stage 1: Plan — delegates to plan-generate (scope -> PRD -> optional tickets)
+  - id: plan
+    type: flow
+    use: plan-generate
+    dependsOn: []
+
+  # Stage 1b: Parse PRD — extract skill-specific metadata for downstream when-guards
+  - id: plan-parse
+    type: main
+    dependsOn: [plan]
+    task: |
+      Load atom-kernel (injected). Read PRD from plan output. Extract skill-domain metadata.
+
+      1. Read PRD at prd_path from plan output (injected via dependsOn implicit context).
+      2. Extract skill-specific metadata from PRD content:
+        - skill_create_needed: true if User Stories describe new skill authoring
+        - skill_create_name: <skill name if create>
+        - skill_delete_needed: true if Implementation Decisions reference skill deletion
+        - skill_delete_name: <skill name if delete>
+        - doc_update_needed: true if any section mentions document updates beyond changed skill
+        - doc_update_files: [list of doc paths]
+        - spec_needed: true if any section mentions capability/spec changes (new or modified OpenSpec capabilities)
+      Write output (main agent collects):
+        - prd_path: <from plan output>
+        - scope_complete: true
+        - ticket_split_needed: <from plan output>
+        - ticket_count: <from plan output, if ticket-split executed>
+        - ticket_paths: <from plan output, if ticket-split executed>
+        - skill_create_needed: true/false
+        - skill_create_name: <skill name if create>
+        - skill_delete_needed: true/false
+        - skill_delete_name: <skill name if delete>
+        - doc_update_needed: true/false
+        - doc_update_files: [list of doc paths]
+        - spec_needed: true/false
+        - change_summary: <from plan output>
+  - id: skill-delete-foo
+    type: flow
+    use: skill-delete
+    dependsOn: [plan-parse]
+    when: 'plan-parse output shows skill_delete_needed: true — skill deletion in plan'
+
+  - id: skill-author-foo
+    type: flow
+    use: skill-author
+    dependsOn: [plan-parse]
+    when: 'plan-parse output shows skill_create_needed: true — skill authoring in plan'
+
+  - id: doc-update
+    type: flow
+    use: doc-update
+    dependsOn: [plan-parse]
+    when: 'plan-parse output shows doc_update_needed: true — doc update in plan'
+
+  - id: openspec-create-foo
+    type: flow
+    use: openspec-create
+    dependsOn: [plan-parse]
+    when: 'plan-parse output shows spec_needed: true — capability/spec change in plan'
+  # Stage 2: Cross review — inter-artifact consistency audit
+  - id: cross-review
+    type: main
+    skill: code-review
+    agent: [reviewer, task]
+    dependsOn: [skill-author-foo, skill-delete-foo, doc-update, openspec-create-foo]
+    task: |
+      Cross-artifact consistency review per code-review (use ## Agent hints for axis sub-agents).
+
+      Artifact: PRD at prd_path + plan-parse output (injected); upstream artifacts auto-resolved from skill-author-foo, skill-delete-foo, doc-update, openspec-create-foo.
+      Standards: per-artifact format — atom-skill-spec rules (skills), atom-graph-spec rules (graphs), Markdown structural checks (docs).
+      Spec: cross-artifact consistency — skill://<name> references resolve; graph use:/skill: fields match registered names; doc links present in artifact set; no name collisions; scope matches PRD User Stories and Out of Scope.
+
+      Output structured YAML report — overall: pass | fail, per-violation findings, cross-artifact conflicts. Write audit report (main agent collects).
+    channels:
+      - node:plan-parse
+      - skill:atom-skill-spec
+      - skill:atom-graph-spec
+
+  # Stage 3: Approval — final quality gate
+  # Multi-writer graph (3 writer flows) — no single rework point: eval omitted,
+  # FAIL falls through to human gate with per-writer retry targets
+  # (atom-graph-spec §Auto-Rework (eval) Rules — single-writer scope).
+  - id: change-accept
+    type: approval
+    dependsOn: [cross-review]
+    routing:
+      actions:
+        - action: continue
+          label: 'Accept change'
+          description: 'All changes are complete and reviewed — finalize'
+        - action: retry
+          target: skill-author-foo
+          label: 'Revise skill authoring'
+          description: 'New skill needs corrections — re-run skill-author with cross-review feedback'
+        - action: retry
+          target: skill-delete-foo
+          label: 'Revise skill deletion'
+          description: 'Skill deletion needs corrections — re-run skill-delete with cross-review feedback'
+        - action: retry
+          target: doc-update
+          label: 'Revise doc update'
+          description: 'Document update needs corrections — re-run doc-update with cross-review feedback'
+        - action: jump
+          target: plan
+          label: 'Revise plan'
+          description: 'Fundamental plan issues — re-plan from plan-generate'
+
+  # Stage 4: Archive — finalize completed OpenSpec change
+  - id: archive
+    type: main
+    skill: atom-openspec-archive
+    dependsOn: [change-accept]
+    task: |
+      Archive the completed OpenSpec change via openspec archive CLI.
+
+      Load atom-kernel (injected). Read change-accept output (injected via dependsOn implicit context).
+
+      Execute per atom-openspec-archive flow:
+      1. Determine change_name (NEVER ask): {args.changeName} if provided → `openspec list --json` filtered to complete changes (single entry) → else archive_status: blocked + candidates.
+      2. Reverse-validate task completion against code evidence before archive.
+      3. Run openspec archive CLI for the change.
+      4. Verify archive result — change moved to archive, specs synced.
+
+      Write output (main agent collects):
+        - archive_status: success | failed | blocked
+        - change_name: <change name>
+        - validation_result: pass | fail | warn
+        - message: <summary>
+      Note: atom-openspec-archive declares upstream 'apply-change' — specific to the openspec-apply graph; this graph resolves the name via args/list fallback instead (skill Step 0).

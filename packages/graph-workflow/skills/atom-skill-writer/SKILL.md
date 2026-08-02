@@ -1,177 +1,184 @@
 ---
 name: atom-skill-writer
-description: Reference for writing skills — format rules, language constraints, reference boundaries. Use when creating or editing skills, mentions skill writing, skill format, SKILL.md.
-argument-hint: none (reference skill)
-user-invocable: true
-version: 1.3.0
-last_updated: '2026-07-28'
+description: 'Entry skill for skill authoring — loads atom-skill-spec, writes or edits SKILL.md. Auto-detects create vs edit mode from scope-confirm output fields. Trigger: skill-write phase in skill-author graph, skill-edit-write phase in skill-author graph.'
+user-invocable: false
+version: 2.0.0
+last_updated: '2026-08-01'
 ---
 
-> **Runtime constraints** — load `skill://writing-great-skills` before use.
+> **Runtime constraints** — graph dispatch: atom-skill-spec arrives via `skill:` channel (handler-injected). Standalone use: load `skill://atom-skill-spec` before use.
 
 # Atom-Skill-Writer
 
-Reference for writing skills. Loads `writing-great-skills` for foundation — information hierarchy, pruning, leading words, failure modes. Layers additional constraints on top.
+Entry skill for skill authoring. Loads atom-skill-spec as reference. Auto-detects mode from scope-confirm output fields — edit mode when output shows `skill_path`, create mode when output shows `save_location` without `skill_path`. Never based on sibling output file existence. Handles both paths — create new SKILL.md or edit existing in-place.
 
-**Priority**: atom-skill-writer rules > writing-great-skills rules. Conflict → atom-skill-writer wins.
-
----
-
-# Frontmatter Format
-
-## Mandatory
-
-|Field|Why|
-|-|-|
-|`name`|Platform resolves `skill://<name>` by frontmatter name match. Missing → skill unloadable|
-|`description`|Trigger phrases listing branches that invoke skill. Search index key|
-
-## Recommended
-
-|Field|Why|
-|-|-|
-|`version`|Semantic version. Traceability|
-|`last_updated`|ISO date. Staleness detection|
-
-## Invocation
-
-Two choices — per `writing-great-skills` §Invocation:
-
-|Model|Frontmatter|Cost|
-|-|-|-|
-|model-invoked|Omit `disable-model-invocation`|Description in window every turn. Agent fires autonomously; other skills reach it|
-|user-invoked|`disable-model-invocation: true` + `user-invocable: true`|Zero context. Loads only when user types name. Cognitive: user must remember it|
-
-Default model-invoked. Pick user-invoked only when agent should never auto-load.
-
----
-
-# Body Content Rules
-
-## Mandatory
-
-`Runtime constraints` block — first content after frontmatter. Lines prefixed with `>`. Multi-line OK — load dependencies, declare constraints, state preconditions. Format:
-
-```
-> **Runtime constraints** — load `skill://<name>` before use.
-> Additional constraint line.
-```
-
-Minimum: one `>` line declaring runtime requirements.
-
-## Entry Skill Context Requirements
-
-Entry skills declare runtime context needs via `## Context Requirements` section in SKILL.md. Required for any graph-callable entry skill — graph author and handler depend on contract.
-
-### Format
-
-Place between `## Input` and `## Output` sections in entry skill SKILL.md:
-
-```markdown
 ## Context Requirements
 
-### Files
+### From upstream
 
-- <glob or path>
-- <glob or path>
+- scope-confirm
+- skill-select
 
-### Description
+### Reference skills
 
-<natural language paragraph>
-```
+- atom-skill-spec
 
-### Files — Deterministic
+## Entry
 
-Glob patterns or paths. Handler resolves: `glob` → `read` → inject as `## File: <path>` blocks.
+**MUST EXECUTE** — when dispatched by atom-phase-handler for skill-write or skill-edit-write phase node. Detect mode from upstream outputs, execute corresponding flow.
 
-One path per list item. Supports glob wildcards. Each resolved file truncated to reasonable size.
+## Flow
 
-Example:
+### Mode Detection
 
-```markdown
-### Files
+Read upstream scope-confirm output injected by handler. Detect mode by output fields:
 
-- .taskflow/outputs/lint.output.txt
-- docs/CODING-STANDARDS.md
-```
+|scope-confirm output field|Mode|
+|-|-|
+|`skill_path` present|**edit** — modify existing SKILL.md|
+|`save_location` present, no `skill_path`|**create** — draft new SKILL.md|
 
-### Description — LLM-Driven
-
-Natural language paragraph. Handler uses LLM to search conversation, read extra files. Injected as `## Additional Context`.
-
-Write concrete, specific instructions. Vague Description → wrong context. Handler does NOT validate Description quality — entry skill author responsible.
-
-Example:
-
-```markdown
-### Description
-
-Lint results showing files with errors. Project coding standards. Search conversation for user-specified file paths or constraints.
-```
-
-### Contract
-
-Section present → handler runs full discovery: merge node.context + Files → resolve → Description → inject. Absent → legacy fallback: node.context globs only, task forwarded verbatim.
-
-### node.context vs Files
-
-|Source|Author|When|Scope|
-|-|-|-|-|
-|node.context|Graph author|Graph definition|Project-level|
-|Files|Entry skill author|Skill writing|Skill-level|
-
-Handler merges both. No conflict.
-
-### Mandatory
-
-All graph-callable entry skills MUST declare `## Context Requirements` section. Without: no context discovery, no phase.task contract. Stub skills exempt.
-
-## Entry Skill Language Constraint
-
-Skills with `user-invocable: true` + `## Entry` section are **entry skills** — invocation triggers execution, not just context loading. Reference skills provide information only.
-
-Entry skill Entry section MUST begin with `**MUST <verb>**` syntax — imperative declaration of required action on invocation. Example: `**MUST EXECUTE** — when user invokes /skill:atom-pilot <name>, begin graph execution immediately.`
-
-Without: agent interprets skill load as reference only — no behavioral contract between frontmatter invocation and body action.
-
-## Prohibited
-
-- Core Philosophy, design philosophy, author intent, background stories — any "why" narrative.
-- Self-repetition — verification checklists, summaries duplicating body content. Each fact in one place.
-
-Allowed: behavioral descriptions (what + how), rules, reference tables. "Why" content belongs in ADR or domain docs.
-
-## Structure
-
-Organize by `writing-great-skills` information hierarchy. Body mixes steps and reference. Core decision: which material on which ladder rung (in-skill step → in-skill reference → external reference). Push reference behind context pointers when only some branches reach it.
+Sibling output existence (e.g. skill-select output file) SHALL NOT influence mode detection — it is timing-dependent and unreliable. Output absent → fail with `"Missing upstream outputs — need scope-confirm"`.
 
 ---
 
-# Language Constraints
+### Create Mode
 
-All natural language — skill body, code comments, sibling files — MUST:
+#### Step C1: Read Plan
 
-1. **Caveman full level** (load `skill://caveman` for full rules):
-   - Drop articles, filler, pleasantries, hedging
-   - Fragments OK. Short synonyms. Technical terms exact. Code unchanged
-   - Standard acronyms OK (API, URI, JSON). No invented abbreviations
-   - Pattern: `[thing] [action] [reason]. [next step].`
+Read scope-confirm output. Extract:
 
-2. **Pure English** — no mixed-language skill files. Exception: code examples, error strings in their native language.
+- `name` — skill identifier, kebab-case or atom- prefix
+- `description` — trigger phrase list
+- `scope` — problem skill solves
+- `inputs` — files/types skill consumes
+- `outputs` — what skill produces
+- `dependencies` — skills loaded via `skill://`
+- `save_location` — filesystem path for SKILL.md
+
+#### Step C2: Draft Frontmatter
+
+Generate YAML frontmatter per atom-skill-spec §Frontmatter Format:
+
+**Mandatory**:
+
+- `name` — from plan
+- `description` — from plan, trigger phrases
+
+**Recommended**:
+
+- `version` — `1.0.0`
+- `last_updated` — today ISO date
+
+**Invocation**:
+
+- Default model-invoked. Use `disable-model-invocation: true` + `user-invocable: true` only for pure reference skills.
+
+#### Step C3: Draft Body
+
+Generate body per atom-skill-spec §Body Content Rules:
+
+1. **Runtime constraints block** — first content after frontmatter. `>` lines. Declare `skill://` dependencies.
+2. **Body sections** — per `writing-great-skills` information hierarchy. Steps first, reference after.
+3. **Entry skill rules** — if graph-callable:
+   - `## Context Requirements` — From upstream + Reference skills + Files
+   - `## Entry` — `**MUST <verb>**` imperative
+4. **Prohibited** — no Core Philosophy, design philosophy, author intent. No self-repetition.
+
+#### Step C4: Validate
+
+Validate against every atom-skill-spec rule class (frontmatter format, Runtime constraints block, body content, language constraints, reference constraints, prohibited content).
+
+#### Step C5: Write
+
+Write SKILL.md to `save_location`. Create parent dirs if needed.
+
+#### Step C6: Output
+
+```
+skill_path: <absolute path>
+name: <skill name>
+description: <skill description>
+frontmatter_fields: [name, description, version, last_updated]
+body_sections: [Runtime constraints, <section names>]
+validation: passed | failed (<failure details>)
+```
 
 ---
 
-# Reference Constraints
+### Edit Mode
 
-## Allowed
+#### Step E1: Read Current Skill
 
-- Sibling files deployed with skill — `skill://<name>/<path>`
-- Skills referenced via `skill://` protocol
+Read skill-select output. Extract:
 
-## Prohibited
+- `skill_path` — filesystem path to existing SKILL.md
+- `skill_name` — skill identifier
+- `current_frontmatter` — existing frontmatter summary
+- `current_sections` — existing body section names
 
-- External docs (`docs/`, `README.md`, `CONTEXT.md`) — absent when skill deployed elsewhere
-- External URLs — uncontrollable, may 404 or change
-- Files outside plugin boundaries
+Read actual SKILL.md from `skill_path`. Store original for diff.
 
-Skills must be self-contained. Sibling files share skill lifecycle — reliable.
+#### Step E2: Read Edit Plan
+
+Read edit-scope-confirm output (also from upstream). Extract:
+
+- `frontmatter_changes` — fields to add, update, remove
+- `section_changes` — sections to add, update, remove
+- `dependency_changes` — `skill://` refs to add/remove
+- `trigger_phrase_changes` — description trigger phrase updates
+
+#### Step E3: Perform In-place Edits
+
+Apply changes to original SKILL.md:
+
+**Frontmatter**:
+
+- Add missing mandatory fields if plan requires
+- Update existing fields per plan
+- **Always refresh `last_updated` to today ISO date** — unconditional, per delta spec (every edit bumps timestamp)
+- Remove fields only if plan explicitly specifies
+- Preserve unchanged fields exactly
+
+**Body**:
+
+- Add new sections at position specified in plan
+- Replace existing section content per plan
+- Remove sections only if plan explicitly specifies
+- Preserve unchanged sections exactly — whitespace, line breaks, code blocks
+
+**Constraints**:
+
+- Never reorder sections not targeted
+- Never reformat code blocks or YAML fences
+- Keep original line endings
+
+#### Step E4: Validate Modified Skill
+
+Validate modified SKILL.md against every atom-skill-spec rule class (frontmatter format, Runtime constraints block, body content, language constraints, reference constraints) plus edit-specific integrity: no orphan `skill://` references, section structure intact after edit.
+
+Record each failure: rule, location, detail, suggested fix.
+
+#### Step E5: Write Modified Skill
+
+Write modified content back to `skill_path` — overwrite. Backup original before write.
+
+#### Step E6: Output Diff
+
+Compare original vs modified. Produce diff summary:
+
+```
+skill_path: <absolute path>
+name: <skill name>
+validation: passed | failed (<failure count> issues)
+frontmatter_changes: [<changed fields>]
+section_changes:
+  added: [<added section names>]
+  updated: [<updated section names>]
+  removed: [<removed section names>]
+diff_summary: <plain text before/after summary>
+```
+
+## Output
+
+Output contract per mode — see Step C6 (create) / Step E6 (edit) output blocks above. Single source, no duplicate listing.

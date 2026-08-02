@@ -51,17 +51,14 @@ describe('NodeStateSchema — happy path', () => {
     }
   });
 
-  it('parses blocked status', () => {
+  it('rejects blocked status — runtime FSM never produces it', () => {
     const raw = {
       runId: 'run-1',
       retryCount: 3,
       status: 'blocked',
     };
     const result = NodeStateSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.status).toBe('blocked');
-    }
+    expect(result.success).toBe(false);
   });
 
   it('parses skipped status', () => {

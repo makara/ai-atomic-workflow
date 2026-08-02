@@ -6,14 +6,15 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { FsmEffect, FsmNodeState } from '../../src/fsm/effects.js';
+import type { FsmEffect, FsmNodeState, FsmRunStatus } from '../../src/fsm/effects.js';
 import type { FsmEvent } from '../../src/fsm/events.js';
-import { createStateMachine } from '../../src/fsm/state-machine.js';
+import { assertLegalTransition, isLegalTransition } from '../../src/fsm/state-machine.js';
 import {
   InvalidStateTransitionError,
   transition,
   type FsmState,
   type TaskflowGraph,
+  type TransitionResult,
 } from '../../src/fsm/transition.js';
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -23,7 +24,7 @@ import {
 function singleAgentGraph(name?: string): TaskflowGraph {
   return {
     name: name ?? 'test-graph',
-    phases: [{ id: 'n1', type: 'agent' }],
+    phases: [{ id: 'n1', type: 'main' }],
   };
 }
 
@@ -31,13 +32,11 @@ function linearTwoGraph(): TaskflowGraph {
   return {
     name: 'linear-two',
     phases: [
-      { id: 'n1', type: 'agent' },
-      { id: 'n2', type: 'agent', dependsOn: ['n1'] },
+      { id: 'n1', type: 'main' },
+      { id: 'n2', type: 'main', dependsOn: ['n1'] },
     ],
   };
 }
-
-const emptyCtx = { steps: {} as Record<string, {}>, args: {} as Record<string, unknown> };
 
 function startEvent(graphName?: string): FsmEvent {
   return { type: 'START', graphName: graphName ?? 'test-graph' };
@@ -54,11 +53,6 @@ function jumpEvent(targetPhaseId: string): FsmEvent {
 }
 
 // Type guards for FsmState discriminated union branches
-function narrowNonIdle(state: FsmState) {
-  if (state.status === 'idle') throw new Error('Expected non-idle state');
-  return state;
-}
-
 function narrowRunning(state: FsmState) {
   if (state.status !== 'running') throw new Error('Expected running state');
   return state;
@@ -66,11 +60,6 @@ function narrowRunning(state: FsmState) {
 
 function narrowCompleted(state: FsmState) {
   if (state.status !== 'completed') throw new Error('Expected completed state');
-  return state;
-}
-
-function narrowBlocked(state: FsmState) {
-  if (state.status !== 'blocked') throw new Error('Expected blocked state');
   return state;
 }
 
@@ -83,11 +72,45 @@ function narrowTerminated(state: FsmState) {
 // state-machine.ts
 // ══════════════════════════════════════════════════════════════════════════
 
-describe('createStateMachine / dispatch', () => {
+// Test-local pure dispatch — legality check + transition, no stateful handle.
+function dispatchState(state: FsmState, event: FsmEvent, graph: TaskflowGraph): TransitionResult {
+  assertLegalTransition(state.status, event.type);
+  return transition(state, event, graph);
+}
+
+const idleState = (): FsmState => ({ status: 'idle' });
+
+describe('isLegalTransition / dispatch', () => {
+  it('legality matrix — idle only accepts START', () => {
+    expect(isLegalTransition('idle', 'START')).toBe(true);
+    expect(isLegalTransition('idle', 'COMPLETE')).toBe(false);
+    expect(isLegalTransition('idle', 'JUMP')).toBe(false);
+    expect(isLegalTransition('idle', 'FORCE_END')).toBe(false);
+  });
+
+  it('legality matrix — running accepts COMPLETE/JUMP/FORCE_END', () => {
+    expect(isLegalTransition('running', 'START')).toBe(false);
+    expect(isLegalTransition('running', 'COMPLETE')).toBe(true);
+    expect(isLegalTransition('running', 'JUMP')).toBe(true);
+    expect(isLegalTransition('running', 'FORCE_END')).toBe(true);
+  });
+
+  it('legality matrix — completed/terminated are terminal', () => {
+    for (const terminal of ['completed', 'terminated']) {
+      for (const ev of ['START', 'COMPLETE', 'JUMP', 'FORCE_END']) {
+        expect(isLegalTransition(terminal, ev)).toBe(false);
+      }
+    }
+  });
+
+  it('assertLegalTransition throws on illegal pair', () => {
+    expect(() => assertLegalTransition('idle', 'COMPLETE')).toThrow(InvalidStateTransitionError);
+    expect(() => assertLegalTransition('completed', 'START')).toThrow(InvalidStateTransitionError);
+  });
+
   describe('START event', () => {
     it('idle → running, first node active', () => {
-      const sm = createStateMachine(singleAgentGraph());
-      const result = sm.dispatch(startEvent());
+      const result = dispatchState(idleState(), startEvent(), singleAgentGraph());
 
       expect(result.nextState.status).toBe('running');
       const rs = narrowRunning(result.nextState);
@@ -99,16 +122,14 @@ describe('createStateMachine / dispatch', () => {
 
     it('START generates a valid UUID v4 runId', () => {
       const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-      const sm = createStateMachine(singleAgentGraph());
-      const result = sm.dispatch(startEvent());
+      const result = dispatchState(idleState(), startEvent(), singleAgentGraph());
       const rs = narrowRunning(result.nextState);
 
       expect(rs.runId).toMatch(UUID_V4_RE);
     });
 
     it('START records startedAt timestamp', () => {
-      const sm = createStateMachine(singleAgentGraph());
-      const result = sm.dispatch(startEvent());
+      const result = dispatchState(idleState(), startEvent(), singleAgentGraph());
       const rs = narrowRunning(result.nextState);
 
       expect(rs.startedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
@@ -116,8 +137,7 @@ describe('createStateMachine / dispatch', () => {
     });
 
     it('START produces persist_run_state effect with running status', () => {
-      const sm = createStateMachine(singleAgentGraph());
-      const result = sm.dispatch(startEvent());
+      const result = dispatchState(idleState(), startEvent(), singleAgentGraph());
 
       const runEffect = result.effects.find(
         (e): e is { type: 'persist_run_state'; runId: string; status: string } => e.type === 'persist_run_state',
@@ -127,8 +147,7 @@ describe('createStateMachine / dispatch', () => {
     });
 
     it('START produces persist_node_state effects for all phases', () => {
-      const sm = createStateMachine(singleAgentGraph());
-      const result = sm.dispatch(startEvent());
+      const result = dispatchState(idleState(), startEvent(), singleAgentGraph());
 
       const nodeEffects = result.effects.filter(
         (e): e is { type: 'persist_node_state'; runId: string; nodeId: string; state: FsmNodeState } =>
@@ -139,26 +158,18 @@ describe('createStateMachine / dispatch', () => {
     });
 
     it('START on non-idle throws InvalidStateTransitionError', () => {
-      const sm = createStateMachine(singleAgentGraph());
-      sm.dispatch(startEvent());
+      const running = dispatchState(idleState(), startEvent(), singleAgentGraph()).nextState;
 
-      expect(() => sm.dispatch(startEvent())).toThrow(InvalidStateTransitionError);
-    });
-
-    it('START → getState reflects running', () => {
-      const sm = createStateMachine(singleAgentGraph());
-      sm.dispatch(startEvent());
-
-      expect(sm.getState().status).toBe('running');
+      expect(() => dispatchState(running, startEvent(), singleAgentGraph())).toThrow(InvalidStateTransitionError);
     });
   });
 
   describe('COMPLETE event', () => {
     it('COMPLETE marks node done and advances to next pending', () => {
-      const sm = createStateMachine(linearTwoGraph());
-      sm.dispatch(startEvent());
+      const g = linearTwoGraph();
+      const started = dispatchState(idleState(), startEvent(), g).nextState;
 
-      const result = sm.dispatch(completeEvent('n1'));
+      const result = dispatchState(started, completeEvent('n1'), g);
       const phases = narrowRunning(result.nextState).phases;
 
       expect(phases['n1'].status).toBe('done');
@@ -167,31 +178,32 @@ describe('createStateMachine / dispatch', () => {
     });
 
     it('COMPLETE on idle throws InvalidStateTransitionError', () => {
-      const sm = createStateMachine(singleAgentGraph());
-
-      expect(() => sm.dispatch(completeEvent('n1'))).toThrow(InvalidStateTransitionError);
+      expect(() => dispatchState(idleState(), completeEvent('n1'), singleAgentGraph())).toThrow(
+        InvalidStateTransitionError,
+      );
     });
 
     it('COMPLETE for non-existent phaseId throws', () => {
-      const sm = createStateMachine(singleAgentGraph());
-      sm.dispatch(startEvent());
+      const started = dispatchState(idleState(), startEvent(), singleAgentGraph()).nextState;
 
-      expect(() => sm.dispatch(completeEvent('nonexistent'))).toThrow(InvalidStateTransitionError);
+      expect(() => dispatchState(started, completeEvent('nonexistent'), singleAgentGraph())).toThrow(
+        InvalidStateTransitionError,
+      );
     });
 
     it('COMPLETE for non-active phaseId throws', () => {
-      const sm = createStateMachine(linearTwoGraph());
-      sm.dispatch(startEvent());
+      const g = linearTwoGraph();
+      const started = dispatchState(idleState(), startEvent(), g).nextState;
 
       // n2 is pending, not active
-      expect(() => sm.dispatch(completeEvent('n2'))).toThrow(InvalidStateTransitionError);
+      expect(() => dispatchState(started, completeEvent('n2'), g)).toThrow(InvalidStateTransitionError);
     });
 
     it('COMPLETE last node → completed with persist_run_state', () => {
-      const sm = createStateMachine(singleAgentGraph());
-      sm.dispatch(startEvent());
+      const g = singleAgentGraph();
+      const started = dispatchState(idleState(), startEvent(), g).nextState;
 
-      const result = sm.dispatch(completeEvent('n1'));
+      const result = dispatchState(started, completeEvent('n1'), g);
       expect(result.nextState.status).toBe('completed');
 
       const runEffect = result.effects.find(
@@ -204,10 +216,10 @@ describe('createStateMachine / dispatch', () => {
 
   describe('FORCE_END event', () => {
     it('FORCE_END from running → terminated, unfinished nodes skipped', () => {
-      const sm = createStateMachine(linearTwoGraph());
-      sm.dispatch(startEvent());
+      const g = linearTwoGraph();
+      const started = dispatchState(idleState(), startEvent(), g).nextState;
 
-      const result = sm.dispatch(forceEndEvent);
+      const result = dispatchState(started, forceEndEvent, g);
       expect(result.nextState.status).toBe('terminated');
 
       const phases = narrowTerminated(result.nextState).phases;
@@ -222,32 +234,31 @@ describe('createStateMachine / dispatch', () => {
     });
 
     it('FORCE_END from idle throws', () => {
-      const sm = createStateMachine(singleAgentGraph());
-      expect(() => sm.dispatch(forceEndEvent)).toThrow(InvalidStateTransitionError);
+      expect(() => dispatchState(idleState(), forceEndEvent, singleAgentGraph())).toThrow(InvalidStateTransitionError);
     });
 
     it('FORCE_END from completed throws', () => {
-      const sm = createStateMachine(singleAgentGraph());
-      sm.dispatch(startEvent());
-      sm.dispatch(completeEvent('n1'));
+      const g = singleAgentGraph();
+      const started = dispatchState(idleState(), startEvent(), g).nextState;
+      const completed = dispatchState(started, completeEvent('n1'), g).nextState;
 
-      expect(() => sm.dispatch(forceEndEvent)).toThrow(InvalidStateTransitionError);
+      expect(() => dispatchState(completed, forceEndEvent, g)).toThrow(InvalidStateTransitionError);
     });
   });
 
   describe('Full cycle', () => {
     it('START → COMPLETE×N → completed (linear 2-node)', () => {
-      const sm = createStateMachine(linearTwoGraph());
+      const g = linearTwoGraph();
 
-      const r1 = sm.dispatch(startEvent());
+      const r1 = dispatchState(idleState(), startEvent(), g);
       expect(r1.nextState.status).toBe('running');
       expect(narrowRunning(r1.nextState).phases['n1'].status).toBe('active');
 
-      const r2 = sm.dispatch(completeEvent('n1'));
+      const r2 = dispatchState(r1.nextState, completeEvent('n1'), g);
       expect(r2.nextState.status).toBe('running');
       expect(narrowRunning(r2.nextState).phases['n2'].status).toBe('active');
 
-      const r3 = sm.dispatch(completeEvent('n2'));
+      const r3 = dispatchState(r2.nextState, completeEvent('n2'), g);
       expect(r3.nextState.status).toBe('completed');
       const phases = narrowCompleted(r3.nextState).phases;
       expect(phases['n1'].status).toBe('done');
@@ -255,46 +266,101 @@ describe('createStateMachine / dispatch', () => {
     });
 
     it('completed state is terminal', () => {
-      const sm = createStateMachine(singleAgentGraph());
-      sm.dispatch(startEvent());
-      sm.dispatch(completeEvent('n1'));
+      const g = singleAgentGraph();
+      const started = dispatchState(idleState(), startEvent(), g).nextState;
+      const completed = dispatchState(started, completeEvent('n1'), g).nextState;
 
-      expect(() => sm.dispatch(completeEvent('n1'))).toThrow(InvalidStateTransitionError);
+      expect(() => dispatchState(completed, completeEvent('n1'), g)).toThrow(InvalidStateTransitionError);
     });
 
     it('terminated state is terminal', () => {
-      const sm = createStateMachine(singleAgentGraph());
-      sm.dispatch(startEvent());
-      sm.dispatch(forceEndEvent);
+      const g = singleAgentGraph();
+      const started = dispatchState(idleState(), startEvent(), g).nextState;
+      const terminated = dispatchState(started, forceEndEvent, g).nextState;
 
-      expect(() => sm.dispatch(startEvent())).toThrow(InvalidStateTransitionError);
+      expect(() => dispatchState(terminated, startEvent(), g)).toThrow(InvalidStateTransitionError);
     });
 
-    it('getState tracks the full lifecycle', () => {
-      const sm = createStateMachine(singleAgentGraph());
-      expect(sm.getState().status).toBe('idle');
+    it('state threading tracks the full lifecycle', () => {
+      const g = singleAgentGraph();
+      let state: FsmState = idleState();
+      expect(state.status).toBe('idle');
 
-      sm.dispatch(startEvent());
-      expect(sm.getState().status).toBe('running');
+      state = dispatchState(state, startEvent(), g).nextState;
+      expect(state.status).toBe('running');
 
-      sm.dispatch(completeEvent('n1'));
-      expect(sm.getState().status).toBe('completed');
+      state = dispatchState(state, completeEvent('n1'), g).nextState;
+      expect(state.status).toBe('completed');
     });
   });
 
   describe('JUMP event', () => {
     it('JUMP from running succeeds', () => {
-      const sm = createStateMachine(singleAgentGraph());
-      sm.dispatch(startEvent());
+      const g = singleAgentGraph();
+      const started = dispatchState(idleState(), startEvent(), g).nextState;
 
-      expect(() => sm.dispatch(jumpEvent('n1'))).not.toThrow();
+      expect(() => dispatchState(started, jumpEvent('n1'), g)).not.toThrow();
+    });
+  });
+
+  describe('JUMP retryCount semantics', () => {
+    function runToPartialDone(g: TaskflowGraph): FsmState {
+      let state: FsmState = { status: 'idle' };
+      state = transition(state, startEvent(), g).nextState;
+      // Complete first node only — keep run in running state (later nodes active/pending)
+      state = transition(state, completeEvent(g.phases[0].id), g).nextState;
+      return state;
+    }
+
+    it('JUMP increments target retryCount from 0 to 1', () => {
+      const g = linearTwoGraph();
+      const running = runToPartialDone(g);
+
+      const result = transition(running, jumpEvent('n1'), g);
+      const phases = narrowRunning(result.nextState).phases;
+      expect(phases['n1'].status).toBe('active');
+      expect(phases['n1'].retryCount).toBe(1);
+    });
+
+    it('JUMP increments upstream closure retryCount', () => {
+      const g = linearTwoGraph();
+      const running = runToPartialDone(g);
+
+      // Jump to n2 — n1 is upstream closure, both reset
+      const result = transition(running, jumpEvent('n2'), g);
+      const phases = narrowRunning(result.nextState).phases;
+      expect(phases['n1'].status).toBe('active');
+      expect(phases['n1'].retryCount).toBe(1);
+      expect(phases['n2'].retryCount).toBe(1);
+    });
+
+    it('JUMP accumulates retryCount across repeated jumps', () => {
+      const g = linearTwoGraph();
+      let state = runToPartialDone(g);
+
+      state = transition(state, jumpEvent('n1'), g).nextState;
+      state = transition(state, completeEvent('n1'), g).nextState;
+      state = transition(state, jumpEvent('n1'), g).nextState;
+
+      const phases = narrowRunning(state).phases;
+      expect(phases['n1'].retryCount).toBe(2);
+    });
+
+    it('JUMP preserves retryCount of untouched nodes', () => {
+      const g = linearTwoGraph();
+      const running = runToPartialDone(g);
+
+      const result = transition(running, jumpEvent('n1'), g);
+      const phases = narrowRunning(result.nextState).phases;
+      // n2 is downstream of n1 — reset with incremented count
+      expect(phases['n2'].status).toBe('pending');
+      expect(phases['n2'].retryCount).toBe(1);
     });
   });
 
   describe('effects', () => {
     it('START effects: persist_run_state + persist_node_state for each phase', () => {
-      const sm = createStateMachine(singleAgentGraph());
-      const result = sm.dispatch(startEvent());
+      const result = dispatchState(idleState(), startEvent(), singleAgentGraph());
 
       const types = result.effects.map((e) => e.type);
       expect(types).toContain('persist_run_state');
@@ -302,8 +368,7 @@ describe('createStateMachine / dispatch', () => {
     });
 
     it('effects are readonly (array runtime check)', () => {
-      const sm = createStateMachine(singleAgentGraph());
-      const result = sm.dispatch(startEvent());
+      const result = dispatchState(idleState(), startEvent(), singleAgentGraph());
       expect(Array.isArray(result.effects)).toBe(true);
       expect(result.effects.length).toBeGreaterThan(0);
     });
@@ -319,7 +384,7 @@ describe('transition()', () => {
 
   describe('START transition', () => {
     it('idle → running, produces runId and phases', () => {
-      const result = transition({ status: 'idle' }, startEvent(), graph, emptyCtx);
+      const result = transition({ status: 'idle' }, startEvent(), graph);
 
       expect(result.nextState.status).toBe('running');
       const rs = narrowRunning(result.nextState);
@@ -330,7 +395,7 @@ describe('transition()', () => {
     });
 
     it('START returns TransitionResult with effects', () => {
-      const result = transition({ status: 'idle' }, startEvent(), graph, emptyCtx);
+      const result = transition({ status: 'idle' }, startEvent(), graph);
       expect(result.effects.length).toBeGreaterThan(0);
       expect(result.effects[0].type).toBe('persist_run_state');
     });
@@ -344,16 +409,16 @@ describe('transition()', () => {
         startedAt: '2024-01-01T00:00:00Z',
       };
 
-      expect(() => transition(runningState, startEvent(), graph, emptyCtx)).toThrow(InvalidStateTransitionError);
+      expect(() => transition(runningState, startEvent(), graph)).toThrow(InvalidStateTransitionError);
     });
   });
 
   describe('COMPLETE transition', () => {
     it('marks node done, next node active (linear graph)', () => {
       const g = linearTwoGraph();
-      const startResult = transition({ status: 'idle' }, startEvent(), g, emptyCtx);
+      const startResult = transition({ status: 'idle' }, startEvent(), g);
 
-      const result = transition(startResult.nextState, completeEvent('n1'), g, emptyCtx);
+      const result = transition(startResult.nextState, completeEvent('n1'), g);
       const phases = narrowRunning(result.nextState).phases;
 
       expect(phases['n1'].status).toBe('done');
@@ -363,9 +428,9 @@ describe('transition()', () => {
 
     it('COMPLETE last node → completed', () => {
       const g = singleAgentGraph();
-      const startResult = transition({ status: 'idle' }, startEvent(), g, emptyCtx);
+      const startResult = transition({ status: 'idle' }, startEvent(), g);
 
-      const result = transition(startResult.nextState, completeEvent('n1'), g, emptyCtx);
+      const result = transition(startResult.nextState, completeEvent('n1'), g);
       expect(result.nextState.status).toBe('completed');
       expect(
         result.effects.some((e) => e.type === 'persist_run_state' && 'status' in e && e.status === 'completed'),
@@ -374,20 +439,16 @@ describe('transition()', () => {
 
     it('COMPLETE non-existent phaseId throws', () => {
       const g = singleAgentGraph();
-      const startResult = transition({ status: 'idle' }, startEvent(), g, emptyCtx);
+      const startResult = transition({ status: 'idle' }, startEvent(), g);
 
-      expect(() => transition(startResult.nextState, completeEvent('bad-id'), g, emptyCtx)).toThrow(
-        InvalidStateTransitionError,
-      );
+      expect(() => transition(startResult.nextState, completeEvent('bad-id'), g)).toThrow(InvalidStateTransitionError);
     });
 
     it('COMPLETE non-active phaseId throws', () => {
       const g = linearTwoGraph();
-      const startResult = transition({ status: 'idle' }, startEvent(), g, emptyCtx);
+      const startResult = transition({ status: 'idle' }, startEvent(), g);
 
-      expect(() => transition(startResult.nextState, completeEvent('n2'), g, emptyCtx)).toThrow(
-        InvalidStateTransitionError,
-      );
+      expect(() => transition(startResult.nextState, completeEvent('n2'), g)).toThrow(InvalidStateTransitionError);
     });
   });
 
@@ -395,9 +456,9 @@ describe('transition()', () => {
     it('FORCE_END from running → terminated, pending/active nodes skipped', () => {
       const g = linearTwoGraph();
       let state: FsmState = { status: 'idle' };
-      state = transition(state, startEvent(), g, emptyCtx).nextState;
+      state = transition(state, startEvent(), g).nextState;
 
-      const result = transition(state, forceEndEvent, g, emptyCtx);
+      const result = transition(state, forceEndEvent, g);
       expect(result.nextState.status).toBe('terminated');
       const phases = narrowTerminated(result.nextState).phases;
       expect(phases['n1'].status).toBe('skipped');
@@ -405,7 +466,7 @@ describe('transition()', () => {
     });
 
     it('FORCE_END from idle throws', () => {
-      expect(() => transition({ status: 'idle' }, forceEndEvent, singleAgentGraph(), emptyCtx)).toThrow(
+      expect(() => transition({ status: 'idle' }, forceEndEvent, singleAgentGraph())).toThrow(
         InvalidStateTransitionError,
       );
     });
@@ -416,37 +477,36 @@ describe('transition()', () => {
       const g: TaskflowGraph = {
         name: 'triple',
         phases: [
-          { id: 'n1', type: 'agent' },
-          { id: 'n2', type: 'agent', dependsOn: ['n1'] },
-          { id: 'n3', type: 'agent', dependsOn: ['n2'] },
+          { id: 'n1', type: 'main' },
+          { id: 'n2', type: 'main', dependsOn: ['n1'] },
+          { id: 'n3', type: 'main', dependsOn: ['n2'] },
         ],
       };
 
       let state: FsmState = { status: 'idle' };
-      state = transition(state, startEvent(), g, emptyCtx).nextState;
+      state = transition(state, startEvent(), g).nextState;
       expect(state.status).toBe('running');
 
-      state = transition(state, completeEvent('n1'), g, emptyCtx).nextState;
+      state = transition(state, completeEvent('n1'), g).nextState;
       expect(state.status).toBe('running');
 
-      state = transition(state, completeEvent('n2'), g, emptyCtx).nextState;
+      state = transition(state, completeEvent('n2'), g).nextState;
       expect(state.status).toBe('running');
 
-      const result = transition(state, completeEvent('n3'), g, emptyCtx);
+      const result = transition(state, completeEvent('n3'), g);
       expect(result.nextState.status).toBe('completed');
     });
   });
 
-  describe('COMPLETE with skip (ADR 0036 D2)', () => {
+  describe('COMPLETE with skip', () => {
     it('skip: true → node status = skipped', () => {
       const g = singleAgentGraph();
-      const startResult = transition({ status: 'idle' }, startEvent(), g, emptyCtx);
+      const startResult = transition({ status: 'idle' }, startEvent(), g);
 
       const result = transition(
         startResult.nextState,
         { type: 'COMPLETE', phaseId: 'n1', durationMs: 10, skip: true },
         g,
-        emptyCtx,
       );
       expect(result.nextState.status).toBe('completed');
       const cs = result.nextState as Extract<FsmState, { status: 'completed' }>;
@@ -454,13 +514,12 @@ describe('transition()', () => {
     });
     it('skip: false → node status = done (normal)', () => {
       const g = singleAgentGraph();
-      const startResult = transition({ status: 'idle' }, startEvent(), g, emptyCtx);
+      const startResult = transition({ status: 'idle' }, startEvent(), g);
 
       const result = transition(
         startResult.nextState,
         { type: 'COMPLETE', phaseId: 'n1', durationMs: 10, skip: false },
         g,
-        emptyCtx,
       );
       expect(result.nextState.status).toBe('completed');
       const cs = result.nextState as Extract<FsmState, { status: 'completed' }>;
@@ -469,14 +528,9 @@ describe('transition()', () => {
 
     it('skip absent → node status = done (backward compat)', () => {
       const g = singleAgentGraph();
-      const startResult = transition({ status: 'idle' }, startEvent(), g, emptyCtx);
+      const startResult = transition({ status: 'idle' }, startEvent(), g);
 
-      const result = transition(
-        startResult.nextState,
-        { type: 'COMPLETE', phaseId: 'n1', durationMs: 10 },
-        g,
-        emptyCtx,
-      );
+      const result = transition(startResult.nextState, { type: 'COMPLETE', phaseId: 'n1', durationMs: 10 }, g);
       // single-node graph → completed after node done
       expect(result.nextState.status).toBe('completed');
       const completedState = result.nextState as Extract<FsmState, { status: 'completed' }>;
@@ -487,18 +541,17 @@ describe('transition()', () => {
       const g: TaskflowGraph = {
         name: 'skip-chain',
         phases: [
-          { id: 'n1', type: 'agent' },
-          { id: 'n2', type: 'agent', dependsOn: ['n1'] },
+          { id: 'n1', type: 'main' },
+          { id: 'n2', type: 'main', dependsOn: ['n1'] },
         ],
       };
-      const startResult = transition({ status: 'idle' }, startEvent(), g, emptyCtx);
+      const startResult = transition({ status: 'idle' }, startEvent(), g);
 
       // skip n1
       const afterSkip = transition(
         startResult.nextState,
         { type: 'COMPLETE', phaseId: 'n1', durationMs: 10, skip: true },
         g,
-        emptyCtx,
       );
       const phases = narrowRunning(afterSkip.nextState).phases;
       expect(phases['n1'].status).toBe('skipped');
@@ -507,26 +560,26 @@ describe('transition()', () => {
     });
   });
 
-  describe('Cascade-skip for OR-join (ADR 0036 D4)', () => {
+  describe('Cascade-skip for OR-join', () => {
     it('OR-join node auto-skipped when all upstream skipped', () => {
       const g: TaskflowGraph = {
         name: 'or-join-cascade',
         phases: [
-          { id: 'a', type: 'agent' },
-          { id: 'b', type: 'agent' },
-          { id: 'c', type: 'agent', dependsOn: ['a', 'b'], join: 'any' },
+          { id: 'a', type: 'main' },
+          { id: 'b', type: 'main' },
+          { id: 'c', type: 'main', dependsOn: ['a', 'b'], join: 'any' },
         ],
       };
       let state: FsmState = { status: 'idle' };
-      state = transition(state, startEvent(), g, emptyCtx).nextState;
+      state = transition(state, startEvent(), g).nextState;
 
       // skip both upstream
-      state = transition(state, { type: 'COMPLETE', phaseId: 'a', durationMs: 10, skip: true }, g, emptyCtx).nextState;
+      state = transition(state, { type: 'COMPLETE', phaseId: 'a', durationMs: 10, skip: true }, g).nextState;
       // b is still active, c should not be skipped yet (b is still pending → wait for b)
       let phases = narrowRunning(state).phases;
       expect(phases['c'].status).toBe('pending');
 
-      state = transition(state, { type: 'COMPLETE', phaseId: 'b', durationMs: 10, skip: true }, g, emptyCtx).nextState;
+      state = transition(state, { type: 'COMPLETE', phaseId: 'b', durationMs: 10, skip: true }, g).nextState;
       // both upstream skipped → c cascade-skipped → all terminal → completed
       expect(state.status).toBe('completed');
       const completedState = state as Extract<FsmState, { status: 'completed' }>;
@@ -537,17 +590,17 @@ describe('transition()', () => {
       const g: TaskflowGraph = {
         name: 'or-join-partial',
         phases: [
-          { id: 'a', type: 'agent' },
-          { id: 'b', type: 'agent' },
-          { id: 'c', type: 'agent', dependsOn: ['a', 'b'], join: 'any' },
+          { id: 'a', type: 'main' },
+          { id: 'b', type: 'main' },
+          { id: 'c', type: 'main', dependsOn: ['a', 'b'], join: 'any' },
         ],
       };
       let state: FsmState = { status: 'idle' };
-      state = transition(state, startEvent(), g, emptyCtx).nextState;
+      state = transition(state, startEvent(), g).nextState;
 
       // a done normally, b skipped
-      state = transition(state, { type: 'COMPLETE', phaseId: 'a', durationMs: 10 }, g, emptyCtx).nextState;
-      state = transition(state, { type: 'COMPLETE', phaseId: 'b', durationMs: 10, skip: true }, g, emptyCtx).nextState;
+      state = transition(state, { type: 'COMPLETE', phaseId: 'a', durationMs: 10 }, g).nextState;
+      state = transition(state, { type: 'COMPLETE', phaseId: 'b', durationMs: 10, skip: true }, g).nextState;
       const phases = narrowRunning(state).phases;
       // c should be active (unblocked by a done + OR-join)
       expect(phases['c'].status).toBe('active');
@@ -592,9 +645,8 @@ describe('InvalidStateTransitionError', () => {
   });
 
   it('thrown by dispatch() on illegal transition', () => {
-    const sm = createStateMachine(singleAgentGraph());
     try {
-      sm.dispatch(completeEvent('n1'));
+      dispatchState(idleState(), completeEvent('n1'), singleAgentGraph());
       expect.fail('should have thrown');
     } catch (e) {
       expect(e).toBeInstanceOf(InvalidStateTransitionError);
@@ -607,7 +659,7 @@ describe('InvalidStateTransitionError', () => {
 
   it('thrown by transition() on illegal state', () => {
     try {
-      transition({ status: 'idle' }, completeEvent('n1'), singleAgentGraph(), emptyCtx);
+      transition({ status: 'idle' }, completeEvent('n1'), singleAgentGraph());
       expect.fail('should have thrown');
     } catch (e) {
       expect(e).toBeInstanceOf(InvalidStateTransitionError);
@@ -678,7 +730,7 @@ describe('FsmEvent discriminated union', () => {
       }
     });
 
-    it('COMPLETE has optional skip flag (ADR 0036 D2)', () => {
+    it('COMPLETE has optional skip flag', () => {
       const evSkip: FsmEvent = { type: 'COMPLETE', phaseId: 'n1', durationMs: 42, skip: true };
       if (evSkip.type === 'COMPLETE') {
         expect(evSkip.skip).toBe(true);
@@ -743,11 +795,11 @@ describe('FsmEffect discriminated union', () => {
       const eff: FsmEffect = {
         type: 'reset_upstream',
         runId: 'r1',
-        gateNodeId: 'g1',
+        fromNodeId: 'g1',
       };
       if (eff.type === 'reset_upstream') {
         expect(eff.runId).toBe('r1');
-        expect(eff.gateNodeId).toBe('g1');
+        expect(eff.fromNodeId).toBe('g1');
       } else {
         expect.fail('should be reset_upstream');
       }
@@ -793,17 +845,6 @@ describe('FsmEffect discriminated union', () => {
       expect(ns.durationMs).toBe(5000);
     });
 
-    it('blocked state', () => {
-      const ns: FsmNodeState = {
-        status: 'blocked',
-        retryCount: 3,
-        completedAt: '2024-01-01T00:00:10Z',
-        durationMs: 10000,
-      };
-      expect(ns.status).toBe('blocked');
-      expect(ns.retryCount).toBe(3);
-    });
-
     it('skipped state', () => {
       const ns: FsmNodeState = {
         status: 'skipped',
@@ -817,13 +858,8 @@ describe('FsmEffect discriminated union', () => {
 
   describe('FsmRunStatus', () => {
     it('all status values are assignable', () => {
-      const statuses: Array<'running' | 'completed' | 'blocked' | 'terminated'> = [
-        'running',
-        'completed',
-        'blocked',
-        'terminated',
-      ];
-      expect(statuses.length).toBe(4);
+      const statuses: Array<FsmRunStatus> = ['running', 'completed', 'terminated'];
+      expect(statuses.length).toBe(3);
     });
   });
 });

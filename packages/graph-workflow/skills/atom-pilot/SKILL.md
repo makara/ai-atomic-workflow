@@ -3,11 +3,11 @@ name: atom-pilot
 description: Graph lifecycle manager — execute→advance loop. Dispatch via skill://atom-phase-handler — single entry point, routes by node.type internally. Use when running taskflow graphs, mentions /skill:atom-pilot, graph execution, run workflow, taskflow run.
 argument-hint: '<graph-name> [--verbose] [--debug]'
 user-invocable: true
-version: 3.3.0
-last_updated: '2026-07-29'
+version: 3.4.1
+last_updated: '2026-08-01'
 ---
 
-> **Runtime constraints** — load `skill://atom-kernel` for task() contract and question() decision UI. Load `skill://atom-phase-handler` for {node, snapshot?} data handling, single-node dispatch, and error handling. Detect graph-scheduler MCP tools at runtime — see `skill://atom-tool-detection`.
+> **Runtime constraints** — load `skill://atom-kernel` for task() contract and question() decision UI. Load `skill://atom-phase-handler` for {node, snapshot?} data handling, single-node dispatch, and error handling. Detect graph-scheduler MCP tools at runtime — see atom-kernel §Graph-Scheduler Tool Detection.
 
 > **Layer**: atom — graph lifecycle manager
 
@@ -21,15 +21,15 @@ Pilot mode: start graph, execute nodes one-by-one, pause for manual commands bet
 
 # Entry
 
-/skill:atom-pilot <graph-name> [--verbose] [--debug]
+## Entry
 
 **MUST EXECUTE** — when user invokes /skill:atom-pilot <graph-name>, begin graph execution immediately. No questions, no confirmation, no exceptions. Invocation IS the command.
 
 Execution flow:
 
-1. Load `skill://atom-kernel` — task() contract + skip-checkpoint mode
+1. Load `skill://atom-kernel` — task() contract
 2. Load `skill://atom-phase-handler` — node dispatch schema
-3. Detect graph-scheduler MCP tools per §Graph-Scheduler Tool Detection — then call graph_start { graphName } → get { runId, next }
+3. Detect graph-scheduler MCP tools per §Graph-Scheduler Tool Detection — then call graph_start { graphName } → get { runId, node }
 4. Enter execute→advance loop per Loop Mechanics
 
 Verbosity: `--verbose` show MCP call summaries + eval details. `--debug` add raw MCP JSON. Default quiet.
@@ -38,13 +38,13 @@ Verbosity: `--verbose` show MCP call summaries + eval details. `--debug` add raw
 
 # Graph-Scheduler Tool Detection
 
-Detect graph-scheduler MCP tools at runtime — see `skill://atom-tool-detection`. Tool parameter and return value schemas unchanged (see §MCP Tool Reference).
+Detect graph-scheduler MCP tools at runtime — 9-tool substring matching rules live in atom-kernel §Graph-Scheduler Tool Detection (platform primitives, loaded with the kernel). Tool parameter and return value schemas unchanged (see §MCP Tool Reference).
 
 ```
-graph_start { graphName } → { runId, next: NextNode }
+graph_start { graphName } → { runId, node: NodeDetail | null }
 ```
 
-Scheduler resolve graph name via merged registry. Return `runId` + first `NextNode`. Agent hold `runId` for all subsequent calls.
+Scheduler resolve graph name via merged registry. Return `runId` + first `node` (NodeDetail | null). Agent hold `runId` for all subsequent calls.
 
 ---
 
@@ -69,13 +69,6 @@ Platform harness auto-display raw tool I/O — beyond agent control. Agent contr
 ## Quiet (default)
 
 Per-node status line + final result table.
-
-### Agent node
-
-```
-── [N/M] <nodeId> · agent ──
-   ✅ "<output snippet>"  ⚡<N>ms
-```
 
 ### Skipped node
 
@@ -115,7 +108,7 @@ Result table:
 |nodeId|Skill|Status|Duration|Output summary|
 |-|-|-|-|-|
 
-Status icons: ✅ = agent done, ⚠️ = failed, ⏭ = skipped.
+Status icons: ✅ = done, ⚠️ = failed, ⏭ = skipped.
 
 ## Verbose (--verbose)
 
@@ -149,7 +142,7 @@ Tool names detected at runtime per §Graph-Scheduler Tool Detection. Parameter s
 |graph_clean_completed|clean completed runs|before?|
 |graph_clean_all|clean all runs|—|
 
-`graph_start` return `{ runId, next }`. `graph_advance` return `NextNode` or `"done"`.
+`graph_start` returns `{ runId, node }`. `graph_advance` / `graph_jump` return `{ snapshot, node }` — `node: null` = graph complete (`fsmState` `completed`).
 
 ---
 
@@ -167,10 +160,10 @@ Execute→advance cycle:
 │                                                  │
 │  (c) call graph_advance                         │
 │      { runId, nodeId, durationMs, skip }           │
-│      → NextNode | "done"                         │
+│      → { snapshot, node } — node null = done     │
 │                                                  │
-│  (d) "done" → report results → exit              │
-│      NextNode → goto (a)                         │
+│  (d) node null → report results → exit           │
+│      node present → goto (a)                     │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -182,17 +175,16 @@ Execute→advance cycle:
 
 Receive `{ node, snapshot? }` from graph_advance/graph_start. Delegate to `skill://atom-phase-handler` — single-node dispatch by node.type. See `skill://atom-phase-handler` for full schema and dispatch rules.
 
-Node types:
+Node types — dispatched by type (main/approval; handlerSkill constant `atom-phase-handler`):
 
-- `node.type = "agent"` → handler delegates to atom-phase-agent (5-step flow)
-- `node.type = "main"` → handler executes inline
+- `node.type = "main"` → handler executes inline (with inline context assembly when channels present)
 - `node.type = "approval"` → handler constructs question() from routingActions, returns IApprovalDecision → pilot routes per §Approval Decision Processing
 
 Node = null → graph complete.
 
 ## Approval Decision Processing
 
-After handler returns `{ status, output, durationMs }` for approval node, parse `output` as `IApprovalDecision { action, target?, note? }`.
+After handler returns `{ status, output, durationMs }` for approval node, parse `output` as `IApprovalDecision { action, target?, note?, label? }` — `label` records chosen option label, unused by pilot routing, for downstream when-guard observability (persisted decision file).
 
 |action|MCP call|note|
 |-|-|-|
@@ -206,15 +198,15 @@ Normal advance. `note` logged to run metadata — no routing impact.
 
 ### retry
 
-`retryTarget` inferred from current approval node's `dependsOn` in snapshot. retry re-executes upstream dependency, not approval itself. `note` injected as retry feedback to upstream context.
+`retryTarget` from `IApprovalDecision.target` when present. Routing targets SHALL be explicit — the `dependsOn[0]` fallback is deprecated and emits a validate warning; the snapshot carries no `dependsOn`, so a target-less retry degrades to `continue` (per atom-graph-spec §Approval Routing). retry re-executes target node instead of approval itself. `note` injected as retry feedback to upstream context.
 
-If `dependsOn` empty or snapshot unavailable → report error, fallback to `continue`.
+If `IApprovalDecision.target` absent → report error, fallback to `continue`.
 
 ### jump
 
 Use `IApprovalDecision.target`. Must be valid nodeId in snapshot. `note` logged as jump reason.
 
-> **After `graph_jump`**: response returns NextNode → re-enter execute loop. `graph_advance` handles normal advance flow.
+> **After `graph_jump`**: response returns `{ snapshot, node }` → re-enter execute loop. `graph_advance` handles normal advance flow.
 
 ## Error Handling
 
@@ -235,7 +227,7 @@ After loop exit, report per Display Rules. Table:
 |nodeId|Skill|Status|Duration|Output summary|
 |-|-|-|-|-|
 
-Status icons: ✅ = agent done, ⚠️ = failed, ⏭ = skipped.
+Status icons: ✅ = done, ⚠️ = failed, ⏭ = skipped.
 
 Also: total wall-clock time, approval decisions, retry counts.
 

@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['server.ts', 'src/cli/entry.ts'],
+  entry: ['server.ts'],
   target: ['node22'],
   format: ['esm'],
   clean: true,

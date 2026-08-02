@@ -1,0 +1,90 @@
+name: openspec-apply
+phases:
+  # Stage 1: Apply — implement the openspec change (entry contract)
+  - id: apply-change
+    type: main
+    dependsOn: []
+    skill: openspec-apply-change
+    channels:
+      - node:change-review
+    task: |
+      Implement tasks from the confirmed openspec change per openspec-apply-change skill.
+
+      Change name resolution — NEVER ask the user:
+      1. {args.changeName} if provided (graph_start args).
+      2. Else `openspec list --json` — exactly one active change → use it.
+      3. Else apply_status: blocked + candidate list, implement nothing.
+
+      Re-run rounds: change-review output is injected via node:change-review channel — FIRST fix every finding, THEN continue remaining tasks.
+
+      Output contract:
+        - change_name: <name>
+        - apply_status: complete | blocked | partial
+        - changed_files: [paths]
+        - spec_paths: [contextFiles paths]
+        - blocked_reason: <text when partial/blocked>
+
+  # Stage 2: Review — dual-axis audit of the implementation
+  - id: change-review
+    type: main
+    dependsOn: [apply-change]
+    skill: code-review
+    agent: [reviewer, task]
+    channels:
+      - skill:atom-graph-spec
+    task: |
+      Dual-axis review of the openspec change implementation per code-review (use ## Agent hints for axis sub-agents).
+
+      Artifact set: change implementation — delta specs (openspec/changes/<change_name>/specs/**), design/tasks, and changed_files from apply-change output (injected).
+      Standards: atom-graph-spec (injected) for graph definitions; repo-documented coding standards for code — auto-discovered per code-review §3 (repository scan + Fowler smell baseline).
+      Spec: the change's delta specs — every SHALL requirement implemented; graph-definition hygiene — eval conditions bounded by retryAttempt, retry targets are writer nodes, conditions reference contract fields; output contract — apply-change output carries change_name/apply_status/changed_files/spec_paths.
+
+      Output machine-parseable YAML report with overall: pass | fail. Write report (main agent collects).
+
+  # Stage 3: Gate — bounded auto-rework on FAIL, human approve otherwise
+  - id: change-accept
+    type: approval
+    dependsOn: [change-review]
+    eval:
+      - when: 'change-review output shows overall: fail AND retryAttempt < 2'
+        action: retry
+        target: apply-change
+        note: 'auto: review found blocking issues — fix and re-review'
+    routing:
+      actions:
+        - action: continue
+          label: 'Approve and archive'
+          description: 'Implementation passes review — archive the change'
+        - action: retry
+          target: apply-change
+          label: 'Revise implementation'
+          description: 'Implementation needs changes — re-run apply-change with review feedback'
+        - action: jump
+          target: apply-change
+          label: 'Restart implementation'
+          description: 'Fundamental issues — re-apply from scratch'
+
+  # Stage 4: Archive — finalize the completed change
+  - id: archive
+    type: main
+    dependsOn: [change-accept]
+    skill: atom-openspec-archive
+    channels:
+      - node:apply-change
+    task: |
+      Archive the completed openspec change via openspec archive CLI.
+
+      Load atom-kernel (injected). Read change-accept output (injected via dependsOn implicit context).
+      Read apply-change output (injected via node:apply-change context channel) for change metadata.
+
+      Execute per atom-openspec-archive flow:
+      1. Determine change_name from apply-change output change_name field; if absent, `openspec list --json` filtered to complete changes — single entry use it, multiple/zero → archive_status: blocked + candidates. NEVER ask user.
+      2. Reverse-validate task completion against code evidence before archive (openspec instructions apply --json + verification.md).
+      3. Run `openspec archive <change> --yes --json`.
+      4. Verify archive result — change moved to archive, specs synced.
+
+      Write output (main agent collects):
+        - archive_status: success | failed | blocked
+        - change_name: <name>
+        - validation_result: pass | fail | warn
+        - message: <summary>

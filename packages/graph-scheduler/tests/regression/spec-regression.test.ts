@@ -42,7 +42,7 @@ function validGraph(overrides?: Record<string, unknown>): Record<string, unknown
   return {
     name: 'test-graph',
     version: 1,
-    phases: [{ id: 'agent-step', type: 'agent', task: 'do work' }],
+    phases: [{ id: 'agent-step', type: 'main', skill: 'entry-agent-skill', task: 'do work' }],
     ...overrides,
   };
 }
@@ -52,19 +52,13 @@ async function createTestRuntime(
   fix: Fixture,
   opts?: {
     registryPaths?: string[];
-    agentRegistry?: Array<{ type: string; skill: string }>;
   },
 ): Promise<SchedulerRuntime> {
-  // Always include agent base — builtin only has approval
-  const baseAgentEntry = { type: 'agent', skill: 'atom-phase-agent' };
-  const mergedAgentRegistry = opts?.agentRegistry ? [baseAgentEntry, ...opts.agentRegistry] : [baseAgentEntry];
-
   return Effect.runPromise(
     createRuntime({
       dbPath: ':memory:',
       taskflowDir: fix.taskflowDir,
       registryPaths: opts?.registryPaths,
-      agentRegistry: mergedAgentRegistry as any,
     }),
   );
 }
@@ -97,7 +91,7 @@ describe('Graph loading chain (name → registry → .taskflow.yaml)', () => {
     expect(result.runId).toBeTruthy();
     expect(result.node).toBeDefined();
     expect(result.node?.nodeId).toBe('agent-step');
-    expect(result.node?.type).toBe('agent');
+    expect(result.node?.type).toBe('main');
   });
 
   it('falls back to {name}.taskflow.yaml when name not in registry', async () => {
@@ -148,8 +142,9 @@ describe('Schema validation (valid / invalid taskflow YAML)', () => {
       name: 'valid',
       version: 1,
       phases: [
-        { id: 'a1', type: 'agent', task: 'step 1' },
-        { id: 'ap1', type: 'approval', task: 'decide' },
+        { id: 'a1', type: 'main', skill: 'entry-agent-skill', task: 'step 1' },
+        // approval requires exactly one review-convergence dep
+        { id: 'ap1', type: 'approval', task: 'decide', dependsOn: ['a1'] },
       ],
     });
 
@@ -157,6 +152,7 @@ describe('Schema validation (valid / invalid taskflow YAML)', () => {
     const result = await rt.graphStart('valid');
     expect(result.runId).toBeTruthy();
     expect(result.node?.nodeId).toBe('a1');
+    expect(result.node?.skill).toBe('entry-agent-skill');
   });
 
   it('accepts version as string (lenient validation)', async () => {
@@ -172,7 +168,7 @@ describe('Schema validation (valid / invalid taskflow YAML)', () => {
     writeFixtureFile(fix, 'bad-field.taskflow.yaml', {
       name: 'bad-field',
       version: 1,
-      phases: [{ id: 'p1', type: 'agent', task: 'x', garbageField: 42 }],
+      phases: [{ id: 'p1', type: 'main', skill: 'entry-agent-skill', task: 'x', garbageField: 42 }],
     });
 
     const rt = await createTestRuntime(fix);
@@ -221,54 +217,37 @@ describe('Agent registry merge (builtin + project override)', () => {
     fix.cleanup();
   });
 
-  it('returns builtin default skills for agent and approval phases', async () => {
+  it('rejects removed agent type at load (GraphDefinitionError — schema enum gate)', async () => {
     writeFixtureFile(fix, 'skills-default.taskflow.yaml', {
       name: 'skills-default',
       version: 1,
-      phases: [
-        { id: 'a1', type: 'agent', task: 'run' },
-        { id: 'ap1', type: 'approval', task: 'decide' },
-      ],
+      phases: [{ id: 'a1', type: 'agent', task: 'run' }],
     });
 
     const rt = await createTestRuntime(fix);
-    const result = await rt.graphStart('skills-default');
-
-    expect(result.node).toBeDefined();
-    expect(result.node?.nodeId).toBe('a1');
-    // Builtin default: agent → atom-phase-agent
-    expect(result.node?.entrySkill).toBe('atom-phase-agent');
+    // Phase type 'agent' is not in the closed enum — schema parse fails first
+    // (GraphDefinitionError with the enum violation).
+    const err = (await rt.graphStart('skills-default').catch((e: unknown) => e)) as {
+      _tag?: string;
+      message?: string;
+    };
+    expect(err).toBeDefined();
+    expect(err?._tag).toBe('GraphDefinitionError');
+    expect(String(err?.message)).toContain('Schema validation failed');
   });
 
-  it('applies project override — replaces builtin mapping', async () => {
+  it('applies phase skill — handlerSkill is the constant', async () => {
     writeFixtureFile(fix, 'skills-override.taskflow.yaml', {
       name: 'skills-override',
       version: 1,
-      phases: [{ id: 'a1', type: 'agent', task: 'custom agent' }],
+      phases: [{ id: 'a1', type: 'main', skill: 'my-custom-agent-skill', task: 'custom agent' }],
     });
 
-    const rt = await createTestRuntime(fix, {
-      agentRegistry: [{ type: 'agent', skill: 'my-custom-agent-skill' }],
-    });
+    const rt = await createTestRuntime(fix);
 
     const result = await rt.graphStart('skills-override');
-    expect(result.node?.entrySkill).toBe('my-custom-agent-skill');
-  });
-
-  it('merges project additions without losing builtin mappings', async () => {
-    // Project adds a custom phase type alongside default agent
-    writeFixtureFile(fix, 'skills-add.taskflow.yaml', {
-      name: 'skills-add',
-      version: 1,
-      phases: [{ id: 'a1', type: 'agent', task: 'standard agent' }],
-    });
-
-    const rt = await createTestRuntime(fix, {
-      agentRegistry: [{ type: 'custom-type', skill: 'custom-skill' }],
-    });
-
-    const result = await rt.graphStart('skills-add');
-    // Builtin mapping still applies for agent type
-    expect(result.node?.entrySkill).toBe('atom-phase-agent');
+    // skill comes from phase.skill; handlerSkill is the constant
+    expect(result.node?.skill).toBe('my-custom-agent-skill');
+    expect(result.node?.handlerSkill).toBe('atom-phase-handler');
   });
 });

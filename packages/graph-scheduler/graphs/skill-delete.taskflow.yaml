@@ -1,0 +1,149 @@
+name: skill-delete
+phases:
+  - id: skill-select
+    type: main
+    dependsOn: []
+    task: |
+      If plan-parse upstream provides skill_delete_name (injected when orchestrated):
+        Use it directly — skip interview
+      Else (standalone context):
+        Conduct interview() to collect scope
+
+      Load atom-kernel (injected). Conduct interview to confirm skill to delete.
+
+      1. Search conversation for user-provided skill name or path.
+      2. If ambiguous, ask clarifying questions via question() per atom-kernel §question():
+        - Skill name (kebab-case)
+        - Skill file path (relative to project root)
+      3. Confirm deletion scope — verify skill exists before proceeding:
+        - Read skill file at confirmed path
+        - Check registry for any references
+        - Mark skill_confirmed: true/false in output
+      4. Write output (main agent collects):
+        - skill_name: <name>
+        - skill_path: <path>
+        - skill_confirmed: true/false
+
+  - id: impact-analysis
+    type: main
+    dependsOn: [skill-select]
+    when: 'skill-select output shows skill_confirmed: true — proceed with impact analysis'
+    task: |
+      Analyze impact scope of deleting the confirmed skill.
+
+      Load atom-kernel (injected) for solve() behavior contract.
+      Read skill-select output (injected via dependsOn implicit context).
+      Execute impact analysis:
+
+      1. Reference graph analysis:
+        - Search all .taskflow.yaml files in graphs/ for references to this skill name
+        - Check skill field in main phases
+        - Check channels entries referencing the skill
+      2. Registry analysis:
+        - Check registry.json for any entry pointing to this skill file
+      3. Dependency graph analysis:
+        - Search all other skills for skill:// references to this skill
+        - Check if any skill depends on this one
+      Write output (main agent collects):
+        - affected_graphs: [list of graph names]
+        - affected_skills: [list of skill names]
+        - registry_entries: [list of registry keys]
+        - impact_severity: low | medium | high
+        - impact_summary: <description>
+
+  - id: delete-confirm
+    type: main
+    dependsOn: [impact-analysis]
+    channels:
+      - node:skill-select
+    task: |
+      Confirm delete decision with impact report and irreversible warning.
+
+      Read impact-analysis output (injected via dependsOn implicit context).
+      Read skill-select upstream output file.
+      Present via question() per atom-kernel §question():
+
+      1. Display impact report — affected graphs, skills, registry entries
+      2. Display warning: "Deletion is IRREVERSIBLE. No undo command available."
+      3. Ask user to confirm: "Proceed with deletion?" with options:
+        - Proceed — continue to execution
+        - Abort — stop the graph
+      4. If user confirms, proceed. If abort, mark delete_confirmed: false.
+      5. Write output (main agent collects):
+        - delete_confirmed: true/false
+        - abort_reason: <string if aborted>
+
+  - id: skill-delete-execute
+    type: main
+    dependsOn: [delete-confirm]
+    when: 'delete-confirm output shows delete_confirmed: true — user confirmed deletion'
+    channels:
+      - node:skill-select
+    task: |
+      Execute skill deletion — file removal + registry update.
+
+      Read delete-confirm output (injected via dependsOn implicit context).
+      Read skill-select output (injected via dependsOn implicit context).
+
+      Execute 3-step deletion per solve() primitive:
+
+      confirm(goal): Confirm deletion scope with user one last time. Verify skill path and name are correct.
+
+      research: Identify all files and registry entries to modify:
+        - Skill SKILL.md file path from skill-select output
+        - Any associated files (e.g., examples, tests)
+        - registry.json entry if present
+        - Check no other skill depends on this one (re-verify impact)
+
+      execute:
+        1. Remove skill file at confirmed path
+        2. If registry.json has entry for this skill, remove it and rewrite registry.json
+        3. Verify post-deletion state:
+          - Skill file no longer exists at path
+          - Registry entry removed (if was present)
+          - No broken skill:// references remain
+
+      Write output (main agent collects):
+        - deleted_files: [list of removed paths]
+        - registry_updated: true/false
+        - post_verification: pass | fail | warn
+        - verification_details: <summary>
+
+  - id: delete-review
+    type: main
+    dependsOn: [skill-delete-execute]
+    skill: code-review
+    agent: [reviewer, task]
+    task: |
+      Review delete result per code-review (use ## Agent hints for axis sub-agents).
+
+      Artifact: delete execution results from skill-delete-execute output (injected).
+      Standards: atom-graph-spec (injected) — verify registry.json integrity, no broken references.
+      Spec: skill-select output (injected) — check deletion matches confirmed scope (correct skill, correct files).
+
+      Output machine-parseable YAML with overall: pass | fail. Write report (main agent collects).
+    channels:
+      - node:skill-select
+      - skill:atom-graph-spec
+
+  - id: delete-accept
+    type: approval
+    dependsOn: [delete-review]
+    eval:
+      - when: 'delete-review output shows overall: fail AND retryAttempt < 2'
+        action: retry
+        target: skill-delete-execute
+        note: 'auto: review found blocking issues — fix and re-review'
+    routing:
+      actions:
+        - action: continue
+          label: 'Accept deletion'
+          description: 'Delete is complete and reviewed — finalize'
+        - action: retry
+          target: skill-delete-execute
+          label: 'Revise deletion'
+          description: 'Delete needs corrections — re-run skill-delete-execute with review feedback'
+        - action: jump
+          target: impact-analysis
+          label: 'Revise impact analysis'
+          description: 'Fundamental issues — re-analyze from impact-analysis'

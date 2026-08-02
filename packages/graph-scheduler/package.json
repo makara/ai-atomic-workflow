@@ -3,7 +3,6 @@
   "version": "0.0.0",
   "type": "module",
   "bin": {
-    "atom-graph-config": "./src/cli/entry.ts",
     "atom-graph-scheduler": "./server.ts"
   },
   "scripts": {
@@ -14,15 +13,16 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.29.0",
-    "effect": "3.22.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "effect": "3.22.1",
     "libsql": "0.5.29",
     "yaml": "2.9.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.1.2",
     "tsup": "^8.5.1",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   }
 }

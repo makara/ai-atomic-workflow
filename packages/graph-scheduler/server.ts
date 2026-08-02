@@ -38,11 +38,12 @@ const TAG_TO_CODE: Record<string, string> = {
   NotFoundError: 'RUN_NOT_FOUND',
   InvalidStateError: 'INVALID_STATE',
   GraphDefinitionError: 'GRAPH_NOT_FOUND',
+  FlowPhaseError: 'FLOW_PHASE_ERROR',
   PersistenceError: 'PERSISTENCE_ERROR',
-  RunNotFound: 'RUN_NOT_FOUND',
-  GraphNotFound: 'GRAPH_NOT_FOUND',
-  PhaseHandlerError: 'PHASE_HANDLER_ERROR',
-  UnknownPhaseTypeError: 'UNKNOWN_PHASE_TYPE',
+  FileSystemError: 'FILE_SYSTEM_ERROR',
+  RegistryLoadError: 'REGISTRY_LOAD_ERROR',
+  DispatchConfigError: 'DISPATCH_CONFIG_ERROR',
+  ConfigError: 'CONFIG_ERROR',
 };
 
 /** Extract _tag from a tagged error object. */
@@ -69,33 +70,37 @@ function toMcpError(err: unknown): McpErrorInfo {
   return { message, code };
 }
 
-// ── Zod schemas (mirrors 05-interfaces.md §一 tool inputSchema) ──────
+// ── Zod schemas for MCP tool inputSchema ──────────────────────────
 
 const GraphStartSchema = z.object({
-  graphName: z.string().min(1).describe('图名称——对应 .taskflow.yaml 的 name 字段或 registry entry'),
+  graphName: z.string().min(1).describe('Graph name — matches the name field of .taskflow.yaml or a registry entry'),
   args: z
     .record(z.string(), z.unknown())
     .optional()
-    .describe('可选——图调用参数。值可在 task 模板中通过 {args.key} 引用'),
+    .describe('Optional — graph invocation arguments. Values are referenced as {args.key} in task templates'),
 });
 
 const GraphAdvanceSchema = z.object({
-  runId: z.string().min(1).describe('图运行 ID——graph_start 返回的 UUID'),
-  nodeId: z.string().min(1).describe('完成的节点 ID'),
-  durationMs: z.number().int().min(0).describe('执行耗时（毫秒）'),
+  runId: z.string().min(1).describe('Graph run ID — UUID returned by graph_start'),
+  nodeId: z.string().min(1).describe('ID of the completed node'),
+  durationMs: z.number().int().min(0).describe('Execution duration in milliseconds'),
+  skip: z
+    .boolean()
+    .optional()
+    .describe('Optional — pass true when the when-guard evaluates false; node is marked skipped'),
 });
 
 const GraphJumpSchema = z.object({
-  runId: z.string().min(1).describe('图运行 ID'),
-  targetPhaseId: z.string().min(1).describe('目标 phase ID——跳转后从此节点开始执行'),
+  runId: z.string().min(1).describe('Graph run ID'),
+  targetPhaseId: z.string().min(1).describe('Target phase ID — execution starts from this node after the jump'),
 });
 
 const GraphForceEndSchema = z.object({
-  runId: z.string().min(1).describe('图运行 ID——要强制终止的 run'),
+  runId: z.string().min(1).describe('Graph run ID — the run to force-terminate'),
 });
 
 const GraphStatusSchema = z.object({
-  runId: z.string().min(1).describe('图运行 ID'),
+  runId: z.string().min(1).describe('Graph run ID'),
 });
 
 const GraphListSchema = z.object({});
@@ -103,7 +108,10 @@ const GraphListSchema = z.object({});
 const GraphInitSchema = z.object({});
 
 const GraphCleanCompletedSchema = z.object({
-  before: z.string().optional().describe('ISO 8601 时间戳——清理此时间之前完成的 run。不传则清理全部已完成'),
+  before: z
+    .string()
+    .optional()
+    .describe('ISO 8601 timestamp — clean up runs completed before this time. Omit to clean all completed runs'),
 });
 
 const GraphCleanAllSchema = z.object({});
@@ -118,7 +126,7 @@ const server = new McpServer({
 // Tool 1: graph_start — create run + return first node
 server.tool(
   'graph_start',
-  '启动新图执行 run。创建 run + 初始化所有节点状态 + 返回第一个待执行节点。',
+  'Start a new graph run. Creates the run, initializes all node states, returns the first pending node.',
   GraphStartSchema.shape,
   async (args) => {
     const rt = await getRuntime();
@@ -141,12 +149,12 @@ server.tool(
 // Tool 2: graph_advance — report completion + get next node
 server.tool(
   'graph_advance',
-  '汇报 agent 节点完成——并获取下一个待执行节点。一步完成 notify + askNext。始终分发 COMPLETE 事件。',
+  'Report an agent node as complete and fetch the next pending node. Combines notify + askNext in one step. Always dispatches the COMPLETE event.',
   GraphAdvanceSchema.shape,
   async (args) => {
     const rt = await getRuntime();
     try {
-      const result = await rt.graphAdvance(args.runId, args.nodeId, args.durationMs);
+      const result = await rt.graphAdvance(args.runId, args.nodeId, args.durationMs, args.skip);
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result) }],
       };
@@ -164,7 +172,7 @@ server.tool(
 // Tool 3: graph_jump — directed jump to target phase
 server.tool(
   'graph_jump',
-  '定向跳转到指定节点——用于 approval REWORK 决策后重跑特定 phase。重置目标节点及其上游依赖为 pending。',
+  'Jump to a specific node — re-run a phase after an approval REWORK decision. Resets the target node and its upstream dependencies to pending.',
   GraphJumpSchema.shape,
   async (args) => {
     const rt = await getRuntime();
@@ -187,7 +195,7 @@ server.tool(
 // Tool 4: graph_force_end — force terminate a run
 server.tool(
   'graph_force_end',
-  '强制终止图运行。所有未完成节点标记为 skipped，run status 设为 terminated。不可逆。',
+  'Force-terminate a graph run. All unfinished nodes are marked skipped; run status becomes terminated. Irreversible.',
   GraphForceEndSchema.shape,
   async (args) => {
     const rt = await getRuntime();
@@ -210,7 +218,7 @@ server.tool(
 // Tool 5: graph_status — query run state
 server.tool(
   'graph_status',
-  '查询 run 完整状态快照——含所有节点状态、retry 计数。',
+  'Query the full status snapshot of a run — all node states and retry counts.',
   GraphStatusSchema.shape,
   async (args) => {
     const rt = await getRuntime();
@@ -231,7 +239,7 @@ server.tool(
 );
 
 // Tool 6: graph_list — list all runs
-server.tool('graph_list', '列出所有 run——按创建时间倒序。', GraphListSchema.shape, async (_args) => {
+server.tool('graph_list', 'List all runs — newest first.', GraphListSchema.shape, async (_args) => {
   const rt = await getRuntime();
   try {
     const runs = await rt.graphList();
@@ -248,17 +256,17 @@ server.tool('graph_list', '列出所有 run——按创建时间倒序。', Grap
   }
 });
 
-// Tool 7: graph_init — initialise database schema
+// Tool 7: graph_init — initialise database schema + full-registry health check
 server.tool(
   'graph_init',
-  '初始化数据库——创建表 + 执行 migration。幂等——重复调用安全。',
+  'Initialize the database (create tables + run migration) plus a full health check (entry-skill contract alignment with orphan detection + config health report). Idempotent — safe to call repeatedly.',
   GraphInitSchema.shape,
   async (_args) => {
     const rt = await getRuntime();
     try {
-      await rt.graphInit();
+      const report = await rt.graphInit();
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ ok: true }) }],
+        content: [{ type: 'text' as const, text: JSON.stringify(report) }],
       };
     } catch (err) {
       const { message, code } = toMcpError(err);
@@ -274,7 +282,7 @@ server.tool(
 // Tool 8: graph_clean_completed — clean completed runs
 server.tool(
   'graph_clean_completed',
-  '清理已完成的 run 记录。可指定截止时间。',
+  'Clean up completed run records. Optional cutoff timestamp.',
   GraphCleanCompletedSchema.shape,
   async (args) => {
     const rt = await getRuntime();
@@ -297,7 +305,7 @@ server.tool(
 // Tool 9: graph_clean_all — clean all runs
 server.tool(
   'graph_clean_all',
-  '清理全部 run 记录——含 running/blocked/terminated。危险操作——需确认。',
+  'Clean up all run records — including running/blocked/terminated. Destructive — requires confirmation.',
   GraphCleanAllSchema.shape,
   async (_args) => {
     const rt = await getRuntime();

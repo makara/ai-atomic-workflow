@@ -17,21 +17,3 @@ export const RegistryEntrySchema = z.object({
 
 /** Inferred TypeScript type for a single registry entry. */
 export type RegistryEntry = z.infer<typeof RegistryEntrySchema>;
-
-/**
- * Zod schema for a single agent registry entry.
- *
- * Agent registry entries define how node types map to skills and execution strategies.
- * Part of the three-layer agent resolution system (builtin → project → per-node override).
- */
-export const AgentRegistryEntrySchema = z.object({
-  /** node type: "agent" | "approval" or custom project type */
-  type: z.string().min(1),
-  /** skill path — handler skill for this phase type */
-  skill: z.string().min(1),
-  /** sub-agent type for task() dispatch (e.g. "task", "scout") */
-  agent: z.string().optional(),
-});
-
-/** Inferred TypeScript type for a single agent registry entry. */
-export type AgentRegistryEntry = z.infer<typeof AgentRegistryEntrySchema>;
