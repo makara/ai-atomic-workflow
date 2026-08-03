@@ -13,8 +13,8 @@ export const PhaseSchema = z
   .object({
     /** phase identifier — unique within a graph */
     id: z.string(),
-    /** phase type — closed enum: main/approval dispatch types + flow composition type */
-    type: z.enum(['main', 'approval', 'flow']),
+    /** phase type — closed enum: main/approval/gate dispatch types + flow composition type */
+    type: z.enum(['main', 'approval', 'gate', 'flow']),
     /** upstream phase ids this phase depends on */
     dependsOn: z.array(z.string()).readonly().optional(),
     /** agent hints — priority-ordered sub-agent type preferences (main type, advisory) */
@@ -55,12 +55,12 @@ export const PhaseSchema = z
     join: z.enum(['all', 'any']).optional().default('all'),
     /** when guard — natural-language skip condition, LLM-evaluated before execution. */
     when: z.string().optional(),
-    /** eval conditions — auto-decision rules for approval phases. Agent evaluates before question(). */
+    /** eval conditions — auto-decision rules for gate phases. Agent evaluates; match → auto retry/jump decision. */
     eval: z
       .array(
         z.object({
           when: z.string().min(1),
-          action: z.enum(['continue', 'retry', 'jump']),
+          action: z.enum(['retry', 'jump']),
           target: z.string().optional(),
           note: z.string().optional(),
         }),
@@ -110,11 +110,36 @@ export const PhaseSchema = z
         message: `approval phase must not declare 'agent' — agent hints are a main-type priority hint array for sub-agent dispatch`,
       });
     }
-    if (data.type !== 'approval' && data.eval !== undefined) {
+    if (data.type === 'approval' && data.eval !== undefined) {
       ctx.addIssue({
         code: 'custom',
         path: ['eval'],
-        message: `'eval' is approval-type auto-decision rules — main/flow phases must not declare it (silent drop otherwise)`,
+        message: `approval phase must not declare 'eval' — machine auto-decisions live on gate phases; approval is the pure human decision card (dual-authority residue is rejected)`,
+      });
+    }
+    if (data.type === 'gate' && data.eval === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['eval'],
+        message: `gate phase requires 'eval' — machine judgment without a condition set would be a silent pass-through`,
+      });
+    }
+    if (data.type === 'gate') {
+      for (const key of ['task', 'preText', 'routing', 'channels', 'agent', 'skill', 'use'] as const) {
+        if (data[key] !== undefined) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message: `gate phase must not declare '${key}' — gate is a machine-judgment node with a closed field surface (id/type/dependsOn/eval/when/join)`,
+          });
+        }
+      }
+    }
+    if (data.type !== 'gate' && data.type !== 'approval' && data.eval !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['eval'],
+        message: `'eval' is gate-type auto-decision rules — main/flow phases must not declare it (silent drop otherwise)`,
       });
     }
     // Removed fields — loud rejection, never silent strip (no backward compat).

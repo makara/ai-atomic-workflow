@@ -167,13 +167,26 @@ export function flattenFlowPhases(
         // Child with own when keeps it (stronger condition).
         // Child without when inherits flow parent when — prevents execution when flow phase skipped.
         when: cp.when ?? phase.when,
-        channels: cp.channels?.map((c) => {
-          if (c.startsWith('node:')) {
-            const target = c.slice('node:'.length);
-            if (!parentIds.has(target)) return `node:${prefix}${target}`;
+        // Prefix child channels: node: targets pointing at child-sibling nodes
+        // get prefixed; parent-level targets stay unprefixed (cross-level ref).
+        // Flow input interface — flow-phase channels are the flow's
+        // input contract: propagate to ENTRY children only, merged with the
+        // child's own channels (flow-first, dedup by string). Non-entry
+        // children keep only their own channels. Never silently dropped.
+        channels: (() => {
+          const childChannels = (cp.channels ?? []).map((c) => {
+            if (c.startsWith('node:')) {
+              const target = c.slice('node:'.length);
+              if (!parentIds.has(target)) return `node:${prefix}${target}`;
+            }
+            return c;
+          });
+          const flowChannels = phase.channels ?? [];
+          if (isEntryInChild && flowChannels.length > 0) {
+            return [...new Set([...flowChannels, ...childChannels])];
           }
-          return c;
-        }),
+          return childChannels.length > 0 ? childChannels : undefined;
+        })(),
         preText: cp.preText,
         routing: prefixedRouting,
         eval: prefixedEval,

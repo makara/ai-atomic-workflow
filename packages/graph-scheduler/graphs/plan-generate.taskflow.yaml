@@ -11,24 +11,35 @@ phases:
       Execute scope interview per skill://atom-scope-interview (load atom-kernel).
 
       Topics: plan goal/problem; constraints (what must NOT change, limits); affected areas (domains, modules, artifacts).
+      Auto-approve mode (standard topic — ask AFTER scope, NEVER auto-approved):
+      Manual (recommended, default) — every approval presents a decision card.
+      Auto — every approval in this run (entry confirmations excluded — they are
+      interviews, never auto) executes its recommended routing action (routingActions[0]).
+      Echo rule: scan current-run completed node outputs first — an existing
+      auto_approve field (nested composition) is inherited WITHOUT asking.
 
       When scope_complete: true, run to-spec to synthesize PRD from interview findings. Publish to issue tracker. Save local copy for downstream phases. Do NOT prescribe section format or output path — to-spec owns its template and publishing conventions.
 
-      Output: prd_path (derived from to-spec native output), scope_complete: true, ticket_split_needed (complex >=4 distinct operations or cross-domain -> true), change_summary.
+      Output: prd_path (derived from to-spec native output), scope_complete: true, ticket_split_needed (complex >=4 distinct operations or cross-domain -> true), change_summary, auto_approve.
 
-  # Phase 2: PRD gate — completeness check
-  - id: scope-accept
-    type: approval
+  # Phase 2: Scope gate — machine completeness check (bounded auto-rework)
+  - id: scope-gate
+    type: gate
     dependsOn: [scope-confirm]
     eval:
       - when: 'scope-confirm output shows scope_complete: false or missing AND retryAttempt < 2'
         action: retry
         target: scope-confirm
-        note: 'auto: plan scope incomplete — re-run scope-confirm solve() loop'
+        note: 'auto: plan scope incomplete — re-run scope-confirm interview() solve mode'
       - when: 'scope-confirm output shows prd_path missing or PRD file absent or empty AND retryAttempt < 2'
         action: retry
         target: scope-confirm
         note: 'auto: PRD not produced or empty — re-run scope-confirm to-spec synthesis'
+
+  # Phase 3: PRD acceptance — human card (gate no-match falls here)
+  - id: scope-accept
+    type: approval
+    dependsOn: [scope-gate]
     routing:
       actions:
         - action: continue
@@ -43,7 +54,7 @@ phases:
           label: 'Re-plan from start'
           description: 'Fundamental plan issues — re-plan from scope-confirm'
 
-  # Phase 3: Ticket split — when-guarded for complex plans
+  # Phase 4: Ticket split — when-guarded for complex plans
   - id: ticket-split
     type: main
     dependsOn: [scope-accept]

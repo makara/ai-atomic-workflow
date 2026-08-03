@@ -60,7 +60,7 @@ describe('built-in assets', () => {
     }
   });
 
-  it('built-in skill-delete.taskflow.yaml is valid YAML with 6 phases', () => {
+  it('built-in skill-delete.taskflow.yaml is valid YAML with 7 phases', () => {
     const { readFileSync } = require('node:fs');
     const { join } = require('node:path');
     const pkgRoot = join(__dirname, '..');
@@ -68,14 +68,15 @@ describe('built-in assets', () => {
     const raw = readFileSync(graphPath, 'utf-8');
     const graph = parseYaml(raw);
     expect(graph.name).toBe('skill-delete');
-    expect(graph.phases).toHaveLength(6);
-    // Verify all 6 phase IDs
+    expect(graph.phases).toHaveLength(7);
+    // Verify all 7 phase IDs
     const phaseIds = graph.phases.map((p: { id: string }) => p.id);
     expect(phaseIds).toContain('skill-select');
     expect(phaseIds).toContain('impact-analysis');
     expect(phaseIds).toContain('delete-confirm');
     expect(phaseIds).toContain('skill-delete-execute');
     expect(phaseIds).toContain('delete-review');
+    expect(phaseIds).toContain('delete-gate');
     expect(phaseIds).toContain('delete-accept');
     // Verify phase types
     const phasesByType: Record<string, string> = {};
@@ -85,20 +86,24 @@ describe('built-in assets', () => {
     expect(phasesByType['delete-confirm']).toBe('main');
     expect(phasesByType['skill-delete-execute']).toBe('main');
     expect(phasesByType['delete-review']).toBe('main');
+    expect(phasesByType['delete-gate']).toBe('gate');
     expect(phasesByType['delete-accept']).toBe('approval');
     // Verify dependsOn chain — entry node has empty dependsOn
     const entryPhase = graph.phases.find((p: { id: string }) => p.id === 'skill-select');
     expect(entryPhase.dependsOn).toEqual([]);
-    // Verify approval has bounded auto-rework eval (no DEBT condition)
-    const approvalPhase = graph.phases.find((p: { id: string }) => p.id === 'delete-accept');
-    expect(approvalPhase.eval).toBeDefined();
-    expect(Array.isArray(approvalPhase.eval)).toBe(true);
-    expect(approvalPhase.eval.length).toBeGreaterThanOrEqual(1);
-    const evalText = approvalPhase.eval.map((e: { when: string }) => e.when).join(' ');
+    // Verify gate has bounded auto-rework eval (no DEBT condition)
+    const gatePhase = graph.phases.find((p: { id: string }) => p.id === 'delete-gate');
+    expect(gatePhase.eval).toBeDefined();
+    expect(Array.isArray(gatePhase.eval)).toBe(true);
+    expect(gatePhase.eval.length).toBeGreaterThanOrEqual(1);
+    const evalText = gatePhase.eval.map((e: { when: string }) => e.when).join(' ');
     expect(evalText).toContain('overall: fail');
     expect(evalText).toContain('retryAttempt < 2');
     expect(evalText).not.toContain('DEBT');
-    // Verify routing actions (3-route)
+    // Verify accept is pure human card — no eval, 3-route routing
+    const approvalPhase = graph.phases.find((p: { id: string }) => p.id === 'delete-accept');
+    expect(approvalPhase.eval).toBeUndefined();
+    expect(approvalPhase.dependsOn).toEqual(['delete-gate']);
     expect(approvalPhase.routing).toBeDefined();
     expect(approvalPhase.routing.actions).toHaveLength(3);
   });

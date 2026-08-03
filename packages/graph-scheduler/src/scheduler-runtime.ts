@@ -85,6 +85,8 @@ export interface SchedulerRuntime {
     readonly node: NodeDetail | null;
     /** contract warnings captured at load — empty when clean (optional) */
     readonly contractWarnings?: string[];
+    /** run snapshot — entry dispatch carries it (Run Mode consumption) */
+    readonly snapshot: IGraphSnapshot;
   }>;
 
   /** Advance a run — report node completion + get next node.

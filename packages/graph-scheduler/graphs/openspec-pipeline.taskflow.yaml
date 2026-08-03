@@ -1,40 +1,67 @@
 name: openspec-pipeline
 phases:
-  # Stage 1: Spec creation — scope interview → approval gate → arch-decision → spec generation
+  # Stage 1: Raw idea entry — grill-with-docs (two-track shared entry)
+  - id: grill
+    type: flow
+    use: grill-with-docs
+    dependsOn: []
+
+  # Stage 2: Spec creation — openspec-create (input-source detection + ADR judgment in interview)
   - id: create
     type: flow
     use: openspec-create
-    dependsOn: []
+    dependsOn: [grill]
+    channels:
+      - node:grill/grilling
 
-  # Stage 2: Middle gate — human decision on generated spec, connects creation to implementation.
-  # No eval: auto-rework would jump into spec-generate whose upstream includes the interactive
-  # spec-accept-scope gate (auto loop stalls at a human question); the gate is inherently the
-  # human's spec-quality decision. Targets use flattened ids for writer precision.
+  # Stage 3: Human quality gate — spec generated, before the expensive track
   - id: pipeline-accept
     type: approval
     dependsOn: [create]
-    task: 'Spec approval'
+    task: 'Spec quality gate'
     preText: |
-      openspec-create generated the change spec. Verify the artifacts
-      (validation_result, delta specs). Continue → openspec-apply
-      implements, dual-reviews, archives. Regenerate → re-run spec
-      generation from the same scope. Restart → re-interview scope.
+      openspec-create generated the delta spec. Continue → run the track selected by the
+      ADR judgment (spec-generate echoes adr_created). Revise → re-run openspec-create
+      (scope interview re-asked). Restart → re-grill from the raw idea.
     routing:
       actions:
         - action: continue
           label: 'Proceed to implementation'
-          description: 'Spec approved — delegate to openspec-apply'
+          description: 'Spec confirmed — run the track selected by the ADR judgment'
         - action: retry
-          target: create/spec-generate
-          label: 'Regenerate spec'
-          description: 'Spec artifacts need regeneration from same scope'
+          target: create
+          label: 'Revise spec'
+          description: 'Spec needs changes — re-run openspec-create'
         - action: jump
-          target: create/spec-scope
-          label: 'Restart from scope'
-          description: 'Scope or inputs wrong — re-run scope interview'
+          target: grill
+          label: 'Restart from idea'
+          description: 'Idea fundamentally reshaped — re-grill from the start'
 
-  # Stage 3: Apply — implement → dual review → bounded auto-rework gate → archive
-  - id: apply
+  # Stage 4: Tracks — complementary when guards on the ADR judgment echoed by spec-generate
+  # (flattened carrier node: create/spec-generate; guards read its output file)
+  - id: minimal-track
     type: flow
     use: openspec-apply
     dependsOn: [pipeline-accept]
+    when: 'create/spec-generate output shows spec_status: ok AND adr_created: false'
+
+  - id: detailed-track
+    type: flow
+    use: openspec-engineer
+    dependsOn: [pipeline-accept]
+    when: 'create/spec-generate output shows spec_status: ok AND adr_created: true'
+
+  # Stage 5: Terminal — runs after whichever track executed (other cascades as skipped)
+  - id: pipeline-done
+    type: main
+    dependsOn: [minimal-track, detailed-track]
+    channels:
+      - node:grill/grilling
+      - node:create/spec-generate
+    task: |
+      Pipeline complete. Track: see upstream flow status. ADR: see create output (injected).
+      Output: track (minimal | detailed | none), adr_created, change_name,
+      candidates (echo from spec-generate when blocked), decisions (echo from grill).
+      Incomplete judgment check: when spec_status is ok but adr_created is missing from
+      spec-generate output (create gate bound exhausted) — output judgment_incomplete: true
+      and suggest graph_jump back to create; never present the run as a completed implementation.

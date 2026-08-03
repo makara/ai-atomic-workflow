@@ -236,7 +236,7 @@ describe('built-in graph DAG validation', () => {
     // topoLayers throws if cycle detected — acyclic assertion
     const layers = topoLayers(phases);
     expect(layers.length).toBeGreaterThan(0);
-    // Verify all 6 phases appear in layers
+    // Verify all 7 phases appear in layers
     const allIds = layers
       .flat()
       .map((p) => p.id)
@@ -244,6 +244,7 @@ describe('built-in graph DAG validation', () => {
     const expectedIds = [
       'delete-accept',
       'delete-confirm',
+      'delete-gate',
       'delete-review',
       'impact-analysis',
       'skill-delete-execute',

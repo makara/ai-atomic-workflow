@@ -3,8 +3,8 @@ name: atom-pilot
 description: Graph lifecycle manager — execute→advance loop. Dispatch via skill://atom-phase-handler — single entry point, routes by node.type internally. Use when running taskflow graphs, mentions /skill:atom-pilot, graph execution, run workflow, taskflow run.
 argument-hint: '<graph-name> [--verbose] [--debug]'
 user-invocable: true
-version: 3.4.1
-last_updated: '2026-08-01'
+version: 3.5.0
+last_updated: '2026-08-03'
 ---
 
 > **Runtime constraints** — load `skill://atom-kernel` for task() contract and question() decision UI. Load `skill://atom-phase-handler` for {node, snapshot?} data handling, single-node dispatch, and error handling. Detect graph-scheduler MCP tools at runtime — see atom-kernel §Graph-Scheduler Tool Detection.
@@ -41,10 +41,10 @@ Verbosity: `--verbose` show MCP call summaries + eval details. `--debug` add raw
 Detect graph-scheduler MCP tools at runtime — 9-tool substring matching rules live in atom-kernel §Graph-Scheduler Tool Detection (platform primitives, loaded with the kernel). Tool parameter and return value schemas unchanged (see §MCP Tool Reference).
 
 ```
-graph_start { graphName } → { runId, node: NodeDetail | null }
+graph_start { graphName } → { runId, node: NodeDetail | null, snapshot: GraphSnapshot }
 ```
 
-Scheduler resolve graph name via merged registry. Return `runId` + first `node` (NodeDetail | null). Agent hold `runId` for all subsequent calls.
+Scheduler resolve graph name via merged registry. Return `runId` + first `node` (NodeDetail | null) + run `snapshot` (per-node states — entry dispatch carries it; Run Mode consumption + echo scans). Agent hold `runId` for all subsequent calls.
 
 ---
 
@@ -85,6 +85,15 @@ Per-node status line + final result table.
 ```
 
 Approval pause — handler constructs question() from routingActions (IApprovalAction[]), collects user choice via custom:true. Handler returns IApprovalDecision as output JSON. Pilot routes per §Approval Decision Processing.
+
+### Gate node
+
+```
+── [N/M] <nodeId> · gate ──
+   ✅ <action> → <target|downstream>  ⚡<N>ms
+```
+
+Gate pause-free — handler evaluates eval conditions (machine judgment), returns IApprovalDecision (label absent) or the no-match marker (→ continue, not a decision). Pilot routes per §Approval Decision Processing — same protocol as approval.
 
 ### Stub/unhandled node
 
@@ -132,7 +141,7 @@ Tool names detected at runtime per §Graph-Scheduler Tool Detection. Parameter s
 
 |tool|purpose|key params|
 |-|-|-|
-|graph_start|create run, get first node|graphName, args?|
+|graph_start|create run, get first node + snapshot|graphName, args?|
 |graph_advance|report result + get next node|runId, nodeId, durationMs, skip?|
 |graph_status|query run state|runId|
 |graph_list|list all runs|—|
@@ -142,7 +151,7 @@ Tool names detected at runtime per §Graph-Scheduler Tool Detection. Parameter s
 |graph_clean_completed|clean completed runs|before?|
 |graph_clean_all|clean all runs|—|
 
-`graph_start` returns `{ runId, node }`. `graph_advance` / `graph_jump` return `{ snapshot, node }` — `node: null` = graph complete (`fsmState` `completed`).
+`graph_start` returns `{ runId, node, snapshot }`. `graph_advance` / `graph_jump` return `{ snapshot, node }` — `node: null` = graph complete (`fsmState` `completed`). The snapshot (per-node states) accompanies every dispatch — approval Run Mode consumption and entry echo scans use it.
 
 ---
 
@@ -167,24 +176,27 @@ Execute→advance cycle:
 └──────────────────────────────────────────────────┘
 ```
 
-`graph_advance` merge notify + next into one call — report node result AND fetch next pending node. For approval nodes, path diverges — see §Approval Decision Processing.
+`graph_advance` merge notify + next into one call — report node result AND fetch next pending node. For approval/gate nodes, path diverges — see §Approval Decision Processing.
 
-> **Note:** `output` collected in (b) for display only. `graph_advance` receives `{ runId, nodeId, durationMs, skip }` — `output` stays in agent session. Exception: approval `output` (IApprovalDecision) drives routing; not passed to graph_advance.
+> **Note:** `output` collected in (b) for display only. `graph_advance` receives `{ runId, nodeId, durationMs, skip }` — `output` stays in agent session. Exception: approval/gate `output` (IApprovalDecision) drives routing; not passed to graph_advance.
 
 ## Node Execution
 
 Receive `{ node, snapshot? }` from graph_advance/graph_start. Delegate to `skill://atom-phase-handler` — single-node dispatch by node.type. See `skill://atom-phase-handler` for full schema and dispatch rules.
 
-Node types — dispatched by type (main/approval; handlerSkill constant `atom-phase-handler`):
+Node types — dispatched by type (main/approval/gate; handlerSkill constant `atom-phase-handler`):
 
 - `node.type = "main"` → handler executes inline (with inline context assembly when channels present)
 - `node.type = "approval"` → handler constructs question() from routingActions, returns IApprovalDecision → pilot routes per §Approval Decision Processing
+- `node.type = "gate"` → handler evaluates eval conditions, returns IApprovalDecision (auto retry/jump, label absent) or no-match → pilot routes per §Approval Decision Processing — no question(), no pause
 
 Node = null → graph complete.
 
 ## Approval Decision Processing
 
-After handler returns `{ status, output, durationMs }` for approval node, parse `output` as `IApprovalDecision { action, target?, note?, label? }` — `label` records chosen option label, unused by pilot routing, for downstream when-guard observability (persisted decision file).
+After handler returns `{ status, output, durationMs }` for an approval or gate node, parse `output` as `IApprovalDecision { action, target?, note?, label? }` — `label` records chosen option label (approval only; gate auto path has no label), unused by pilot routing, for downstream when-guard observability (persisted decision file).
+
+**Gate no-match**: when the gate handler returns the literal marker `"<no-match>"` (all eval conditions false or completion failure — conservative degradation), the marker is NOT an `IApprovalDecision` — skip JSON parsing and route as `continue`: `graph_advance(runId, nodeId, durationMs)`, falling through to the downstream node (typically the paired approval, which presents the human card).
 
 |action|MCP call|note|
 |-|-|-|

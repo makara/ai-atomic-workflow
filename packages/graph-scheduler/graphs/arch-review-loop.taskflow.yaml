@@ -1,0 +1,122 @@
+name: arch-review-loop
+phases:
+  # Stage 1: Loop entry — standard mode topic (atom-scope-interview v1.1):
+  # scope confirm FIRST (always manual, never auto-approved), then auto-approve
+  # mode (Manual recommended AND default). Echo rule: current-run completed
+  # outputs already carry auto_approve (nested composition) → inherit without
+  # asking. Report input: existing report path (true closed loop) OR fresh review.
+  # Declared FIRST — findActiveNode dispatches the entry before review/implement.
+  - id: loop-entry
+    type: main
+    dependsOn: []
+    skill: atom-scope-interview
+    channels:
+      - ./CONTEXT.md
+    task: |
+      Execute scope interview per skill://atom-scope-interview (load atom-kernel).
+
+      Topics — order is load-bearing: scope FIRST, mode LAST.
+      1. Report input: existing report path (true closed loop — re-run on a prior
+         report; confirm the path exists, read its Top Recommendation) OR fresh
+         review (confirm domain/feature/problem + focus dimensions + output path —
+         path MUST be explicitly confirmed; recommend docs/reports/<YYYY-MM-DD>-arch-review-<topic>.md).
+      2. Auto-approve mode (standard topic — atom-scope-interview v1.1 rules:
+         echo scan current-run completed outputs first; inherit if present, else
+         ask AFTER scope, NEVER auto-approved):
+         Manual (recommended, default) — every approval presents a decision card.
+         Auto — every approval in this run (entry confirmations excluded — they
+         are interviews, never auto) executes its recommended routing action
+         (routingActions[0]).
+
+      Output: scope, focus, output, report_input (fresh|existing), report_path,
+      auto_approve (true|false), scope_complete.
+
+  # Stage 2: Review — the loop's round worker, ALWAYS runs (fresh or existing).
+  # Empty JUMP closure (dependsOn []) + node:loop-entry channel: retry review
+  # re-runs ONLY the reviewer on the SAME report — the entry (scope + mode) is
+  # never re-asked. arch-review itself supports existing reports (re-review mode).
+  - id: review
+    type: flow
+    use: arch-review
+    dependsOn: []
+    channels:
+      - node:loop-entry
+
+  # Stage 3: Implement gate — fresh mode: human decides; existing mode: report
+  # pre-accepted at entry (skip). Revise removed — re-scope = new run.
+  - id: review-accept
+    type: approval
+    dependsOn: [review]
+    when: 'skip when loop-entry output shows report_input: existing (report pre-accepted at entry)'
+    task: 'Implement review Top Recommendation?'
+    preText: |
+      Review report saved (path confirmed at loop entry — docs/reports, date prefix).
+      Implement → openspec-pipeline runs. Stop → report only (re-scope = a new run).
+      Auto mode: this card auto-executes the recommendation.
+    routing:
+      actions:
+        - action: continue
+          label: 'Implement Top Recommendation'
+          description: 'Run openspec-pipeline to implement the review Top Recommendation'
+        - action: continue
+          label: 'Stop — report only'
+          description: 'Keep the report; no implementation'
+
+  # Stage 4: Implementation — entry-rooted flow (JUMP closure stays empty: loop
+  # re-runs only this segment; the confirmed path is never re-asked).
+  # node:loop-entry channel delivers report_path — the pipeline reads the CURRENT
+  # report each round (the reviewer's re-review lands immediately). Nested approvals
+  # obey Run Mode via the handler scan — no per-node declarations.
+  - id: implement
+    type: flow
+    use: openspec-pipeline
+    dependsOn: []
+    channels:
+      - node:review/arch-review
+      - node:loop-entry
+    when: 'run only when review-accept output shows decision label Implement Top Recommendation, or loop-entry output shows report_input: existing; skip when review-accept shows Stop — report only'
+
+  # Stage 5: Auto loop router — machine retry branch (auto mode + accepted report +
+  # Top Rec remains → re-run the REVIEWER). No-match falls through to loop-accept.
+  # eval reads the round worker's structured output (review/arch-review — unified
+  # output contract); conditions reference contract fields only (Eval Rule 1).
+  # `round < 8` bounds the gate's retry (hygiene) — it is NOT a termination
+  # mechanism: past the bound the gate no-matches and the round-end card (or auto
+  # Loop again) takes over; ending the loop is always a human decision.
+  - id: loop-gate
+    type: gate
+    dependsOn: [review/arch-review, loop-entry, review-accept]
+    eval:
+      - when: 'loop-entry output shows auto_approve: true AND (review-accept output shows decision label Implement Top Recommendation OR loop-entry output shows report_input: existing) AND review/arch-review output shows top_rec_remaining: true AND review/arch-review output shows round < 8'
+        action: retry
+        target: review
+        note: 'auto mode — re-review the report while a Top Recommendation remains (reviewer reuse, bounded by review round)'
+
+  # Stage 6: Round-end approval — end-of-round decision (runs EVERY round). Default = Loop again
+  # (manual recommendation + auto execution). Termination is always an explicit
+  # human decision: card in manual mode, operator force-end in auto mode.
+  - id: loop-accept
+    type: approval
+    dependsOn: [loop-gate]
+    task: 'End the review loop?'
+    preText: |
+      The report was re-reviewed and updated at the confirmed path (no re-confirmation).
+      Loop again → arch-review re-reviews the SAME report (default — repeat is the
+      loop's natural motion; auto mode executes this). Complete → the user explicitly
+      ends the loop. Auto mode: termination is the operator's call (force-end) —
+      the report's round marker shows progress.
+    routing:
+      actions:
+        - action: retry
+          target: review
+          label: 'Loop again — re-review the report'
+          description: 'Run arch-review on the same report again (default — repeat)'
+        - action: continue
+          label: 'Complete loop'
+          description: 'User-approved end — the loop finishes'
+
+  # Stage 7: Terminal
+  - id: loop-done
+    type: main
+    dependsOn: [loop-accept]
+    task: 'Loop complete. Report at confirmed path. Final outcome: see loop-accept decision (upstream).'

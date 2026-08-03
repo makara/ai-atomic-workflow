@@ -2,15 +2,15 @@
 name: atom-graph-design
 description: 'Entry skill for graph topology design — loads atom-graph-spec, analyzes requirements, designs phase list with dependsOn/when/channels. Trigger: graph-design phase in graph-generate graph.'
 user-invocable: false
-version: 1.1.0
-last_updated: '2026-08-01'
+version: 1.2.0
+last_updated: '2026-08-03'
 ---
 
-> **Runtime constraints** — load `skill://atom-kernel` for solve() behavior contract. Graph dispatch: atom-graph-spec arrives via `skill:` channel (handler-injected); standalone use loads it directly. Load `skill://atom-phase-handler` for phase type knowledge.
+> **Runtime constraints** — load `skill://atom-kernel` for interview() behavior contract (solve mode). Graph dispatch: atom-graph-spec arrives via `skill:` channel (handler-injected); standalone use loads it directly. Load `skill://atom-phase-handler` for phase type knowledge.
 
 # Atom-Graph-Design
 
-Entry skill for graph topology design. Uses atom-kernel solve() primitive — confirm goal → research specs → think topology → interview decisions → repeat until confirmed. Loads atom-graph-spec as reference. Outputs structured design document for atom-graph-writer consumption.
+Entry skill for graph topology design. Uses atom-kernel interview() solve mode — confirm goal → research specs → think topology → interview decisions → repeat until confirmed. Loads atom-graph-spec as reference. Outputs structured design document for atom-graph-writer consumption.
 
 ## Context Requirements
 
@@ -24,16 +24,16 @@ Entry skill for graph topology design. Uses atom-kernel solve() primitive — co
 
 ## Entry
 
-**MUST SOLVE** — when dispatched by atom-phase-handler for graph-design phase node. Execute solve() loop per atom-kernel §solve() behavior contract.
+**MUST INTERVIEW** — when dispatched by atom-phase-handler for graph-design phase node. Execute interview() solve mode per atom-kernel §interview() behavior contract.
 
 ## Flow
 
-### solve() Loop
+### interview() solve mode
 
-Execute atom-kernel solve() behavior contract. Goal: "design graph topology for confirmed scope".
+Execute atom-kernel interview() solve mode. Goal: "design graph topology for confirmed scope".
 
 ```
-solve({ goal: "design graph topology for <scope>", research: true, context })
+interview({ goal: "design graph topology for <scope>", research: true, context })
 ```
 
 #### confirm(goal)
@@ -119,4 +119,4 @@ validation:
   when_deterministic: passed | failed
 ```
 
-Return `solution` per solve() contract.
+Return `solution` per interview() solve mode contract.

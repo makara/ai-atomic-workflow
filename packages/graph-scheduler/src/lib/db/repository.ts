@@ -116,18 +116,6 @@ export class GraphRepository extends Context.Tag('GraphRepository')<
       nodes: ReadonlyArray<{ readonly nodeId: string; readonly topoOrder: number }>,
     ) => Effect.Effect<void, PersistenceError>;
 
-    /** Reset specified node IDs to pending (retry upstream). */
-    readonly resetUpstreamNodes: (
-      runId: string,
-      nodeIds: ReadonlyArray<string>,
-    ) => Effect.Effect<void, PersistenceError>;
-
-    /** Reset specified node IDs to pending (jump downstream). */
-    readonly resetDownstreamNodes: (
-      runId: string,
-      nodeIds: ReadonlyArray<string>,
-    ) => Effect.Effect<void, PersistenceError>;
-
     /** Delete completed runs, optionally filtered by updated_at cutoff. Returns deleted run ids. */
     readonly deleteCompletedRuns: (before?: string) => Effect.Effect<ReadonlyArray<string>, PersistenceError>;
 
@@ -285,34 +273,6 @@ export function buildService(db: ReturnType<typeof Database>): GraphRepository['
           );
           for (const n of nodes) {
             stmt.run(runId, n.nodeId, n.topoOrder);
-          }
-        })();
-      }),
-
-    resetUpstreamNodes: (runId: string, nodeIds: ReadonlyArray<string>): Effect.Effect<void, PersistenceError> =>
-      tryDb('resetUpstreamNodes', () => {
-        if (nodeIds.length === 0) return;
-        debugLog('runtime', { event: 'reset_upstream', runId, nodeIds });
-        db.transaction(() => {
-          const stmt = db.prepare(
-            `UPDATE node_states SET status = 'pending', retry_count = 0, started_at = NULL, completed_at = NULL WHERE run_id = ? AND node_id = ?`,
-          );
-          for (const nodeId of nodeIds) {
-            stmt.run(runId, nodeId);
-          }
-        })();
-      }),
-
-    resetDownstreamNodes: (runId: string, nodeIds: ReadonlyArray<string>): Effect.Effect<void, PersistenceError> =>
-      tryDb('resetDownstreamNodes', () => {
-        if (nodeIds.length === 0) return;
-        debugLog('runtime', { event: 'reset_downstream', runId, nodeIds });
-        db.transaction(() => {
-          const stmt = db.prepare(
-            `UPDATE node_states SET status = 'pending', retry_count = 0, started_at = NULL, completed_at = NULL WHERE run_id = ? AND node_id = ?`,
-          );
-          for (const nodeId of nodeIds) {
-            stmt.run(runId, nodeId);
           }
         })();
       }),

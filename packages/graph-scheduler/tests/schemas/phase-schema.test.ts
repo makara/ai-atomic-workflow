@@ -195,7 +195,7 @@ describe('PhaseSchema — type semantics', () => {
     expect(messages).toContain('agent');
   });
 
-  it('rejects eval on main type — approval-only field', () => {
+  it('rejects eval on main type — gate-only field', () => {
     const raw = {
       id: 'p1',
       type: 'main',
@@ -207,13 +207,53 @@ describe('PhaseSchema — type semantics', () => {
     expect(result.error.issues.some((i) => i.path.join('.') === 'eval')).toBe(true);
   });
 
-  it('accepts eval on approval type', () => {
+  it('rejects eval on approval type — dual-authority residue', () => {
     const raw = {
       id: 'a1',
       type: 'approval',
       eval: [{ when: 'x', action: 'retry', target: 'w' }],
     };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(result.error.issues.some((i) => i.path.join('.') === 'eval')).toBe(true);
+  });
+
+  it('accepts gate type with eval', () => {
+    const raw = {
+      id: 'g1',
+      type: 'gate',
+      dependsOn: ['review'],
+      eval: [{ when: 'x', action: 'retry', target: 'w' }],
+    };
     expect(PhaseSchema.safeParse(raw).success).toBe(true);
+  });
+
+  it('rejects gate type without eval', () => {
+    const raw = { id: 'g1', type: 'gate', dependsOn: ['review'] };
+    expect(PhaseSchema.safeParse(raw).success).toBe(false);
+  });
+
+  it('rejects gate type with task field', () => {
+    const raw = {
+      id: 'g1',
+      type: 'gate',
+      dependsOn: ['review'],
+      task: 'x',
+      eval: [{ when: 'x', action: 'retry', target: 'w' }],
+    };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(result.error.issues.some((i) => i.path.join('.') === 'task')).toBe(true);
+  });
+
+  it('rejects gate eval with continue action — silent bypass unexpressible', () => {
+    const raw = {
+      id: 'g1',
+      type: 'gate',
+      dependsOn: ['review'],
+      eval: [{ when: 'x', action: 'continue' }],
+    };
+    expect(PhaseSchema.safeParse(raw).success).toBe(false);
   });
 });
 

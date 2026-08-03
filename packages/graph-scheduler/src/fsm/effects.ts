@@ -18,12 +18,13 @@ export type FsmNodeState = Omit<NodeState, 'runId'>;
 export type FsmRunStatus = Exclude<import('./transition.js').FsmStatus, 'idle'>;
 
 /**
- * FSM side-effect descriptor — 3 kinds of work the api/ layer must carry out.
+ * FSM side-effect descriptor — 2 kinds of work the api/ layer must carry out.
  *
  * - persist_node_state: write a single node's state to node_states table
  * - persist_run_state: update the run-level status in graph_runs table
- * - reset_upstream: reset all upstream nodes of a node to pending (jump retry)
- * - reset_downstream: reset a node and its downstream dependents to pending (jump)
+ *
+ * Jump resets (target + upstream + downstream) persist via persist_node_state
+ * with the in-memory retryCount increment — no separate reset effect types.
  */
 export type FsmEffect =
   | {
@@ -36,14 +37,4 @@ export type FsmEffect =
       readonly type: 'persist_run_state';
       readonly runId: string;
       readonly status: FsmRunStatus;
-    }
-  | {
-      readonly type: 'reset_upstream';
-      readonly runId: string;
-      readonly fromNodeId: string;
-    }
-  | {
-      readonly type: 'reset_downstream';
-      readonly runId: string;
-      readonly nodeId: string;
     };

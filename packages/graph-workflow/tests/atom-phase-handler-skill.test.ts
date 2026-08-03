@@ -20,7 +20,7 @@ function loadSpecSkill(): string {
   return readFileSync(specPath, 'utf-8');
 }
 
-describe('atom-phase-handler SKILL.md — project constraints', () => {
+describe('atom-phase-handler SKILL.md — project constraints + gate branch contract', () => {
   const skill = loadSkill();
 
   // ── NodeDetail field ──────────────────────────────────────
@@ -88,6 +88,37 @@ describe('atom-phase-handler SKILL.md — project constraints', () => {
     const format = skill.slice(skill.indexOf('## Constraints Block Format'));
     expect(format).toMatch(/CONSTRAINT VIOLATION: <count>/);
     expect(format).toMatch(/result table \+ approval pre-call/);
+  });
+
+  // ── Gate branch contract ──────────────────────────────────
+  // Content pins for the gate dispatch branch (authority-split followup): the
+  // contract is documentation-only for the agent side — completion() behavior
+  // is not unit-testable; these assertions keep the written contract honest.
+
+  it('defines the gate branch with array-order short-circuit eval', () => {
+    const gateSection = skill.slice(skill.indexOf('node.type = "gate"'));
+    expect(gateSection).toMatch(/array order, short-circuit/);
+  });
+
+  it('persists gate decisions without a label (machine path)', () => {
+    const gateSection = skill.slice(skill.indexOf('node.type = "gate"'));
+    expect(gateSection).toMatch(/label absent/);
+  });
+
+  it('defines the no-match marker with conservative degradation', () => {
+    const gateSection = skill.slice(skill.indexOf('node.type = "gate"'));
+    expect(gateSection).toContain('<no-match>');
+    expect(gateSection).toMatch(/conservative/);
+  });
+
+  it('fails loud on empty/absent eval (gate without conditions is a pass-through)', () => {
+    const gateSection = skill.slice(skill.indexOf('node.type = "gate"'));
+    expect(gateSection).toMatch(/Eval empty\/absent → `status: "failed"`/);
+  });
+
+  it('documents completion-failure degradation as no-match fall-through', () => {
+    const gateSection = skill.slice(skill.indexOf('node.type = "gate"'));
+    expect(gateSection).toMatch(/completion fails/);
   });
 
   // ── Language / reference hygiene ──────────────────────────

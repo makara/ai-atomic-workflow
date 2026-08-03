@@ -124,20 +124,27 @@ export function validateGraphContracts(
           );
         }
       }
+    }
+
+    // 2.2 — gate eval hygiene; targets explicit, bounded, writer-targeted
+    if (type === 'gate') {
       for (const evalRule of (phase.eval ?? []) as Array<Record<string, unknown>>) {
         const actionType = str(evalRule.action, '');
         if ((actionType === 'retry' || actionType === 'jump') && !evalRule.target) {
           warnings.push(
             actionType === 'jump'
-              ? `${prefix} — eval condition action 'jump' lacks explicit target; snapshot.nodes runtime expansion applies (M2) — declare explicit target per atom-graph-spec §Approval Routing.`
+              ? `${prefix} — eval condition action 'jump' lacks explicit target; snapshot.nodes runtime expansion applies (M2) — declare explicit target per atom-graph-spec §Gate.`
               : `${prefix} — eval condition action 'retry' lacks explicit target; dependsOn[0] fallback is deprecated.`,
           );
         }
-        // Auto-rework hygiene — atom-graph-spec §Auto-Rework (eval) Rules
+        // Auto-rework hygiene — atom-graph-spec §Auto-Rework (gate) Rules.
+        // Termination signal: retryAttempt (the gate's own jump count) OR a
+        // reviewer iteration counter (e.g. verify `round < N`) — loop routers
+        // iterate NEW artifacts and bound by the reviewer's own counter.
         const whenText = str(evalRule.when, '');
-        if (actionType === 'retry' && whenText && !/retryAttempt/i.test(whenText)) {
+        if (actionType === 'retry' && whenText && !/retryAttempt/i.test(whenText) && !/\bround\s*</.test(whenText)) {
           warnings.push(
-            `${prefix} — eval condition is unbounded (no retryAttempt bound); auto-rework risks an infinite loop — add 'AND retryAttempt < N' per atom-graph-spec §Auto-Rework (eval) Rules.`,
+            `${prefix} — eval condition is unbounded (no retryAttempt/round bound); auto-rework risks an infinite loop — add 'AND retryAttempt < N' (or a reviewer iteration bound) per atom-graph-spec §Auto-Rework (gate) Rules.`,
           );
         }
         if (actionType === 'retry' && evalRule.target) {
@@ -151,19 +158,25 @@ export function validateGraphContracts(
             targetPhase !== undefined && (str(targetPhase.skill, '') === 'code-review' || targetId.includes('review'));
           if (isReviewNode && depends.includes(targetId)) {
             warnings.push(
-              `${prefix} — eval retry targets reviewer node '${targetId}' (the approval's direct dependency); re-running the reviewer over unchanged artifacts reproduces the same verdict — target the writer node instead per atom-graph-spec §Auto-Rework (eval) Rules.`,
+              `${prefix} — eval retry targets reviewer node '${targetId}' (the gate's direct dependency); re-running the reviewer over unchanged artifacts reproduces the same verdict — target the writer node instead per atom-graph-spec §Auto-Rework (gate) Rules.`,
             );
           }
         }
       }
-      // target existence: every routing/eval target must resolve
-      // in the flattened graph. Pre-flatten graphs may reference flow phase ids
-      // (remapped to the flow's entry node at flatten) or flattened-style
-      // '<flow>/<child>' ids — both valid; anything else unresolved is an error,
-      // never a silent no-op jump.
-      const flowIds = new Set(phases.filter((p) => str(p.type, '') === 'flow').map((p) => str(p.id, '')));
-      const targetResolvable = (t: string): boolean =>
-        byId.has(t) || flowIds.has(t) || [...flowIds].some((f) => t.startsWith(`${f}/`));
+    }
+
+    // target existence: every routing/eval target must resolve
+    // in the flattened graph. Pre-flatten graphs may reference flow phase ids
+    // (remapped to the flow's entry node at flatten) or flattened-style
+    // '<flow>/<child>' ids — both valid; anything else unresolved is an error,
+    // never a silent no-op jump.
+    const flowIds = new Set(phases.filter((p) => str(p.type, '') === 'flow').map((p) => str(p.id, '')));
+    const targetResolvable = (t: string): boolean =>
+      byId.has(t) || flowIds.has(t) || [...flowIds].some((f) => t.startsWith(`${f}/`));
+    if (type === 'approval') {
+      const actions = ((phase.routing as Record<string, unknown> | undefined)?.actions ?? []) as Array<
+        Record<string, unknown>
+      >;
       for (const action of actions) {
         const actionTarget = str(action.target, '');
         if (actionTarget && !targetResolvable(actionTarget)) {
@@ -172,6 +185,8 @@ export function validateGraphContracts(
           );
         }
       }
+    }
+    if (type === 'gate') {
       for (const evalRule of (phase.eval ?? []) as Array<Record<string, unknown>>) {
         const evalTarget = str(evalRule.target, '');
         if (evalTarget && !targetResolvable(evalTarget)) {
@@ -182,16 +197,22 @@ export function validateGraphContracts(
       }
     }
 
-    // 2.2b — redundant transitive dependencies rejected for ALL phases (graph-scheduling §DependsOn #3)
-    for (let i = 0; i < deps.length; i++) {
-      for (let j = 0; j < deps.length; j++) {
-        if (i === j) continue;
-        const a = deps[i];
-        const b = deps[j];
-        if (upstreamClosure(a, byId).has(b)) {
-          errors.push(
-            `${prefix} — redundant transitive dependency: '${a}' depends on '${b}' (directly or transitively); declare only leaf deps per §DependsOn Rules #3.`,
-          );
+    // 2.2b — redundant transitive dependencies rejected for ALL phases except gates
+    // (graph-scheduling §DependsOn #3). Gates declare eval-CONTEXT inputs — the eval
+    // reads direct dependsOn outputs; a transitive node whose output the eval references
+    // (e.g. a loop router reading the entry decision) is load-bearing, not ordering
+    // redundancy.
+    if (type !== 'gate') {
+      for (let i = 0; i < deps.length; i++) {
+        for (let j = 0; j < deps.length; j++) {
+          if (i === j) continue;
+          const a = deps[i];
+          const b = deps[j];
+          if (upstreamClosure(a, byId).has(b)) {
+            errors.push(
+              `${prefix} — redundant transitive dependency: '${a}' depends on '${b}' (directly or transitively); declare only leaf deps per §DependsOn Rules #3.`,
+            );
+          }
         }
       }
     }
@@ -207,6 +228,27 @@ export function validateGraphContracts(
       if (SIBLING_OUTPUT_EXISTENCE_RE.test(when)) {
         errors.push(
           `${prefix} — when guard depends on sibling output existence ('no … output present'); guards must reference observable fields of direct upstream outputs.`,
+        );
+      }
+    }
+  }
+
+  // Run Mode (atom-graph-spec §Run Mode) — graphs with approval phases should
+  // offer the standard auto-approve mode topic at a main entry (default Manual).
+  // Flow entries (e.g. openspec-pipeline's grill, skill-change-workflow's plan)
+  // declare it in the composed child's entry — composition covers the parent's
+  // approvals (the child entry output carries auto_approve). e2e-minimal is a
+  // test fixture — excluded.
+  if (str(graph.name, '') !== 'e2e-minimal') {
+    const hasApproval = phases.some((p) => str(p.type, '') === 'approval');
+    if (hasApproval) {
+      const entryPhases = phases.filter((p) => ((p.dependsOn as string[] | undefined)?.length ?? 0) === 0);
+      const hasFlowEntry = entryPhases.some((p) => str(p.type, '') === 'flow');
+      const entryTasks = entryPhases.filter((p) => str(p.type, '') === 'main').map((p) => str(p.task, ''));
+      const offersModeTopic = hasFlowEntry || entryTasks.some((t) => /Auto-approve mode|auto_approve/.test(t));
+      if (!offersModeTopic) {
+        warnings.push(
+          `${filePath} — graph declares approval phases but no main entry offers the standard auto-approve mode topic (atom-graph-spec §Run Mode); add the mode topic to the entry task text (Manual default)`,
         );
       }
     }

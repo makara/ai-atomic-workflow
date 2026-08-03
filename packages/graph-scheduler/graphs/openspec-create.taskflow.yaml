@@ -6,52 +6,50 @@ phases:
     skill: atom-scope-interview
     channels:
       - ./CONTEXT.md
+      - docs/adr/*.md
     task: |
       Execute scope interview per skill://atom-scope-interview (load atom-kernel). Detect input source type:
         - wayfinder-map: read map, extract closed decisions
         - arch-review: read review report, extract findings
-        - direct: interview for spec scope
+        - grill-consensus: read composed grill-with-docs output — extract decisions + doc_updates + adr_created
+        - direct: interview for spec scope — follow grilling discipline (one-question-at-a-time,
+          recommendation-first, decision-tree traversal)
+
+      ADR judgment — inline conversation side effect (decisions crystallize in dialogue;
+      judgment is never a separate autonomous step):
+      - Sharpened inputs (wayfinder-map / arch-review / grill-consensus): decisions already
+        crystallized upstream — check docs/adr/ for an existing ADR covering the change's
+        decisions; reuse it (adr_created: true, adr_path) without re-testing.
+      - Direct input: at decision-crystallization moments apply the three-condition test
+        (hard-to-reverse / surprising-without-context / real-trade-off); PROPOSE the ADR to
+        the user — write to docs/adr/ only after explicit user confirmation; a declined ADR
+        is recorded in the output without writing the file. Update CONTEXT.md terms as they
+        crystallize.
+      - adr_created MUST always be present in output — a missing judgment is an incomplete scope.
 
       Topics: spec domain + change type + input artifacts + destination (change name).
+      Auto-approve mode (standard topic — ask AFTER scope, NEVER auto-approved):
+      Manual (recommended, default) — every approval presents a decision card.
+      Auto — every approval in this run (entry confirmations excluded — they are
+      interviews, never auto) executes its recommended routing action (routingActions[0]).
+      Echo rule: scan current-run completed node outputs first — an existing
+      auto_approve field (nested composition) is inherited WITHOUT asking.
 
-      Output: scope_complete, input_source, change_name, affected_domains, spec_plan.
+      Output: scope_complete, input_source, change_name, affected_domains, spec_plan,
+      adr_created, adr_path?, decision_summary, decisions, auto_approve.
 
-  - id: spec-accept-scope
-    type: approval
+  - id: spec-gate
+    type: gate
     dependsOn: [spec-scope]
     eval:
-      - when: 'spec-scope output shows scope_complete: false or missing AND retryAttempt < 2'
+      - when: '(scope_complete false or missing OR adr_created missing) AND retryAttempt < 2'
         action: retry
         target: spec-scope
-        note: 'auto: spec scope incomplete'
-    routing:
-      actions:
-        - action: continue
-          label: Generate spec
-          description: 'Scope confirmed — delegate to openspec propose CLI'
-        - action: retry
-          target: spec-scope
-          label: Revise scope
-          description: 'Scope needs changes — re-run spec-scope solve() loop'
-
-  - id: arch-decision
-    type: main
-    dependsOn: [spec-accept-scope]
-    skill: domain-modeling
-    channels:
-      - node:spec-scope
-      - ./CONTEXT.md
-      - docs/adr/*.md
-    task: |
-      Record architecture decision per domain-modeling.
-      Artifact: spec-scope output (injected). Standards: ADR-FORMAT / CONTEXT-FORMAT.
-      Apply three-condition test (hard-to-reverse / surprising-without-context / real-trade-off).
-      Autonomous — never question().
-      Output contract: adr_created, adr_path, decision_summary, test_result.
+        note: 'auto: spec scope incomplete or ADR judgment missing — re-run scope interview'
 
   - id: spec-generate
     type: main
-    dependsOn: [arch-decision]
+    dependsOn: [spec-gate]
     skill: openspec-propose
     channels:
       - node:spec-scope
@@ -60,4 +58,8 @@ phases:
 
       Change name: from spec-scope output; if absent -> {args.changeName}; else openspec list --json single active; else spec_status: blocked + candidates.
 
-      Output contract: change_name, domains, file_paths, validation_result, spec_status.
+      Echo adr_created from spec-scope output (injected via node:spec-scope channel) — downstream
+      pipeline when guards select the implementation track from this field.
+
+      Output contract: change_name, domains, file_paths, validation_result, spec_status,
+      adr_created (echo).

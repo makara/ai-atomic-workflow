@@ -46,10 +46,10 @@ describe('doc-update.taskflow.yaml — schema validation', () => {
     expect(graph.phases.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('has exactly 4 phases', () => {
+  it('has exactly 5 phases', () => {
     const raw = readFileSync(GRAPH_PATH, 'utf-8');
     const graph = parseYaml(raw);
-    expect(graph.phases).toHaveLength(4);
+    expect(graph.phases).toHaveLength(5);
   });
 
   it('every phase passes PhaseSchema validation individually', () => {
@@ -83,7 +83,7 @@ describe('doc-update.taskflow.yaml — phase structure', () => {
 
   it('has correct phase IDs in order', () => {
     const ids = phases.map((p) => p.id);
-    expect(ids).toEqual(['doc-scope', 'doc-write', 'doc-review', 'doc-accept']);
+    expect(ids).toEqual(['doc-scope', 'doc-write', 'doc-review', 'doc-gate', 'doc-accept']);
   });
 
   it('has correct phase types', () => {
@@ -92,6 +92,7 @@ describe('doc-update.taskflow.yaml — phase structure', () => {
     expect(byId['doc-scope']).toBe('main');
     expect(byId['doc-write']).toBe('main');
     expect(byId['doc-review']).toBe('main');
+    expect(byId['doc-gate']).toBe('gate');
     expect(byId['doc-accept']).toBe('approval');
   });
 
@@ -114,25 +115,33 @@ describe('doc-update.taskflow.yaml — phase structure', () => {
     expect(review.agent).toEqual(['reviewer', 'task']);
   });
 
-  it('doc-accept is approval with 3-route routing and bounded eval', () => {
-    const accept = phases[3];
-    expect(accept.id).toBe('doc-accept');
-    expect(accept.type).toBe('approval');
-    expect(accept.routing).toBeDefined();
-    expect(accept.routing!.actions).toHaveLength(3);
-    expect(accept.eval).toBeDefined();
-    expect(accept.eval!.length).toBeGreaterThanOrEqual(1);
+  it('doc-gate is gate with bounded eval', () => {
+    const gate = phases[3];
+    expect(gate.id).toBe('doc-gate');
+    expect(gate.type).toBe('gate');
+    expect(gate.eval).toBeDefined();
+    expect(gate.eval!.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('doc-accept eval is bounded FAIL → retry rule (contract field, no DEBT)', () => {
-    const accept = phases[3];
-    const evalText = accept.eval!.map((r) => r.when).join(' ');
+  it('doc-gate eval is bounded FAIL → retry rule (contract field, no DEBT)', () => {
+    const gate = phases[3];
+    const evalText = gate.eval!.map((r) => r.when).join(' ');
     expect(evalText).toContain('overall: fail');
     expect(evalText).toContain('retryAttempt < 2');
     expect(evalText).not.toContain('DEBT');
-    const retryRules = accept.eval!.filter((r) => r.action === 'retry');
+    const retryRules = gate.eval!.filter((r) => r.action === 'retry');
     expect(retryRules.length).toBe(1);
     expect(retryRules[0]!.target).toBe('doc-write');
+  });
+
+  it('doc-accept is approval with 3-route routing and no eval', () => {
+    const accept = phases[4];
+    expect(accept.id).toBe('doc-accept');
+    expect(accept.type).toBe('approval');
+    expect(accept.dependsOn).toEqual(['doc-gate']);
+    expect(accept.routing).toBeDefined();
+    expect(accept.routing!.actions).toHaveLength(3);
+    expect(accept.eval).toBeUndefined();
   });
 });
 
@@ -157,13 +166,13 @@ describe('doc-update.taskflow.yaml — topology', () => {
     expect(layers.length).toBeGreaterThan(0);
   });
 
-  it('all 4 phases appear in topoLayers', () => {
+  it('all 5 phases appear in topoLayers', () => {
     const layers = topoLayers(phases);
     const allIds = layers
       .flat()
       .map((p) => p.id)
       .sort();
-    expect(allIds).toEqual(['doc-accept', 'doc-review', 'doc-scope', 'doc-write'].sort());
+    expect(allIds).toEqual(['doc-accept', 'doc-gate', 'doc-review', 'doc-scope', 'doc-write'].sort());
   });
 
   it('all dependsOn references point to existing phase IDs', () => {
@@ -175,16 +184,17 @@ describe('doc-update.taskflow.yaml — topology', () => {
     }
   });
 
-  it('approval depends on single review node — writer not listed', () => {
+  it('approval depends on single gate node — writer not listed', () => {
     const deps = new Map(phases.map((p) => [p.id, p.dependsOn ?? []]));
     expect(deps.get('doc-scope')).toEqual([]);
     expect(deps.get('doc-write')).toEqual(['doc-scope']);
     expect(deps.get('doc-review')).toEqual(['doc-write']);
-    expect(deps.get('doc-accept')).toEqual(['doc-review']);
+    expect(deps.get('doc-gate')).toEqual(['doc-review']);
+    expect(deps.get('doc-accept')).toEqual(['doc-gate']);
   });
 
   it('doc-accept jump action has explicit target', () => {
-    const accept = phases[3];
+    const accept = phases[4];
     const jump = accept.routing!.actions.find((a) => a.action === 'jump');
     expect(jump).toBeDefined();
     expect(jump!.target).toBe('doc-scope');

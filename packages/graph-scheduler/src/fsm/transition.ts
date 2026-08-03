@@ -291,7 +291,7 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
       // Reset target + upstream to pending — retryCount increments per jump
       // re-execution (never zeroed): eval conditions bound auto-rework loops by
       // referencing retryAttempt, so zeroing would defeat the bound (see
-      // atom-graph-spec §Auto-Rework (eval) Rules).
+      // atom-graph-spec §Auto-Rework (gate) Rules).
       for (const id of resetSet) {
         const ns = phases[id];
         if (ns) {
@@ -315,18 +315,24 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
       const doneSet = terminalIds(phases);
       const ready = resolveReady(graph.phases, doneSet, phases);
 
-      const effects: FsmEffect[] = [
-        {
-          type: 'reset_upstream',
-          runId: state.runId,
-          fromNodeId: event.targetPhaseId,
-        },
-        {
-          type: 'reset_downstream',
-          runId: state.runId,
-          nodeId: event.targetPhaseId,
-        },
-      ];
+      // Persist every reset node (target + upstream + downstream) with the
+      // in-memory pending state — retryCount INCREMENTED, never zeroed.
+      // The target itself is not covered by findUpstream/findDownstream
+      // (both exclude the node they start from), so it must be persisted
+      // explicitly or it stays `done` in the DB after a mid-chain jump.
+      const effects: FsmEffect[] = [];
+      const resetNodes = new Set([event.targetPhaseId, ...resetSet, ...downstreamIds]);
+      for (const id of resetNodes) {
+        const ns = phases[id];
+        if (ns && ns.status === 'pending') {
+          effects.push({
+            type: 'persist_node_state',
+            runId: state.runId,
+            nodeId: id,
+            state: ns,
+          });
+        }
+      }
 
       for (const p of ready) {
         phases[p.id] = {

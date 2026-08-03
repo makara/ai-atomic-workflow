@@ -232,4 +232,79 @@ describe('resolveChannels', () => {
     expect(r.files).toEqual([]);
     expect(r.errors).toEqual([]);
   });
+
+  it('run-scoped: node: target outside the current run warns and skips — stale file never resolves', () => {
+    const r = resolveChannels({
+      channels: ['node:loop-entry'],
+      dependsOn: [],
+      contract,
+      runNodeIds: new Set(['scope-detect', 'arch-review']),
+    });
+    expect(r.upstream).toEqual([]);
+    expect(r.errors).toEqual([]);
+    expect(r.warnings.length).toBeGreaterThan(0);
+    expect(r.warnings[0]).toContain('node:loop-entry');
+    expect(r.warnings[0]).toContain('current run');
+  });
+
+  it('run-scoped: node: target inside the current run resolves normally', () => {
+    const r = resolveChannels({
+      channels: ['node:loop-entry'],
+      dependsOn: [],
+      contract,
+      runNodeIds: new Set(['loop-entry', 'arch-review']),
+    });
+    expect(r.upstream).toEqual(['loop-entry']);
+    expect(r.errors).toEqual([]);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it('run-scoped: contract upstream match outside the run warns and skips', () => {
+    const r = resolveChannels({
+      channels: ['plan-parse'],
+      dependsOn: [],
+      contract,
+      runNodeIds: new Set(['scope-confirm']),
+    });
+    expect(r.upstream).toEqual([]);
+    expect(r.warnings.join(' ')).toContain('plan-parse');
+  });
+
+  it('run-scoped: dependsOn-covered target stays implicit — no scope warning', () => {
+    const r = resolveChannels({
+      channels: ['node:scope-confirm'],
+      dependsOn: ['scope-confirm'],
+      contract,
+      runNodeIds: new Set(['scope-confirm']),
+    });
+    expect(r.upstream).toEqual([]);
+    expect(r.warnings.join(' ')).toContain('redundant declaration');
+    expect(r.warnings.join(' ')).not.toContain('current run');
+  });
+
+  it('run-scoped: absent runNodeIds keeps legacy behavior (validation paths)', () => {
+    const r = resolveChannels({ channels: ['node:plan-parse'], dependsOn: [], contract });
+    expect(r.upstream).toEqual(['plan-parse']);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it('run-scoped: flow-propagated node: channel observes the same scope (in-run resolves, out-of-run warns)', () => {
+    // flow input channels propagate to entry children as plain node:
+    // entries — the same run-scope gate applies
+    const inRun = resolveChannels({
+      channels: ['node:loop-entry'],
+      dependsOn: [],
+      contract,
+      runNodeIds: new Set(['loop-entry', 'review/arch-review']),
+    });
+    expect(inRun.upstream).toEqual(['loop-entry']);
+    const outRun = resolveChannels({
+      channels: ['node:loop-entry'],
+      dependsOn: [],
+      contract,
+      runNodeIds: new Set(['review/arch-review']),
+    });
+    expect(outRun.upstream).toEqual([]);
+    expect(outRun.warnings.join(' ')).toContain('current run');
+  });
 });

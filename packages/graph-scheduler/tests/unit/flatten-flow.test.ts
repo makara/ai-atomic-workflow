@@ -536,6 +536,110 @@ describe('flattenFlowPhases — node: channel prefixing', () => {
   });
 });
 
+describe('flattenFlowPhases — flow input interface channel propagation', () => {
+  it('propagates flow channels to every entry child, merged with child channels', () => {
+    const child: Taskflow = {
+      name: 'sub-graph',
+      phases: [
+        { id: 'a', type: 'main', dependsOn: [], channels: ['./CONTEXT.md'] },
+        { id: 'b', type: 'main', dependsOn: [], channels: [] },
+        { id: 'c', type: 'main', dependsOn: ['a'] },
+      ],
+    };
+    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
+
+    const parent: Taskflow = {
+      name: 'parent',
+      phases: [{ id: 'ops', type: 'flow', use: 'sub-graph', dependsOn: [], channels: ['node:grill/grilling'] }],
+    };
+
+    const result = flattenFlowPhases(parent, loader, 1, 5);
+    const a = result.phases.find((p) => p.id === 'ops/a');
+    const b = result.phases.find((p) => p.id === 'ops/b');
+    const c = result.phases.find((p) => p.id === 'ops/c');
+    // entry children get flow channels first + own channels preserved
+    expect(a?.channels).toEqual(['node:grill/grilling', './CONTEXT.md']);
+    expect(b?.channels).toEqual(['node:grill/grilling']);
+    // non-entry child untouched
+    expect(c?.channels).toBeUndefined();
+  });
+
+  it('dedups identical entries — flow-first, string equality', () => {
+    const child: Taskflow = {
+      name: 'sub-graph',
+      phases: [{ id: 'entry', type: 'main', dependsOn: [], channels: ['./CONTEXT.md'] }],
+    };
+    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
+
+    const parent: Taskflow = {
+      name: 'parent',
+      phases: [
+        { id: 'ops', type: 'flow', use: 'sub-graph', dependsOn: [], channels: ['./CONTEXT.md', 'node:grill/grilling'] },
+      ],
+    };
+
+    const result = flattenFlowPhases(parent, loader, 1, 5);
+    const entry = result.phases.find((p) => p.id === 'ops/entry');
+    expect(entry?.channels).toEqual(['./CONTEXT.md', 'node:grill/grilling']);
+  });
+
+  it('child node: channel to non-parent id still prefixed — distinct from flow-level entry', () => {
+    const child: Taskflow = {
+      name: 'sub-graph',
+      phases: [{ id: 'entry', type: 'main', dependsOn: [], channels: ['node:grill/grilling'] }],
+    };
+    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
+
+    const parent: Taskflow = {
+      name: 'parent',
+      phases: [{ id: 'ops', type: 'flow', use: 'sub-graph', dependsOn: [], channels: ['node:grill/grilling'] }],
+    };
+
+    const result = flattenFlowPhases(parent, loader, 1, 5);
+    const entry = result.phases.find((p) => p.id === 'ops/entry');
+    // child ref is a child-sibling target (prefixed ops/grill/grilling); flow ref targets the composed graph — both kept
+    expect(entry?.channels).toEqual(['node:grill/grilling', 'node:ops/grill/grilling']);
+  });
+
+  it('flow without channels — child behavior unchanged', () => {
+    const child: Taskflow = {
+      name: 'sub-graph',
+      phases: [{ id: 'entry', type: 'main', dependsOn: [], channels: ['node:seed'] }],
+    };
+    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
+
+    const parent: Taskflow = {
+      name: 'parent',
+      phases: [
+        { id: 'seed', type: 'main', dependsOn: [] },
+        { id: 'ops', type: 'flow', use: 'sub-graph', dependsOn: [] },
+      ],
+    };
+
+    const result = flattenFlowPhases(parent, loader, 1, 5);
+    const entry = result.phases.find((p) => p.id === 'ops/entry');
+    // parent-level target stays unprefixed; no flow channels to merge
+    expect(entry?.channels).toEqual(['node:seed']);
+  });
+
+  it('flow channels never silently dropped — entries always carry them', () => {
+    const child: Taskflow = {
+      name: 'sub-graph',
+      phases: [{ id: 'entry', type: 'main', dependsOn: [] }],
+    };
+    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
+
+    const parent: Taskflow = {
+      name: 'parent',
+      phases: [{ id: 'ops', type: 'flow', use: 'sub-graph', dependsOn: [], channels: ['node:grill/grilling'] }],
+    };
+
+    const result = flattenFlowPhases(parent, loader, 1, 5);
+    const entry = result.phases.find((p) => p.id === 'ops/entry');
+    expect(entry?.channels).toEqual(['node:grill/grilling']);
+  });
+});
+
 describe('flattenFlowPhases — parent routing/eval target remap', () => {
   it('remaps parent routing target naming flow id to flattened entry node', () => {
     const parent: Taskflow = {
@@ -562,19 +666,19 @@ describe('flattenFlowPhases — parent routing/eval target remap', () => {
     const parent: Taskflow = {
       name: 'test',
       phases: [
-        { id: 'review', type: 'flow', use: 'skill-create', dependsOn: [] },
+        { id: 'writer', type: 'flow', use: 'skill-create', dependsOn: [] },
         {
           id: 'accept',
-          type: 'approval',
-          dependsOn: ['review'],
-          eval: [{ when: 'review output shows fail', action: 'retry', target: 'review' }],
+          type: 'gate',
+          dependsOn: ['writer'],
+          eval: [{ when: 'writer output shows fail', action: 'retry', target: 'writer' }],
         },
       ],
     };
 
     const result = flattenFlowPhases(parent, staticLoader, 1, 5);
     const accept = result.phases.find((p) => p.id === 'accept');
-    expect(accept?.eval?.[0].target).toBe('review/scope-confirm');
+    expect(accept?.eval?.[0].target).toBe('writer/scope-confirm');
   });
 
   it('keeps child routing targets prefixed — regression', () => {
@@ -601,5 +705,180 @@ describe('flattenFlowPhases — parent routing/eval target remap', () => {
     const result = flattenFlowPhases(parent, loader, 1, 5);
     const gate = result.phases.find((p) => p.id === 'ops/gate');
     expect(gate?.routing?.actions[0].target).toBe('ops/write');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Composition inheritance — parent graph flows the built-in implement graph
+// (G3: merge-at-load carries openspec-finalize + when guard + channels into
+// the parent; idea-to-ship not yet created — this test IS the inheritance proof)
+// ---------------------------------------------------------------------------
+
+describe('flattenFlowPhases — composition inheritance of implement finalize', () => {
+  const { readFileSync } = require('node:fs');
+  const { join } = require('node:path');
+  const { parse: parseYaml } = require('yaml');
+  const pkgRoot = join(__dirname, '..', '..');
+  const implementGraph = parseYaml(
+    readFileSync(join(pkgRoot, 'graphs', 'implement.taskflow.yaml'), 'utf-8'),
+  ) as Taskflow;
+  const loader = (name: string): Taskflow | null => (name === 'implement' ? implementGraph : null);
+
+  const parent: Taskflow = {
+    name: 'idea-to-ship',
+    phases: [{ id: 'implement', type: 'flow', use: 'implement', dependsOn: [] }],
+  };
+
+  const result = flattenFlowPhases(parent, loader, 1, 5);
+
+  it('finalize node inherited with when guard', () => {
+    const finalize = result.phases.find((p) => p.id === 'implement/openspec-finalize');
+    expect(finalize).toBeDefined();
+    expect(String(finalize?.when)).toMatch(/work-input output shows input_source: openspec-change/);
+  });
+
+  it('finalize channels passthrough with prefixed targets', () => {
+    const finalize = result.phases.find((p) => p.id === 'implement/openspec-finalize');
+    expect(finalize?.channels).toEqual(['node:implement/work-input']);
+  });
+
+  it('finalize skill + dependsOn preserved', () => {
+    const finalize = result.phases.find((p) => p.id === 'implement/openspec-finalize');
+    expect(finalize?.skill).toBe('atom-openspec-archive');
+    expect(finalize?.dependsOn).toEqual(['implement/implement-accept']);
+  });
+
+  it('eval auto-rework target remapped to flattened writer', () => {
+    const gate = result.phases.find((p) => p.id === 'implement/implement-gate');
+    expect(gate?.eval?.[0].target).toBe('implement/implement');
+  });
+
+  it('full child phase set inherited', () => {
+    const ids = result.phases.map((p) => p.id);
+    expect(ids).toEqual([
+      'implement/work-input',
+      'implement/implement',
+      'implement/implement-review',
+      'implement/implement-gate',
+      'implement/implement-accept',
+      'implement/openspec-finalize',
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Entry-rooted flow — dependsOn: [] + when guard (arch-review-loop closed-loop
+// pattern): when propagates to ALL children, entry child inherits
+// empty upstream (JUMP closure stays empty), parent routing target rewrites to
+// the entry node so a loop retry re-runs only the flow segment.
+// ---------------------------------------------------------------------------
+
+describe('flattenFlowPhases — entry-rooted flow when propagation and loop target rewrite', () => {
+  function loopChild(): Taskflow {
+    return {
+      name: 'pipeline',
+      phases: [
+        { id: 'grill', type: 'main', task: 'grill', dependsOn: [] },
+        { id: 'create', type: 'main', task: 'create', dependsOn: ['grill'] },
+        { id: 'done', type: 'main', task: 'done', dependsOn: ['create'] },
+      ],
+    };
+  }
+
+  function loopLoader(name: string): Taskflow | null {
+    if (name === 'pipeline') return loopChild();
+    return null;
+  }
+
+  it('entry-rooted flow keeps empty upstream on entry child; when propagates to ALL children', () => {
+    const parent: Taskflow = {
+      name: 'loop',
+      phases: [
+        { id: 'review', type: 'main', dependsOn: [] },
+        { id: 'review-accept', type: 'approval', dependsOn: ['review'] },
+        { id: 'implement', type: 'flow', use: 'pipeline', dependsOn: [], when: 'run only when review-accept approves' },
+        { id: 'verify', type: 'main', dependsOn: ['implement'], when: 'run only when implement ran' },
+      ],
+    };
+
+    const result = flattenFlowPhases(parent, loopLoader, 1, 5);
+    const entry = result.phases.find((p) => p.id === 'implement/grill');
+    const create = result.phases.find((p) => p.id === 'implement/create');
+    const done = result.phases.find((p) => p.id === 'implement/done');
+
+    // Entry child inherits flow dependsOn (empty) — JUMP upstream closure stays empty
+    expect(entry?.dependsOn).toEqual([]);
+    // When guard propagates to every child without its own when
+    expect(entry?.when).toBe('run only when review-accept approves');
+    expect(create?.when).toBe('run only when review-accept approves');
+    expect(done?.when).toBe('run only when review-accept approves');
+    // Child internal chain preserved
+    expect(create?.dependsOn).toEqual(['implement/grill']);
+    expect(done?.dependsOn).toEqual(['implement/create']);
+    // Downstream parent node rewired to child terminal
+    const verify = result.phases.find((p) => p.id === 'verify');
+    expect(verify?.dependsOn).toEqual(['implement/done']);
+    // verify keeps its own (stronger) when
+    expect(verify?.when).toBe('run only when implement ran');
+  });
+
+  it('parent routing target naming the flow rewrites to the entry node — loop retry re-runs only the segment', () => {
+    const parent: Taskflow = {
+      name: 'loop',
+      phases: [
+        { id: 'review', type: 'main', dependsOn: [] },
+        { id: 'review-accept', type: 'approval', dependsOn: ['review'] },
+        { id: 'implement', type: 'flow', use: 'pipeline', dependsOn: [] },
+        { id: 'verify', type: 'main', dependsOn: ['implement'] },
+        {
+          id: 'loop-accept',
+          type: 'approval',
+          dependsOn: ['verify'],
+          routing: {
+            actions: [
+              { action: 'retry', target: 'implement', label: 'Loop pipeline again', description: 're-run' },
+              { action: 'jump', target: 'review', label: 'Re-scope review', description: 'fresh scope' },
+            ],
+          },
+        },
+      ],
+    };
+
+    const result = flattenFlowPhases(parent, loopLoader, 1, 5);
+    const gate = result.phases.find((p) => p.id === 'loop-accept');
+    const actions = gate?.routing?.actions ?? [];
+    const retry = actions.find((a) => a.action === 'retry');
+    // Flow-id target rewritten to the flattened entry node — findUpstream(entry) = []
+    expect(retry?.target).toBe('implement/grill');
+    const jump = actions.find((a) => a.action === 'jump');
+    // Non-flow target untouched (parent-level node stays unprefixed)
+    expect(jump?.target).toBe('review');
+  });
+
+  it('child with its own when keeps it — stronger condition wins', () => {
+    const parent: Taskflow = {
+      name: 'loop',
+      phases: [
+        { id: 'implement', type: 'flow', use: 'pipeline', dependsOn: [], when: 'flow-level guard' },
+        {
+          id: 'create-override',
+          type: 'main',
+          dependsOn: ['implement'],
+          when: 'child-specific guard',
+        },
+      ],
+    };
+    const child = loopChild();
+    child.phases = [
+      { id: 'grill', type: 'main', task: 'grill', dependsOn: [], when: 'own guard' },
+      { id: 'create', type: 'main', task: 'create', dependsOn: ['grill'] },
+    ];
+    const customLoader = (name: string): Taskflow | null => (name === 'pipeline' ? child : null);
+
+    const result = flattenFlowPhases(parent, customLoader, 1, 5);
+    const grill = result.phases.find((p) => p.id === 'implement/grill');
+    const create = result.phases.find((p) => p.id === 'implement/create');
+    expect(grill?.when).toBe('own guard');
+    expect(create?.when).toBe('flow-level guard');
   });
 });

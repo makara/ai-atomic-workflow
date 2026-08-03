@@ -144,6 +144,13 @@ export interface IResolveInput {
   readonly dependsOn: readonly string[] | undefined;
   /** parsed skill contract — single source of truth for type derivation */
   readonly contract: IContextContract;
+  /**
+   * Current run's node set (flattened graph nodeIds). When present, a `node:`
+   * target outside the set is a cross-run reference — warn + skip instead of
+   * resolving (stale output files from other runs must never inject). Absent
+   * (validation paths without a run) → check skipped, behavior unchanged.
+   */
+  readonly runNodeIds?: ReadonlySet<string>;
 }
 
 /** Strip explicit prefix from a channel entry — returns the bare target. */
@@ -194,13 +201,24 @@ export function fileChannelCoveredBy(channel: string, contractFile: string): boo
 export function resolveChannels(input: IResolveInput): IResolveResult {
   const channels = input.channels ?? [];
   const dependsOn = new Set(input.dependsOn ?? []);
-  const { contract } = input;
+  const { contract, runNodeIds } = input;
 
   const upstream: string[] = [];
   const references: string[] = [];
   const files: string[] = [];
   const errors: string[] = [];
   const warnings: string[] = [];
+
+  // run-scoped gate — cross-run references warn + skip (stale-file protection);
+  // both call sites pre-check dependsOn coverage before invoking this
+  const runScoped = (target: string, display: string): boolean => {
+    if (!runNodeIds) return true;
+    if (runNodeIds.has(target)) return true;
+    warnings.push(
+      `"${display}" — target outside the current run's node set; cross-run output files are never injected (stale-file protection)`,
+    );
+    return false;
+  };
 
   for (const entry of channels) {
     // empty entry — semantic no-op, reject with clear message
@@ -217,6 +235,8 @@ export function resolveChannels(input: IResolveInput): IResolveResult {
       } else {
         if (dependsOn.has(prefixed.target)) {
           warnings.push(`"${entry}" — node already covered by dependsOn; redundant declaration`);
+        } else if (!runScoped(prefixed.target, entry)) {
+          // cross-run reference — warn + skip (stale-file protection)
         } else {
           upstream.push(prefixed.target);
         }
@@ -228,6 +248,8 @@ export function resolveChannels(input: IResolveInput): IResolveResult {
     if (contract.upstream.includes(entry)) {
       if (dependsOn.has(entry)) {
         warnings.push(`"${entry}" — already covered by dependsOn; redundant declaration`);
+      } else if (!runScoped(entry, entry)) {
+        // cross-run reference — warn + skip (stale-file protection)
       } else {
         upstream.push(entry);
         warnings.push(

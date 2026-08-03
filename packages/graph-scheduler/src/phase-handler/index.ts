@@ -10,6 +10,7 @@
 
 export { approvalPhaseHandler } from './approval-handler.js';
 export { PhaseHandlerError, UnknownPhaseTypeError } from './errors.js';
+export { gatePhaseHandler } from './gate-handler.js';
 export { mainPhaseHandler } from './main-handler.js';
 export type {
   IApprovalAction,
@@ -24,19 +25,21 @@ export type {
 import type { Phase } from '../schemas/index.js';
 import { approvalPhaseHandler } from './approval-handler.js';
 import { UnknownPhaseTypeError } from './errors.js';
+import { gatePhaseHandler } from './gate-handler.js';
 import { mainPhaseHandler } from './main-handler.js';
 import type { IPhaseHandler } from './types.js';
 
 /**
  * Static handler map — single source for the enabled type set.
  *
- * Built-in dispatch types: main/approval (always present). Flow is a
+ * Built-in dispatch types: main/approval/gate (always present). Flow is a
  * load-time composition type, not a dispatch type. Unknown types fail
  * via UnknownPhaseTypeError — never a silent pass-through.
  */
 const HANDLERS: Readonly<Record<string, IPhaseHandler>> = {
   main: mainPhaseHandler,
   approval: approvalPhaseHandler,
+  gate: gatePhaseHandler,
 };
 
 /** Resolve a phase handler by type — throws UnknownPhaseTypeError for unknown types. */

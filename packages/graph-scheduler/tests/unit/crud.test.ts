@@ -131,6 +131,19 @@ describe('graphStart', () => {
     expect(result.node?.type).toBe('main');
   });
 
+  it('returns run snapshot — first node active, entry dispatch carries it', async () => {
+    fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
+    const result = await fix.rt.graphStart('linear-agent');
+
+    expect(result.snapshot.runId).toBe(result.runId);
+    expect(result.snapshot.fsmState).toBe('running');
+    expect(result.snapshot.nodeCount).toBeGreaterThan(0);
+    expect(result.snapshot.completedCount).toBe(0);
+    expect(result.snapshot.nodes).toEqual(
+      expect.arrayContaining([expect.objectContaining({ nodeId: 'agent-a', status: 'active', retryCount: 0 })]),
+    );
+  });
+
   it('starts with invocation args available on node', async () => {
     fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
     const result = await fix.rt.graphStart('linear-agent', { mode: 'fast' });

@@ -1,10 +1,10 @@
 ---
 name: atom-kernel
-description: Platform primitives — task() dispatch, question() decision UI with 8 rules, interview() consensus, solve() goal-driven loop, graph-scheduler tool detection. Use when dispatching sub-agents or presenting decisions.
+description: Platform primitives — task() dispatch, question() decision UI with 8 rules, interview() consensus (single contract, consensus + solve modes), graph-scheduler tool detection. Use when dispatching sub-agents or presenting decisions.
 argument-hint: none (reference skill)
 user-invocable: false
-version: 2.4.0
-last_updated: '2026-08-02'
+version: 2.5.0
+last_updated: '2026-08-03'
 ---
 
 > **Runtime constraints** — load skill://writing-great-skills before use. **Layer**: atom — runtime primitives.
@@ -17,10 +17,9 @@ last_updated: '2026-08-02'
 |-|-|-|
 |`task()`|**Callable**|`task` tool — dispatches sub-agents|
 |`question()`|**Callable**|`ask` tool — single-decision UI|
-|`interview()`|**Behavior Contract**|Agent-implemented — multi-turn consensus conversation|
-|`solve()`|**Behavior Contract**|Agent-implemented — goal-driven loop: confirm → research → think → interview → repeat|
+|`interview()`|**Behavior Contract**|Agent-implemented — multi-turn consensus conversation, two modes (consensus / solve)|
 
-> **`task()` and `question()`** are tool-mapped callables — agent invokes them directly and gets a result. **`interview()` and `solve()`** are behavior contracts — agent reads rules below and implements manually using `question()` (or `ask`) one turn at a time. Attempting to call `interview({goal, context})` or `solve({goal})` as a function will fail with `ReferenceError: … is not defined`.
+> **`task()` and `question()`** are tool-mapped callables — agent invokes them directly and gets a result. **`interview()`** is a behavior contract — agent reads rules below and implements manually using `question()` (or `ask`) one turn at a time. Attempting to call `interview({goal, context})` as a function will fail with `ReferenceError: … is not defined`.
 
 ---
 
@@ -139,17 +138,24 @@ question({ header: "Token refresh strategy", options: [{ label: "Polling", descr
 
 # interview() — Consensus Interview (Behavior Contract — NOT a callable function)
 
-Multi-round consensus conversation. Full implementation of grilling skill behavior contract — every rule below MUST apply on every call.
+Single conversation contract with two modes — **consensus mode** and **solve mode** — sharing one rule set. Full implementation of the grilling skill behavior contract — every rule below MUST apply on every call, both modes.
 
 ## Signature
 
 ```
-interview({ goal, context }) → consensus
+interview({ goal, context?, research?, design? }) → consensus | solution
 ```
 
 - `goal` — interview goal. Drives question generation. First consensus point — must confirm shared understanding of goal before proceeding.
 - `context` — background. File content, state snapshot, structured data. Provides interview context. Facts discoverable from context — look up, do not ask.
-- Returns `consensus` — object `{ decisions: [{ decision, rationale }] }`. Structured summary of agreed decision points.
+- `research?` — solve mode only. Boolean. Run research step before think. Default `true` when solve mode selected.
+- `design?` — solve mode only. Marker that the goal produces a design/solution. Presence selects solve mode.
+- Returns `consensus` — `{ decisions: [{ decision, rationale }] }` (consensus mode), or `solution` — `{ goal, findings?, design, consensus }` (solve mode).
+
+## Mode Selection
+
+- **Consensus mode** — reach shared understanding on a topic: confirm goal → decision rounds → `{ decisions }`. Default.
+- **Solve mode** — produce a complete solution: confirm goal → research → think → decision rounds → reject → re-think → repeat until accepted → `{ goal, findings?, design, consensus }`. Use when `research: true` or the goal produces a design/plan (graph design, skill structure design, spec synthesis). Solve mode eliminates graph-level confirm phases — confirmation logic sinks into agent-internal loop.
 
 ## Behavior Contract
 
@@ -166,28 +172,17 @@ interview({ goal, context }) → consensus
 
 **Zero-question degradation**: context already covers all aspects of goal and goal needs no clarification — return consensus directly without questions. Natural consequence of rules 1-8 — not independent rule.
 
----
+## Solve-Mode Additions
 
-# solve() — Goal-Driven Loop (Behavior Contract — NOT a callable function)
-
-Goal-driven solve loop. Agent researches, thinks, interviews, repeats — all inside single agent call. Eliminates graph-level confirm phases — confirmation logic sinks into agent-internal loop.
-
-## Signature
-
-```
-solve({ goal, research?, context? }) → solution
-```
-
-- `goal` — what to solve. Drives research direction, think scope, interview questions. First consensus point — must confirm shared understanding before loop.
-- `research?` — boolean. Run research step. Default `true`. Set `false` when specs already known — skip to think.
-- `context?` — background. File content, existing specs, state. Facts discoverable from context — look up, do not ask.
-- Returns `solution` — structured result `{ goal, findings?, design, consensus }`. `findings` present only when `research: true`.
+9. **Research before think** — when `research: true` (default in solve mode), load `skill://research`. Look up reference specs, existing patterns, constraints. Do not skip — uninformed design wastes interview rounds.
+10. **Think exhaustively** — design complete solution. Cover all dimensions: structure, naming, edges, guards, edge cases. Incomplete design → extra interview rounds.
+11. **Re-think on reject** — user rejects any decision → return to think step. Revise design. Re-interview affected decisions only — do not re-ask confirmed points.
 
 ## Internal Flow
 
 ```
-solve({ goal, research: true, context })
-  ├── confirm(goal)       ← interview() goal consensus — confirm shared understanding
+interview({ goal, research: true, context })   ← solve mode
+  ├── confirm(goal)       ← goal consensus — confirm shared understanding
   ├── research             ← skill://research — look up specs, patterns, constraints
   ├── think                ← agent reasons about solution — design, analyze, decide
   ├── interview(details)   ← question() per-round — confirm each decision point
@@ -196,20 +191,9 @@ solve({ goal, research: true, context })
 
 Loop inside agent — no graph-level retry/jump. Human rejection → agent re-thinks and re-interviews. Design + confirmation in single phase.
 
-## Behavior Contract
+## Mode Comparison
 
-1. **Goal consensus first** — confirm goal with user via interview() before any work. Even explicit goal must reach shared understanding.
-2. **Research before think** — when `research: true`, load `skill://research`. Look up reference specs, existing patterns, constraints. Do not skip — uninformed design wastes interview rounds.
-3. **Think exhaustively** — design complete solution. Cover all dimensions: structure, naming, edges, guards, edge cases. Incomplete design → extra interview rounds.
-4. **Interview one decision at a time** — present one design decision per turn via question(). Recommendation first. Wait for user response before next.
-5. **Loop until confirmed** — user rejects any decision → return to think step. Revise design. Re-interview affected decisions only — do not re-ask confirmed points.
-6. **Fact lookup** — fact discoverable from environment (filesystem, tools, skill://) — look up. Do not ask user.
-7. **Context-driven** — `context` provides background. Facts from context → use directly. Gap in context → research step fills it.
-8. **Return structured solution** — when all decisions confirmed, return `{ goal, findings?, design, consensus }`. `consensus` records every confirmed decision with rationale.
-
-## vs interview()
-
-|Dimension|interview()|solve()|
+|Dimension|Consensus mode|Solve mode|
 |-|-|-|
 |Goal|Reach consensus on topic|Produce complete solution|
 |Internal steps|interview only|confirm → research → think → interview loop|
@@ -218,16 +202,13 @@ Loop inside agent — no graph-level retry/jump. Human rejection → agent re-th
 |Returns|`{ decisions }`|`{ goal, findings?, design, consensus }`|
 |Use case|scope confirm, plan confirm|graph design, skill structure design|
 
-## Primitives Triangle
+## Primitives Note
 
 ```
-question() — single decision
+question() — single decision (primitive)
     │
     ▼
-interview() — multi-turn consensus
-    │
-    ▼
-solve() — goal-driven loop (research → think → interview → repeat)
+interview() — single conversation contract (consensus + solve modes)
 ```
 
-Each level builds on lower: solve() uses interview() for goal consensus + decision rounds, uses question() per decision. interview() uses question() per turn.
+Each level builds on lower: interview() uses question() per turn. `task()` is orthogonal — dispatches sub-agents that may themselves use any primitive. Grilling / grill-with-docs (upstream skills) are the named conversation disciplines — interview() is their formalized contract; grill-with-docs additionally carries inline domain-modeling side effects (ADR/glossary persistence).

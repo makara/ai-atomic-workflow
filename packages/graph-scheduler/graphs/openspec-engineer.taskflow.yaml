@@ -1,0 +1,149 @@
+name: openspec-engineer
+phases:
+  # Stage 1: Spec — synthesize from the recorded decision (to-spec, no interview)
+  - id: to-spec
+    type: main
+    dependsOn: []
+    task: |
+      Auto-approve mode (standard topic — confirm BEFORE work, NEVER auto-approved):
+      Manual (recommended, default) — every approval presents a decision card.
+      Auto — every approval in this run (entry confirmations excluded — they are
+      interviews, never auto) executes its recommended routing action (routingActions[0]).
+      Echo rule: scan current-run completed node outputs first — an existing
+      auto_approve field (nested composition) is inherited WITHOUT asking (no re-confirm).
+      Output includes: auto_approve (true|false).
+
+      Synthesize the spec from the recorded ADR decision + change context per to-spec skill.
+      No interview — the decision is already recorded; synthesize from what exists.
+      Change name resolution — NEVER ask the user:
+      1. {args.changeName} if provided (graph_start args).
+      2. Else `openspec list --json` — exactly one active change → use it.
+      3. Else spec_status: blocked + candidate list, implement nothing.
+      Read the change's delta specs (openspec/changes/<change_name>/) and the ADR recorded
+      for it (docs/adr/ — most recent ADR referencing the change).
+      Sketch seams (prefer existing, highest seam); confirm with the user (question once).
+      Write the spec per to-spec template; publish to the issue tracker with ready-for-agent label.
+      Output (main agent collects):
+        - spec_path: <path>
+        - spec_status: published | blocked
+        - seam_summary: <seam description>
+        - change_name: <name>
+        - adr_path: <path when found>
+
+  # Stage 2: Tickets — split the spec into tracer-bullet slices (to-tickets)
+  - id: to-tickets
+    type: main
+    dependsOn: [to-spec]
+    task: |
+      Break the spec into tracer-bullet tickets per to-tickets skill.
+      Read spec from to-spec output spec_path (injected via dependsOn implicit context).
+      Draft vertical slices with blocking edges; quiz the user on granularity and
+      blocking edges (question rounds until approved); publish to the configured
+      tracker in dependency order with ready-for-agent label.
+      Output (main agent collects):
+        - ticket_count: <N>
+        - ticket_paths: [<ticket file paths>]
+        - change_name: <echo>
+
+  # Stage 3: Implement — tdd slices per implement skill (graph-mode patched)
+  - id: implement
+    type: main
+    skill: implement
+    dependsOn: [to-tickets]
+    channels:
+      - node:implement-review
+    task: |
+      Execute implement graph mode per implement skill — seam confirmation (question once),
+      tdd red-green slices in frontier order, regular typecheck + single-file tests,
+      full suite at the end.
+      Re-run rounds: implement-review output is injected via node:implement-review
+      channel — FIRST fix every finding, THEN continue.
+      Work tickets (ticket_paths injected); the change ledger check-off happens
+      uniformly in openspec-archive, not here.
+      Output (main agent collects):
+        - diff_summary: <summary of implementation changes>
+        - changed_files: [paths]
+        - progress_note: <open tickets vs done>
+
+  # Stage 4: Review — dual-axis audit per code-review (spec + tickets + ADR contract)
+  - id: implement-review
+    type: main
+    skill: code-review
+    agent: [reviewer, task]
+    dependsOn: [implement]
+    channels:
+      - skill:atom-graph-spec
+      - node:to-spec
+      - node:to-tickets
+    task: |
+      Dual-axis review of the implementation per code-review (use ## Agent hints for axis sub-agents).
+      Artifact set: spec (to-spec output spec_path), tickets (to-tickets output ticket_paths),
+      diff from implement output (injected); the recorded ADR (to-spec output adr_path) —
+      implementation must honor the decision.
+      Standards: repo-documented coding standards — auto-discovered per code-review §3;
+      atom-graph-spec (injected) for graph definitions.
+      Spec: ticket acceptance criteria met per ticket; spec commitments honored;
+      ADR decision honored. Graph-definition hygiene — eval conditions bounded by
+      retryAttempt, retry targets are writer nodes, when guard references direct upstream
+      observable fields, channels explicit.
+      Output structured YAML report — overall: pass | fail, per-violation findings.
+      Write report (main agent collects).
+
+  # Stage 5: Gate — bounded auto-rework on FAIL (machine judgment)
+  - id: implement-gate
+    type: gate
+    dependsOn: [implement-review]
+    eval:
+      - when: 'implement-review output shows overall: fail AND retryAttempt < 2'
+        action: retry
+        target: implement
+        note: 'auto: review found blocking issues — fix and re-review'
+
+  # Stage 6: Accept — human approval card (gate no-match falls here)
+  - id: implement-accept
+    type: approval
+    dependsOn: [implement-gate]
+    task: 'Implementation approval'
+    preText: |
+      implement-review reported the dual-axis verdict. Continue → reverse-validated
+      archive. Revise → re-run to-spec + to-tickets (seam confirmation and granularity
+      quiz re-asked) then implement, with prior review feedback injected via
+      node:implement-review. Redo → re-synthesize spec and tickets from the ADR decision.
+    routing:
+      actions:
+        - action: continue
+          label: 'Accept and archive'
+          description: 'Implementation complete — archive the change'
+        - action: retry
+          target: implement
+          label: 'Revise implementation'
+          description: 'Code needs corrections — re-run implement with review feedback'
+        - action: jump
+          target: to-spec
+          label: 'Redo spec and tickets'
+          description: 'Spec or tickets fundamentally wrong — re-synthesize'
+
+  # Stage 7: Archive — reverse-validated change archival (atom-openspec-archive)
+  - id: openspec-archive
+    type: main
+    dependsOn: [implement-accept]
+    skill: atom-openspec-archive
+    channels:
+      - node:to-spec
+      - node:implement
+    task: |
+      Execute atom-openspec-archive flow (reverse-validated archive).
+      Load atom-kernel (injected). Read implement-accept output (injected via dependsOn implicit context).
+      Change name: from to-spec output change_name field (injected via node:to-spec channel);
+      if absent, `openspec list --json` filtered to complete changes — single entry use it,
+      multiple/zero → archive_status: blocked + candidates. NEVER ask user.
+      Step 0 reverse-validation: task completion × code evidence (grep, contextFiles +
+      implement output changed_files injected via node:implement channel); evidence hit →
+      check off ledger + register verification.md; checked without evidence → drift →
+      refuse archive + rework suggestion output.
+      Step 1-3: `openspec archive <change> --yes --json` (CLI inlines delta specs → main specs sync).
+      Write output (main agent collects):
+        - archive_status: success | failed | blocked
+        - change_name: <name>
+        - validation_result: pass | fail | warn
+        - message: <summary>

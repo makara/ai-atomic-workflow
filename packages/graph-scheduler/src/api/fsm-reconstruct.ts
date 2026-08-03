@@ -3,7 +3,7 @@
  *
  * Extracted from crud.ts.
  * Reconstructs FsmState from persisted DB rows and executes FSM effects
- * (persist state, reset upstream/downstream nodes).
+ * (persist state, jump resets persist via persist_node_state).
  *
  * @module
  */
@@ -13,7 +13,6 @@ import type { FsmEffect, FsmNodeState } from '../fsm/effects.js';
 import type { FsmState, TaskflowGraph } from '../fsm/transition.js';
 import { GraphRepository, type GraphRun, type NodeStateEntry, type NodeStateUpdate } from '../lib/db/repository.js';
 import { NodeStateSchema } from '../schemas/index.js';
-import { findDownstream, findUpstream } from '../topology.js';
 import type { PersistenceError } from '../types.js';
 
 /**
@@ -88,13 +87,11 @@ export function reconstructFsmState(
  *
  * - persist_node_state → repo.updateNodeState
  * - persist_run_state  → repo.updateRunStatus
- * - reset_upstream     → findUpstream → repo.resetUpstreamNodes
- * - reset_downstream   → findDownstream → repo.resetDownstreamNodes
  */
 export function executeEffects(
   effects: readonly FsmEffect[],
   repo: GraphRepository['Type'],
-  graph: TaskflowGraph,
+  _graph: TaskflowGraph,
 ): Effect.Effect<void, PersistenceError> {
   return Effect.gen(function* () {
     for (const effect of effects) {
@@ -111,18 +108,6 @@ export function executeEffects(
         }
         case 'persist_run_state': {
           yield* repo.updateRunStatus(effect.runId, effect.status);
-          break;
-        }
-        case 'reset_upstream': {
-          const upstreamIds = findUpstream(effect.fromNodeId, graph.phases);
-          yield* repo.resetUpstreamNodes(effect.runId, upstreamIds);
-          break;
-        }
-        case 'reset_downstream': {
-          const downstreamIds = findDownstream(effect.nodeId, graph.phases);
-          if (downstreamIds.length > 0) {
-            yield* repo.resetDownstreamNodes(effect.runId, downstreamIds);
-          }
           break;
         }
       }

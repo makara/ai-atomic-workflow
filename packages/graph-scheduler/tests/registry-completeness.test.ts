@@ -86,11 +86,33 @@ describe('registry.json — built-in graph completeness', () => {
     expect(entry?.path).toBe('openspec-pipeline.taskflow.yaml');
   });
 
-  it('arch-review-to-spec is registered', () => {
+  it('openspec-engineer is registered', () => {
+    const registry = loadRegistry();
+    const entry = registry.find((item) => item.name === 'openspec-engineer');
+    expect(entry).toBeDefined();
+    expect(entry?.path).toBe('openspec-engineer.taskflow.yaml');
+  });
+
+  it('arch-review-loop is registered — closed-loop review pipeline', () => {
+    const registry = loadRegistry();
+    const entry = registry.find((item) => item.name === 'arch-review-loop');
+    expect(entry).toBeDefined();
+    expect(entry?.path).toBe('arch-review-loop.taskflow.yaml');
+    expect(entry?.description).toMatch(/closed loop|Top Rec/i);
+  });
+
+  it('arch-review-to-spec is NOT registered — deprecated and removed', () => {
     const registry = loadRegistry();
     const entry = registry.find((item) => item.name === 'arch-review-to-spec');
+    expect(entry).toBeUndefined();
+  });
+
+  it('grill-with-docs is registered — two-track shared idea entry', () => {
+    const registry = loadRegistry();
+    const entry = registry.find((item) => item.name === 'grill-with-docs');
     expect(entry).toBeDefined();
-    expect(entry?.path).toBe('arch-review-to-spec.taskflow.yaml');
+    expect(entry?.path).toBe('grill-with-docs.taskflow.yaml');
+    expect(entry?.description).toMatch(/raw idea/i);
   });
 });
 

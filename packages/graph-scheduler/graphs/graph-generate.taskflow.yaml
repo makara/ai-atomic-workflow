@@ -10,8 +10,14 @@ phases:
       Execute scope interview per skill://atom-scope-interview (load atom-kernel).
 
       Topics: graph name and purpose; scope (start-to-end phases, user interactions, agent tasks); skill dependencies (entry skills for main phases); dependencies (other graphs or skills to reference); save location.
+      Auto-approve mode (standard topic — ask AFTER scope, NEVER auto-approved):
+      Manual (recommended, default) — every approval presents a decision card.
+      Auto — every approval in this run (entry confirmations excluded — they are
+      interviews, never auto) executes its recommended routing action (routingActions[0]).
+      Echo rule: scan current-run completed node outputs first — an existing
+      auto_approve field (nested composition) is inherited WITHOUT asking.
 
-      Output: confirmed graph name and purpose, full phase topology (ids, types, dependsOn edges, when guards, join modes, channels), skill dependencies, scope_complete: true, save_location.
+      Output: confirmed graph name and purpose, full phase topology (ids, types, dependsOn edges, when guards, join modes, channels), skill dependencies, scope_complete: true, save_location, auto_approve.
 
   - id: graph-design
     type: main
@@ -20,12 +26,12 @@ phases:
     channels:
       - skill:atom-graph-spec
     task: |
-      Design graph topology using atom-kernel solve() primitive — confirm goal → research specs → think topology → interview decisions → repeat until confirmed.
+      Design graph topology using atom-kernel interview() solve mode — confirm goal → research specs → think topology → interview decisions → repeat until confirmed.
 
-      Load atom-kernel (injected) for solve() behavior contract.
+      Load atom-kernel (injected) for interview() behavior contract.
       Load atom-graph-spec (injected) as reference.
       Read scope-confirm output (injected).
-      Execute solve({ goal: "design graph topology for confirmed scope", research: true, context }) per atom-kernel §solve():
+      Execute interview({ goal: "design graph topology for confirmed scope", research: true, context }) per atom-kernel §interview() solve mode:
 
       confirm(goal): Confirm design goal with user via interview(). Confirm graph name, purpose, phase count estimate, flow-type sub-graph calls, save location. Never skip — goal consensus required.
 
@@ -78,14 +84,18 @@ phases:
       - node:scope-confirm
       - skill:atom-graph-spec
 
-  - id: graph-accept
-    type: approval
+  - id: graph-gate
+    type: gate
     dependsOn: [graph-review]
     eval:
       - when: 'graph-review output shows overall: fail AND retryAttempt < 2'
         action: retry
         target: graph-write
         note: 'auto: review found blocking issues — fix and re-review'
+
+  - id: graph-accept
+    type: approval
+    dependsOn: [graph-gate]
     routing:
       actions:
         - action: continue

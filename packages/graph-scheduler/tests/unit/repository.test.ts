@@ -228,55 +228,6 @@ describe('deleteCompletedRuns', () => {
 });
 
 // ---------------------------------------------------------------------------
-// resetUpstreamNodes / resetDownstreamNodes
-// ---------------------------------------------------------------------------
-
-describe('node reset operations', () => {
-  let repo = makeRepo();
-
-  afterEach(() => {
-    repo = makeRepo();
-  });
-
-  const NODES = [
-    { nodeId: 'n1', type: 'main', topoOrder: 0 },
-    { nodeId: 'n2', type: 'main', topoOrder: 1 },
-    { nodeId: 'n3', type: 'main', topoOrder: 2 },
-  ] as const;
-
-  it('resetUpstreamNodes resets specified nodes to pending', async () => {
-    await Effect.runPromise(repo.createRun('r1', 'g1'));
-    await Effect.runPromise(repo.createNodeStates('r1', NODES));
-    // Set all to done first
-    for (const n of NODES) {
-      await Effect.runPromise(repo.updateNodeState('r1', n.nodeId, { status: 'done' }));
-    }
-    // Reset n1 and n2
-    await Effect.runPromise(repo.resetUpstreamNodes('r1', ['n1', 'n2']));
-
-    const states = await Effect.runPromise(repo.getNodeStates('r1'));
-    expect(states[0].status).toBe('pending');
-    expect(states[1].status).toBe('pending');
-    // n3 unchanged
-    expect(states[2].status).toBe('done');
-  });
-
-  it('resetDownstreamNodes only resets specified nodes', async () => {
-    await Effect.runPromise(repo.createRun('r1', 'g1'));
-    await Effect.runPromise(repo.createNodeStates('r1', NODES));
-    for (const n of NODES) {
-      await Effect.runPromise(repo.updateNodeState('r1', n.nodeId, { status: 'done' }));
-    }
-    await Effect.runPromise(repo.resetDownstreamNodes('r1', ['n3']));
-
-    const states = await Effect.runPromise(repo.getNodeStates('r1'));
-    expect(states[0].status).toBe('done');
-    expect(states[1].status).toBe('done');
-    expect(states[2].status).toBe('pending');
-  });
-});
-
-// ---------------------------------------------------------------------------
 // initialize — idempotent migration
 // ---------------------------------------------------------------------------
 

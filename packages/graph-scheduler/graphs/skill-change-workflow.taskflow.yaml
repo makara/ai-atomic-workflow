@@ -81,7 +81,7 @@ phases:
   # Stage 3: Approval — final quality gate
   # Multi-writer graph (3 writer flows) — no single rework point: eval omitted,
   # FAIL falls through to human gate with per-writer retry targets
-  # (atom-graph-spec §Auto-Rework (eval) Rules — single-writer scope).
+  # (atom-graph-spec §Auto-Rework (gate) Rules — single-writer scope).
   - id: change-accept
     type: approval
     dependsOn: [cross-review]

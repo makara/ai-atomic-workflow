@@ -11,6 +11,11 @@
       "description": "Architecture review: scope detect -> architecture review report"
     },
     {
+      "name": "grill-with-docs",
+      "path": "grill-with-docs.taskflow.yaml",
+      "description": "Raw idea entry: scope → grilling interview with inline domain-modeling side effects → decision gate. Two-track shared idea-sharpening entry."
+    },
+    {
       "name": "skill-author",
       "path": "skill-author.taskflow.yaml",
       "description": "Skill authoring: create or edit — scope → write → review → approve → output"
@@ -38,12 +43,17 @@
     {
       "name": "openspec-create",
       "path": "openspec-create.taskflow.yaml",
-      "description": "OpenSpec spec creation pipeline: scope interview with input source detection -> approval gate -> arch-decision step -> openspec propose CLI delegation"
+      "description": "OpenSpec spec creation: scope interview with input source detection (wayfinder-map/arch-review/grill-consensus/direct) + inline ADR judgment -> gate -> openspec propose CLI delegation"
     },
     {
-      "name": "arch-review-to-spec",
-      "path": "arch-review-to-spec.taskflow.yaml",
-      "description": "Composed pipeline: architecture review -> decision gate (spec or document only) -> optional spec generation"
+      "name": "arch-review-loop",
+      "path": "arch-review-loop.taskflow.yaml",
+      "description": "Closed-loop architecture review: entry (existing report or fresh review + auto-approve mode) → arch-review re-review (round worker) → approve Top Rec → openspec-pipeline → round-end approval (Loop again default, Complete = user ends) → loop until the user approves ending"
+    },
+    {
+      "name": "implement",
+      "path": "implement.taskflow.yaml",
+      "description": "Generic implementation: input-source detection (openspec-change/tickets/prd) -> tdd implementation -> dual-axis review -> bounded gate -> conditional OpenSpec archive"
     },
     {
       "name": "skill-change-workflow",
@@ -56,9 +66,14 @@
       "description": "OpenSpec apply pipeline: apply change → dual review → bounded auto-rework gate → archive"
     },
     {
+      "name": "openspec-engineer",
+      "path": "openspec-engineer.taskflow.yaml",
+      "description": "OpenSpec detailed implementation: spec synthesis → tickets → tdd implementation → dual review → bounded gate → approval → reverse-validated archive"
+    },
+    {
       "name": "openspec-pipeline",
       "path": "openspec-pipeline.taskflow.yaml",
-      "description": "OpenSpec lifecycle pipeline: spec creation (openspec-create) → human approval gate → implementation (openspec-apply)"
+      "description": "OpenSpec full-lifecycle pipeline: raw idea entry (grill-with-docs) → spec creation (openspec-create) → human gate → branch (openspec-apply direct / openspec-engineer detailed) → archive"
     }
   ]
 }

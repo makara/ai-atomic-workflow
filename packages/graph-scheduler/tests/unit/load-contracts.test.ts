@@ -92,7 +92,7 @@ describe('load-time contract validation', () => {
         { id: 'review', type: 'main', skill: 'scenario-agent-skill', task: 'r', dependsOn: ['writer'] },
         {
           id: 'gate',
-          type: 'approval',
+          type: 'gate',
           dependsOn: ['review'],
           eval: [{ when: 'output shows fail', action: 'retry', target: 'writer' }],
         },
@@ -131,7 +131,7 @@ describe('load-time contract validation', () => {
         { id: 'writer', type: 'main', skill: 'scenario-agent-skill', task: 'a', dependsOn: [] },
         {
           id: 'gate',
-          type: 'approval',
+          type: 'gate',
           dependsOn: ['writer'],
           eval: [{ when: 'output shows fail AND retryAttempt < 2', action: 'retry', target: 'writer' }],
         },

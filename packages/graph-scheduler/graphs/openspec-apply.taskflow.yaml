@@ -8,6 +8,14 @@ phases:
     channels:
       - node:change-review
     task: |
+      Auto-approve mode (standard topic — confirm BEFORE work, NEVER auto-approved):
+      Manual (recommended, default) — every approval presents a decision card.
+      Auto — every approval in this run (entry confirmations excluded — they are
+      interviews, never auto) executes its recommended routing action (routingActions[0]).
+      Echo rule: scan current-run completed node outputs first — an existing
+      auto_approve field (nested composition) is inherited WITHOUT asking (no re-confirm).
+      Output includes: auto_approve (true|false).
+
       Implement tasks from the confirmed openspec change per openspec-apply-change skill.
 
       Change name resolution — NEVER ask the user:
@@ -41,15 +49,20 @@ phases:
 
       Output machine-parseable YAML report with overall: pass | fail. Write report (main agent collects).
 
-  # Stage 3: Gate — bounded auto-rework on FAIL, human approve otherwise
-  - id: change-accept
-    type: approval
+  # Stage 3: Gate — bounded auto-rework on FAIL (machine judgment)
+  - id: change-gate
+    type: gate
     dependsOn: [change-review]
     eval:
       - when: 'change-review output shows overall: fail AND retryAttempt < 2'
         action: retry
         target: apply-change
         note: 'auto: review found blocking issues — fix and re-review'
+
+  # Stage 4: Accept — human approval card (auto-or-ask: gate no-match falls here)
+  - id: change-accept
+    type: approval
+    dependsOn: [change-gate]
     routing:
       actions:
         - action: continue
@@ -64,7 +77,7 @@ phases:
           label: 'Restart implementation'
           description: 'Fundamental issues — re-apply from scratch'
 
-  # Stage 4: Archive — finalize the completed change
+  # Stage 5: Archive — finalize the completed change
   - id: archive
     type: main
     dependsOn: [change-accept]

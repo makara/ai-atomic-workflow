@@ -139,7 +139,13 @@ export function graphStart(
   graphName: string,
   args?: Record<string, unknown>,
 ): Effect.Effect<
-  { runId: string; node: NodeDetail | null; contractWarnings?: string[] },
+  {
+    runId: string;
+    node: NodeDetail | null;
+    contractWarnings?: string[];
+    /** Run snapshot — same shape as advance/jump; entry dispatch carries it (Run Mode consumption). */
+    snapshot: IGraphSnapshot;
+  },
   SchedulerError | RegistryLoadError,
   GraphRepository | FileSystem | RegistryLoader
 > {
@@ -182,7 +188,7 @@ export function graphStart(
     // Build next node
     const node = yield* buildNextNode(runId, nextState, graph, args);
     // Contract warnings captured at load — surfaced for decision gates
-    return { runId, node, contractWarnings: getContractWarnings(graphName) };
+    return { runId, node, contractWarnings: getContractWarnings(graphName), snapshot: buildSnapshot(nextState) };
   });
 }
 

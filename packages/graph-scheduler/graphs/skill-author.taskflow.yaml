@@ -16,8 +16,14 @@ phases:
       Flow context: prefer upstream plan-parse skill_create_name (injected when orchestrated); else interview (skill Step 1).
 
       Topics: skill name and purpose; scope (what problem it solves); input/output contract (files/types needed and produced); dependencies (skills loaded via skill://); save location.
+      Auto-approve mode (standard topic — ask AFTER scope, NEVER auto-approved):
+      Manual (recommended, default) — every approval presents a decision card.
+      Auto — every approval in this run (entry confirmations excluded — they are
+      interviews, never auto) executes its recommended routing action (routingActions[0]).
+      Echo rule: scan current-run completed node outputs first — an existing
+      auto_approve field (nested composition) is inherited WITHOUT asking.
 
-      Output: confirmed scope (name, purpose, inputs, outputs), full skill plan (sections, references, context requirements, trigger phrases), scope_complete: true, save_location.
+      Output: confirmed scope (name, purpose, inputs, outputs), full skill plan (sections, references, context requirements, trigger phrases), scope_complete: true, save_location, auto_approve.
 
   # --- Create path: write new skill ---
   - id: skill-write
@@ -26,11 +32,11 @@ phases:
     skill: atom-skill-writer
     when: 'scope-confirm output shows save_location and no skill_path — create mode'
     task: |
-      Write skill per confirmed plan using atom-kernel solve() for content confirmation.
+      Write skill per confirmed plan using atom-kernel interview() solve mode for content confirmation.
 
-      Load atom-kernel (injected) for solve() behavior contract.
+      Load atom-kernel (injected) for interview() behavior contract.
       Read scope-confirm output (injected).
-      Execute solve({ goal: "write SKILL.md for confirmed scope", research: true, context }):
+      Execute interview({ goal: "write SKILL.md for confirmed scope", research: true, context }) in solve mode:
 
       confirm(goal): Confirm writing scope with user — verify plan still accurate.
 
@@ -67,7 +73,7 @@ phases:
     type: main
     dependsOn: [skill-select]
     task: |
-      Load atom-kernel (injected). Interview to confirm edit scope per skill://atom-scope-interview. If plan incomplete, continue solve() loop until scope_complete: true.
+      Load atom-kernel (injected). Interview to confirm edit scope per skill://atom-scope-interview. If plan incomplete, continue interview() solve mode until scope_complete: true.
 
       Read skill-select output (injected via dependsOn implicit context).
       Interview per atom-kernel §interview() — one-at-a-time, recommendation-first:
@@ -76,7 +82,7 @@ phases:
       - Any new skill:// dependencies to add or remove?
       Assess plan completeness:
       - Plan "complete" if all changes specified with clear diff plan
-      - If scope_complete: false → continue solve() loop: research atom-skill-spec rules → think diff plan → interview → repeat until scope_complete: true
+      - If scope_complete: false → continue interview() solve mode: research atom-skill-spec rules → think diff plan → interview → repeat until scope_complete: true
       Write output (main agent collects):
         - scope_complete: true
         - changes: [list of change descriptions]
@@ -90,11 +96,11 @@ phases:
     dependsOn: [edit-scope-confirm]
     skill: atom-skill-writer
     task: |
-      Modify SKILL.md per confirmed diff plan using atom-kernel solve() for content confirmation.
+      Modify SKILL.md per confirmed diff plan using atom-kernel interview() solve mode for content confirmation.
 
-      Load atom-kernel (injected) for solve() behavior contract.
+      Load atom-kernel (injected) for interview() behavior contract.
       Read skill-select output, edit-scope-confirm output (both injected).
-      Execute solve({ goal: "apply edits to SKILL.md as planned", research: true, context }):
+      Execute interview({ goal: "apply edits to SKILL.md as planned", research: true, context }) in solve mode:
 
       confirm(goal): Confirm edit scope with user — verify plan still accurate.
 
@@ -132,7 +138,7 @@ phases:
   # Dual-writer graph (create skill-write / edit skill-edit-write, mutually
   # exclusive via when guards) — no single rework point: eval omitted, FAIL
   # falls through to human gate with per-mode retry targets
-  # (atom-graph-spec §Auto-Rework (eval) Rules — single-writer scope).
+  # (atom-graph-spec §Auto-Rework (gate) Rules — single-writer scope).
   - id: skill-accept
     type: approval
     dependsOn: [skill-review]

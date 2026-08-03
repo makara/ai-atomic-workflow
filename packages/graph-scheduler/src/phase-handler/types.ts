@@ -56,7 +56,7 @@ export interface IBaseNodeDetail {
  * Unified NodeDetail DTO returned by graph_start / graph_advance.
  *
  * All phase-type-specific fields are optional — handler fills what it needs.
- * type is the closed enum (main/approval/flow — schema-enforced);
+ * type is the closed enum (main/approval/gate/flow — schema-enforced);
  * handlerSkill is the constant 'atom-phase-handler'.
  */
 export interface INodeDetail {
@@ -84,13 +84,13 @@ export interface INodeDetail {
   readonly when?: string;
   /** project constraints — from .graph-scheduler/constraints.md, all phase types carry */
   readonly constraints: readonly string[];
-  /** Approval phase — eval conditions for auto-decision before question() */
+  /** Gate phase — eval conditions for machine auto-decision (no continue — auto-approval is a non-bypassable-gate violation) */
   readonly eval?: ReadonlyArray<IEvalCondition>;
   readonly retryAttempt: number;
 }
 
 /**
- * Eval condition — auto-decision rule evaluated by agent before question().
+ * Eval condition — auto-decision rule evaluated by agent on gate nodes.
  *
  * When natural-language `when` condition matches upstream review output,
  * handler auto-produces IApprovalDecision with configured action.
@@ -99,8 +99,8 @@ export interface INodeDetail {
 export interface IEvalCondition {
   /** Natural-language condition — evaluated by agent via completion(smol) */
   readonly when: string;
-  /** Auto-routing action when condition matches */
-  readonly action: 'continue' | 'retry' | 'jump';
+  /** Auto-routing action when condition matches — continue rejected (silent gate bypass is unexpressible) */
+  readonly action: 'retry' | 'jump';
   /** Target node ID for retry or jump. Routing targets SHALL be explicit; absent retry target degrades to continue. */
   readonly target?: string;
   /** Auto-decision note — injected as IApprovalDecision.note */

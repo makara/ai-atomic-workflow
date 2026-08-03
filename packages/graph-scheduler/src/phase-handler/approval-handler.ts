@@ -2,9 +2,9 @@
  * Approval phase handler — validate, extendNodeDetail for "approval" type.
  *
  * Approval phases:
- * - No extra validation (task is optional — topic/routingActions/preText/eval synthesized)
- * - NodeDetail extends: topic (from task), routingActions, preText, eval
- * - eval: auto-decision conditions evaluated before question() — match → auto IApprovalDecision
+ * - No extra validation (task is optional — topic/routingActions/preText synthesized)
+ * - NodeDetail extends: topic (from task), routingActions, preText
+ * - Pure human decision card — eval lives on gate phases (schema-enforced)
  *
  * @module
  */
@@ -37,7 +37,6 @@ export const approvalPhaseHandler: IPhaseHandler = {
       topic: phase.task ?? 'Decision Required',
       routingActions: routing?.actions ?? DEFAULT_APPROVAL_ACTIONS,
       preText: phase.preText ?? `Phase: ${phase.id}. Output is ready for review.`,
-      eval: phase.eval,
     };
   },
 };

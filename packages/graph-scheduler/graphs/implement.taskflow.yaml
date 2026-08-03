@@ -1,0 +1,132 @@
+name: implement
+phases:
+  # Stage 1: Work input — resolve input source (openspec-change / tickets / prd / blocked)
+  - id: work-input
+    type: main
+    dependsOn: []
+    task: |
+      Auto-approve mode (standard topic — confirm BEFORE work, NEVER auto-approved):
+      Manual (recommended, default) — every approval presents a decision card.
+      Auto — every approval in this run (entry confirmations excluded — they are
+      interviews, never auto) executes its recommended routing action (routingActions[0]).
+      Echo rule: scan current-run completed node outputs first — an existing
+      auto_approve field (nested composition) is inherited WITHOUT asking (no re-confirm).
+      Output includes: auto_approve (true|false).
+
+      Resolve work input and detect input source — NEVER ask the user.
+
+      Detection order (mirrors openspec-create spec-scope three-source pattern):
+      1. {args.changeName} provided → input_source: openspec-change, change_name set.
+      2. Upstream plan/ticket output declares change_name (composition via plan-generate passes it) → openspec-change.
+      3. {args.source: openspec} → run `openspec list --json`; exactly one active change → openspec-change
+         (multiple or zero → input_source: blocked + candidate list, no guessing).
+      4. Otherwise → input_source: tickets|prd ({args.ticket_paths} / {args.prd_path} / upstream output).
+
+      Pre-agree implementation seams with tdd discipline (record in work_ref).
+      Input source determines tail behavior — openspec-finalize guard reads this output.
+
+      Output (main agent collects):
+        - input_source: openspec-change | tickets | prd | blocked
+        - change_name: <name when openspec-change>
+        - work_ref: <artifact or spec/ticket reference>
+        - seams: [<pre-agreed tdd seams>]
+        - ticket_paths: [paths when tickets]
+        - prd_path: <path when prd>
+
+  # Stage 2: Implement — tdd slices per implement graph mode
+  - id: implement
+    type: main
+    skill: implement
+    agent: [task]
+    dependsOn: [work-input]
+    task: |
+      Execute implement graph mode — seam confirmation (question once), tdd red-green slices,
+      regular typecheck + single-file tests, full suite at the end.
+
+      When input_source: openspec-change — implement against `openspec instructions apply --json`
+      (contextFiles + task progress); task completion stays in sync with code
+      (ledger check-off happens uniformly in openspec-finalize, not forced here).
+      When input_source: blocked — report candidate list and stop, implement nothing.
+
+      Output (main agent collects):
+        - diff_summary: <summary of implementation changes>
+        - changed_files: [paths]
+        - progress_note: <openspec task progress when change input>
+
+  # Stage 3: Review — dual-axis audit per code-review
+  - id: implement-review
+    type: main
+    skill: code-review
+    agent: [reviewer, task]
+    dependsOn: [implement]
+    channels:
+      - skill:atom-graph-spec
+    task: |
+      Dual-axis review of the implementation per code-review (use ## Agent hints for axis sub-agents).
+
+      Artifact set: work_ref + diff from implement output (injected); delta specs when change input
+      (openspec/changes/<change_name>/specs/**).
+      Standards: repo-documented coding standards — auto-discovered per code-review §3; atom-graph-spec
+      (injected) for graph definitions.
+      Spec: input-source contract — openspec-change → every SHALL in delta specs implemented;
+      tickets/prd → PRD/ticket acceptance criteria met. Graph-definition hygiene — eval conditions
+      bounded by retryAttempt, retry targets are writer nodes, when guard references direct upstream
+      observable fields, channels explicit.
+
+      Output structured YAML report — overall: pass | fail, per-violation findings. Write report (main agent collects).
+
+  # Stage 4: Gate — bounded auto-rework on FAIL (machine judgment)
+  - id: implement-gate
+    type: gate
+    dependsOn: [implement-review]
+    eval:
+      - when: 'implement-review output shows overall: fail AND retryAttempt < 2'
+        action: retry
+        target: implement
+        note: 'auto: review found blocking issues — fix and re-review'
+
+  # Stage 5: Accept — human approval card (gate no-match falls here)
+  - id: implement-accept
+    type: approval
+    dependsOn: [implement-gate]
+    routing:
+      actions:
+        - action: continue
+          label: 'Accept implementation'
+          description: 'Implementation complete — proceed (finalize when OpenSpec change input)'
+        - action: retry
+          target: implement
+          label: 'Revise implementation'
+          description: 'Code needs corrections — re-run implement with review feedback'
+        - action: jump
+          target: work-input
+          label: 'Redo from input'
+          description: 'Input source or seams wrong — re-resolve work input'
+
+  # Stage 6: OpenSpec finalize — reverse-validated archive when input was an OpenSpec change
+  # work-input arrives via node: channel, not dependsOn: implement-accept transitively
+  # depends on it (2.2b rejects redundant transitive deps); the guard references the
+  # channel-injected upstream output — plan-generate ticket-split precedent.
+  - id: openspec-finalize
+    type: main
+    skill: atom-openspec-archive
+    dependsOn: [implement-accept]
+    when: 'work-input output shows input_source: openspec-change — implementation is change-bound; archive maintains openspec content'
+    channels:
+      - node:work-input
+    task: |
+      Execute atom-openspec-archive flow (reverse-validated archive).
+
+      Load atom-kernel (injected). Read implement-accept output (injected via dependsOn implicit context).
+      Change name: from work-input output change_name field (injected via node:work-input channel) — NEVER ask;
+      skill Step 0 `openspec list` fallback only when name absent (this graph has no apply-change upstream).
+      Step 0 reverse-validation: task completion × code evidence (grep, contextFiles + implementation output);
+        evidence hit → check off ledger + register verification.md; checked without evidence → drift →
+        refuse archive + rework suggestion output.
+      Step 1-3: `openspec archive <change> --yes --json` (CLI inlines delta specs → main specs sync).
+
+      Write output (main agent collects):
+        - archive_status: success | failed | blocked
+        - change_name: <name>
+        - validation_result: pass | fail | warn
+        - message: <summary>

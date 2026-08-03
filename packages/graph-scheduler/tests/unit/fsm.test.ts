@@ -790,34 +790,6 @@ describe('FsmEffect discriminated union', () => {
         expect.fail('should be persist_run_state');
       }
     });
-
-    it('reset_upstream identifiable by type', () => {
-      const eff: FsmEffect = {
-        type: 'reset_upstream',
-        runId: 'r1',
-        fromNodeId: 'g1',
-      };
-      if (eff.type === 'reset_upstream') {
-        expect(eff.runId).toBe('r1');
-        expect(eff.fromNodeId).toBe('g1');
-      } else {
-        expect.fail('should be reset_upstream');
-      }
-    });
-
-    it('reset_downstream identifiable by type', () => {
-      const eff: FsmEffect = {
-        type: 'reset_downstream',
-        runId: 'r1',
-        nodeId: 'n1',
-      };
-      if (eff.type === 'reset_downstream') {
-        expect(eff.runId).toBe('r1');
-        expect(eff.nodeId).toBe('n1');
-      } else {
-        expect.fail('should be reset_downstream');
-      }
-    });
   });
 
   describe('FsmNodeState', () => {

@@ -1,0 +1,66 @@
+name: grill-with-docs
+phases:
+  # Stage 1: Scope — confirm the raw idea and doc-trace intent
+  - id: grill-scope
+    type: main
+    dependsOn: []
+    skill: atom-scope-interview
+    channels:
+      - ./CONTEXT.md
+    task: |
+      Execute scope interview per skill://atom-scope-interview (load atom-kernel).
+
+      Topics: idea/goal (raw, unfogged), doc-trace intent (glossary terms + ADR offers expected),
+      interview output record path.
+      Auto-approve mode (standard topic — ask AFTER scope, NEVER auto-approved):
+      Manual (recommended, default) — every approval presents a decision card.
+      Auto — every approval in this run (entry confirmations excluded — they are
+      interviews, never auto) executes its recommended routing action (routingActions[0]).
+      Echo rule: scan current-run completed node outputs first — an existing
+      auto_approve field (nested composition) is inherited WITHOUT asking.
+
+      Output: scope_complete, idea_goal, doc_trace_intent, output_path, auto_approve.
+
+  # Stage 2: Grilling — decision-tree conversation with inline domain-modeling side effects
+  - id: grilling
+    type: main
+    dependsOn: [grill-scope]
+    skill: grilling
+    channels:
+      - ./CONTEXT.md
+      - docs/adr/*.md
+      - skill:domain-modeling
+    task: |
+      Execute grilling graph mode per grilling skill — question() one question per turn,
+      recommendation first, fact lookup before asking, walk every decision-tree branch.
+
+      Inline domain-modeling side effects (user-confirmed, never autonomous):
+      - CONTEXT.md term updates at crystallization moments
+      - ADR offers at decision-crystallization moments — three-condition test
+        (hard-to-reverse / surprising-without-context / real-trade-off); write to
+        docs/adr/ only after explicit user confirmation; declined ADRs recorded
+        without writing
+
+      Output (main agent collects):
+        - consensus: { decisions: [{ decision, rationale }] }
+        - doc_updates: [<CONTEXT.md term updates applied>]
+        - adr_created: true | false
+        - adr_path: <path when created>
+
+  # Stage 3: Accept — human approval gate
+  - id: grill-accept
+    type: approval
+    dependsOn: [grilling]
+    routing:
+      actions:
+        - action: continue
+          label: 'Idea sharpened — to spec'
+          description: 'Consensus reached — proceed to openspec-create'
+        - action: retry
+          target: grilling
+          label: 'Re-grill'
+          description: 'Conversation incomplete — re-run grilling with prior context'
+        - action: jump
+          target: grill-scope
+          label: 'Restart scope'
+          description: 'Topic shifted — restart from scope confirmation'

@@ -4,6 +4,14 @@ phases:
     type: main
     dependsOn: []
     task: |
+      Auto-approve mode (standard topic — confirm BEFORE work, NEVER auto-approved):
+      Manual (recommended, default) — every approval presents a decision card.
+      Auto — every approval in this run (entry confirmations excluded — they are
+      interviews, never auto) executes its recommended routing action (routingActions[0]).
+      Echo rule: scan current-run completed node outputs first — an existing
+      auto_approve field (nested composition) is inherited WITHOUT asking (no re-confirm).
+      Output includes: auto_approve (true|false).
+
       If plan-parse upstream provides skill_delete_name (injected when orchestrated):
         Use it directly — skip interview
       Else (standalone context):
@@ -31,7 +39,7 @@ phases:
     task: |
       Analyze impact scope of deleting the confirmed skill.
 
-      Load atom-kernel (injected) for solve() behavior contract.
+      Load atom-kernel (injected) for interview() behavior contract.
       Read skill-select output (injected via dependsOn implicit context).
       Execute impact analysis:
 
@@ -85,7 +93,7 @@ phases:
       Read delete-confirm output (injected via dependsOn implicit context).
       Read skill-select output (injected via dependsOn implicit context).
 
-      Execute 3-step deletion per solve() primitive:
+      Execute 3-step deletion per interview() solve mode:
 
       confirm(goal): Confirm deletion scope with user one last time. Verify skill path and name are correct.
 
@@ -126,14 +134,18 @@ phases:
       - node:skill-select
       - skill:atom-graph-spec
 
-  - id: delete-accept
-    type: approval
+  - id: delete-gate
+    type: gate
     dependsOn: [delete-review]
     eval:
       - when: 'delete-review output shows overall: fail AND retryAttempt < 2'
         action: retry
         target: skill-delete-execute
         note: 'auto: review found blocking issues — fix and re-review'
+
+  - id: delete-accept
+    type: approval
+    dependsOn: [delete-gate]
     routing:
       actions:
         - action: continue

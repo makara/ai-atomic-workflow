@@ -19,7 +19,7 @@ import type { Phase } from '../../src/types.js';
 // Fixture — load graph-generate graph once per describe
 // ---------------------------------------------------------------------------
 
-const VALID_PHASE_TYPES: Record<string, true> = { main: true, approval: true, flow: true };
+const VALID_PHASE_TYPES: Record<string, true> = { main: true, approval: true, gate: true, flow: true };
 
 function loadGraphGenerateGraph(): Taskflow {
   const pkgRoot = join(__dirname, '..', '..');
@@ -223,12 +223,20 @@ describe('graph-generate — topology validity', () => {
     }
   });
 
-  it('graph-accept depends on graph-review', () => {
+  it('graph-accept depends on graph-gate', () => {
     const graph = loadGraphGenerateGraph();
     const acceptPhase = graph.phases.find((p) => p.id === 'graph-accept');
     expect(acceptPhase).toBeDefined();
     expect(acceptPhase!.dependsOn).toBeDefined();
-    expect(acceptPhase!.dependsOn).toContain('graph-review');
+    expect(acceptPhase!.dependsOn).toContain('graph-gate');
+  });
+
+  it('graph-gate depends on graph-review', () => {
+    const graph = loadGraphGenerateGraph();
+    const gatePhase = graph.phases.find((p) => p.id === 'graph-gate');
+    expect(gatePhase).toBeDefined();
+    expect(gatePhase!.dependsOn).toBeDefined();
+    expect(gatePhase!.dependsOn).toContain('graph-review');
   });
 
   it('graph-write depends on graph-design', () => {
@@ -245,11 +253,20 @@ describe('graph-generate — topology validity', () => {
 // ---------------------------------------------------------------------------
 
 describe('graph-generate — eval condition presence', () => {
-  it('every approval phase has an eval field', () => {
+  it('every approval phase has no eval (pure human card)', () => {
     const graph = loadGraphGenerateGraph();
     const approvalPhases = graph.phases.filter((p) => p.type === 'approval');
     expect(approvalPhases.length).toBeGreaterThanOrEqual(1);
     for (const phase of approvalPhases) {
+      expect(phase.eval).toBeUndefined();
+    }
+  });
+
+  it('every gate phase has a bounded eval', () => {
+    const graph = loadGraphGenerateGraph();
+    const gatePhases = graph.phases.filter((p) => p.type === 'gate');
+    expect(gatePhases.length).toBeGreaterThanOrEqual(1);
+    for (const phase of gatePhases) {
       expect(phase.eval).toBeDefined();
       expect(Array.isArray(phase.eval)).toBe(true);
       expect(phase.eval!.length).toBeGreaterThanOrEqual(1);
@@ -258,23 +275,23 @@ describe('graph-generate — eval condition presence', () => {
 
   it('eval conditions have valid action enum values', () => {
     const graph = loadGraphGenerateGraph();
-    const approvalPhases = graph.phases.filter((p) => p.type === 'approval');
-    for (const phase of approvalPhases) {
+    const gatePhases = graph.phases.filter((p) => p.type === 'gate');
+    for (const phase of gatePhases) {
       for (const cond of phase.eval!) {
-        expect(['continue', 'retry', 'jump']).toContain(cond.action);
+        expect(['retry', 'jump']).toContain(cond.action);
         expect(typeof cond.when).toBe('string');
         expect(cond.when.length).toBeGreaterThan(0);
       }
     }
   });
 
-  it('graph-accept eval is bounded FAIL retry on contract field (no DEBT)', () => {
+  it('graph-gate eval is bounded FAIL retry on contract field (no DEBT)', () => {
     const graph = loadGraphGenerateGraph();
-    const acceptPhase = graph.phases.find((p) => p.id === 'graph-accept');
-    expect(acceptPhase).toBeDefined();
-    expect(acceptPhase!.eval).toBeDefined();
+    const gatePhase = graph.phases.find((p) => p.id === 'graph-gate');
+    expect(gatePhase).toBeDefined();
+    expect(gatePhase!.eval).toBeDefined();
 
-    const conditions = acceptPhase!.eval!.map((c) => c.when).join(' ');
+    const conditions = gatePhase!.eval!.map((c) => c.when).join(' ');
     expect(conditions).toContain('overall: fail');
     expect(conditions).toContain('retryAttempt < 2');
     expect(conditions).not.toContain('DEBT');

@@ -1,35 +1,59 @@
 name: arch-review
 phases:
-  # Detect review scope and confirm with user via consensus interview
+  # Detect review scope and confirm with user via consensus interview.
+  # Composability: when composed into arch-review-loop, the loop entry (loop-entry)
+  # pre-confirms the scope — this node skips (its output becomes a skip marker) and
+  # the review node falls back to the loop-entry output (injected channel).
   - id: scope-detect
     type: main
     dependsOn: []
     skill: atom-scope-interview
     channels:
       - ./CONTEXT.md
+    when: 'skip when loop-entry output shows scope_complete: true (loop composition — scope pre-confirmed at the loop entry); run otherwise (standalone)'
     task: |
       Execute scope interview per skill://atom-scope-interview (load atom-kernel).
 
       Topics: architecture review domain/feature/problem; focus dimensions (depth/coupling/testability/naming/duplication); output path — MUST be explicitly confirmed by user.
+      Recommend default output path: docs/reports/<YYYY-MM-DD>-arch-review-<topic>.md (date prefix — new convention); user MUST explicitly confirm, may override.
 
       Output: scope, focus, output.
 
-  # Execute architecture review with confirmed scope
+  # Execute architecture review with confirmed scope — from scope-detect (standalone)
+  # or from the composing loop entry (loop composition — scope pre-confirmed).
   - id: arch-review
     type: main
     dependsOn: [scope-detect]
     skill: improve-codebase-architecture
     agent: [scout, task]
     channels:
+      - node:loop-entry
       - ./CONTEXT.md
       - docs/adr/*.md
       - skill:codebase-design
     task: |
       Execute architecture review per improve-codebase-architecture (use ## Agent hints for the Explore sub-agent).
 
-      Scope: read scope-detect output (injected) — confirmed output path + focus.
-      Artifact: review scope (injected); Standards: CONTEXT.md vocabulary + codebase-design terms.
-      Output contract: markdown (NOT HTML) written to confirmed output path.
+      Scope: read scope-detect output (injected); when scope-detect shows a skip marker
+      (loop composition — scope pre-confirmed at the loop entry), use the loop-entry output (injected).
+      Report input (from loop-entry output — injected channel):
+      - report_input: fresh → current behavior: markdown (NOT HTML) written to the confirmed output path.
+      - report_input: fresh AND the report file at report_path already exists (round ≥ 2 — a
+        previous round produced the report) → transition to re-review semantics: treat as existing —
+        read the report at report_path (single source of truth, NO path re-confirmation), mark
+        implementation progress per Top Recommendation item (evidence-backed status), review the
+        implementation for defects (findings cards), update the report in place (condense/archive
+        implemented content, rewrite Top Recommendation — strongest remaining candidate or empty),
+        increment the round marker.
+      - report_input: existing → closed-loop re-review mode: read the report at report_path (confirmed at
+        loop entry — single source of truth, NO path re-confirmation). Mark implementation progress per
+        Top Recommendation item (evidence-backed status — pipeline change evidence + code walk). Review the
+        implementation for defects (findings cards). Update the report in place — condense/archive
+        implemented content, rewrite Top Recommendation (strongest remaining candidate, or empty).
+        Increment the round marker.
+      Output contract (both modes): report_path, round (increment), implemented (list),
+      new_findings (count), top_rec (new Top Rec or empty), top_rec_remaining (true|false),
+      summary (one line).
       For each finding, render markdown card — Files / Problem / Solution /
       Benefits (locality + leverage + testability) / Recommendation strength
       (Strong | Worth exploring | Speculative).
