@@ -11,7 +11,7 @@
 import { Context, Effect, Layer } from 'effect';
 import Database from 'libsql';
 import { debugLog } from '../../debug.js';
-import type { NotFoundError, PersistenceError } from '../../types.js';
+import type { NotFoundError, PersistenceError, RunMode } from '../../types.js';
 import { tryDb } from './helpers.js';
 import { migrate } from './migration.js';
 /** Row shape for graph_runs table. */
@@ -20,6 +20,7 @@ interface GraphRunRow {
   graph_name: string;
   fsm_state: string;
   args: string | null;
+  mode: string;
   created_at: string;
   updated_at: string;
 }
@@ -41,6 +42,8 @@ export interface GraphRun {
   readonly graphName: string;
   readonly fsmState: string;
   readonly args: Record<string, unknown> | null;
+  /** Run Mode — decided at run creation (graph_start mode param), stable for run lifetime. */
+  readonly mode: RunMode;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -86,6 +89,7 @@ export class GraphRepository extends Context.Tag('GraphRepository')<
       runId: string,
       graphName: string,
       args?: Record<string, unknown>,
+      mode?: RunMode,
     ) => Effect.Effect<void, PersistenceError>;
 
     /** Update a single node state row (partial). */
@@ -131,6 +135,7 @@ function rowToGraphRun(row: GraphRunRow): GraphRun {
     graphName: row.graph_name,
     fsmState: row.fsm_state,
     args: row.args ? (JSON.parse(row.args) as Record<string, unknown>) : null,
+    mode: row.mode === 'auto' ? 'auto' : 'manual',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -161,14 +166,15 @@ export function buildService(db: ReturnType<typeof Database>): GraphRepository['
       runId: string,
       graphName: string,
       args?: Record<string, unknown>,
+      mode: RunMode = 'manual',
     ): Effect.Effect<void, PersistenceError> =>
       tryDb('createRun', () => {
         const nowISO = new Date().toISOString();
-        debugLog('runtime', { event: 'run_created', runId, graphName });
+        debugLog('runtime', { event: 'run_created', runId, graphName, mode });
         db.prepare(
-          `INSERT INTO graph_runs (run_id, graph_name, fsm_state, args, created_at, updated_at)
-           VALUES (?, ?, 'idle', ?, ?, ?)`,
-        ).run(runId, graphName, args ? JSON.stringify(args) : null, nowISO, nowISO);
+          `INSERT INTO graph_runs (run_id, graph_name, fsm_state, args, mode, created_at, updated_at)
+           VALUES (?, ?, 'idle', ?, ?, ?, ?)`,
+        ).run(runId, graphName, args ? JSON.stringify(args) : null, mode, nowISO, nowISO);
       }),
 
     updateNodeState: (runId: string, nodeId: string, update: NodeStateUpdate): Effect.Effect<void, PersistenceError> =>

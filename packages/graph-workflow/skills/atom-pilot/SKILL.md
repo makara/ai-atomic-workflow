@@ -29,8 +29,12 @@ Execution flow:
 
 1. Load `skill://atom-kernel` — task() contract
 2. Load `skill://atom-phase-handler` — node dispatch schema
-3. Detect graph-scheduler MCP tools per §Graph-Scheduler Tool Detection — then call graph_start { graphName } → get { runId, node }
-4. Enter execute→advance loop per Loop Mechanics
+3. Detect graph-scheduler MCP tools per §Graph-Scheduler Tool Detection
+4. **Run Mode decision** (the mode is a run attribute, decided by the run creator):
+   - `--auto` flag → mode `'auto'`; `--manual` flag → mode `'manual'`; neither → one question(): Manual (recommended, default) — every approval presents a decision card | Auto — every approval executes its recommended routing action without a card. custom:true for free text.
+   - Direct MCP callers (no pilot) pass `mode` explicitly or default to `manual` — absence never means auto.
+5. Call graph_start { graphName, mode } → get { runId, node }
+6. Enter execute→advance loop per Loop Mechanics
 
 Verbosity: `--verbose` show MCP call summaries + eval details. `--debug` add raw MCP JSON. Default quiet.
 
@@ -41,10 +45,10 @@ Verbosity: `--verbose` show MCP call summaries + eval details. `--debug` add raw
 Detect graph-scheduler MCP tools at runtime — 9-tool substring matching rules live in atom-kernel §Graph-Scheduler Tool Detection (platform primitives, loaded with the kernel). Tool parameter and return value schemas unchanged (see §MCP Tool Reference).
 
 ```
-graph_start { graphName } → { runId, node: NodeDetail | null, snapshot: GraphSnapshot }
+graph_start { graphName, mode?: 'manual' | 'auto' } → { runId, node: NodeDetail | null, snapshot: GraphSnapshot }
 ```
 
-Scheduler resolve graph name via merged registry. Return `runId` + first `node` (NodeDetail | null) + run `snapshot` (per-node states — entry dispatch carries it; Run Mode consumption + echo scans). Agent hold `runId` for all subsequent calls.
+Scheduler resolve graph name via merged registry. Return `runId` + first `node` (NodeDetail | null) + run `snapshot` (per-node states — jump navigation + progress display; Run Mode rides `node.runMode`, not the snapshot). Agent hold `runId` for all subsequent calls.
 
 ---
 
@@ -141,7 +145,7 @@ Tool names detected at runtime per §Graph-Scheduler Tool Detection. Parameter s
 
 |tool|purpose|key params|
 |-|-|-|
-|graph_start|create run, get first node + snapshot|graphName, args?|
+|graph_start|create run, get first node + snapshot|graphName, args?, mode? ('manual'\|'auto', default manual)|
 |graph_advance|report result + get next node|runId, nodeId, durationMs, skip?|
 |graph_status|query run state|runId|
 |graph_list|list all runs|—|
@@ -151,7 +155,7 @@ Tool names detected at runtime per §Graph-Scheduler Tool Detection. Parameter s
 |graph_clean_completed|clean completed runs|before?|
 |graph_clean_all|clean all runs|—|
 
-`graph_start` returns `{ runId, node, snapshot }`. `graph_advance` / `graph_jump` return `{ snapshot, node }` — `node: null` = graph complete (`fsmState` `completed`). The snapshot (per-node states) accompanies every dispatch — approval Run Mode consumption and entry echo scans use it.
+`graph_start` returns `{ runId, node, snapshot }`. `graph_advance` / `graph_jump` return `{ snapshot, node }` — `node: null` = graph complete (`fsmState` `completed`). The snapshot (per-node states) accompanies every dispatch — jump navigation + progress display. Run Mode rides `node.runMode` — no output scans, no echo scans.
 
 ---
 

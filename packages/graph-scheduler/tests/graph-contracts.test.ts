@@ -834,12 +834,13 @@ describe('2.12 openspec-create v2 inline ADR topology', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2.13 — arch-review-loop v4 reviewer-reuse topology: loop-entry (report input +
-// Run Mode mode topic) + always-running review flow (empty JUMP closure) +
-// round-end approval (Loop again default, Complete human-only)
+// 2.13 — arch-review-loop v5 round-origin topology: loop-entry (per-round scope
+// re-confirm, round origin) + review flow dependsOn [loop-entry] + implement flow
+// dependsOn [review-accept] + round-end approval (Loop again → loop-entry default,
+// no-Top-Rec normal end)
 // ---------------------------------------------------------------------------
 
-describe('2.13 arch-review-loop v4 reviewer-reuse topology', () => {
+describe('2.13 arch-review-loop v5 round-origin topology', () => {
   const graph = loadGraph('arch-review-loop.taskflow.yaml');
   const phases = graph.phases as Array<Record<string, unknown>>;
   const phaseOf = (id: string): Record<string, unknown> => {
@@ -868,49 +869,54 @@ describe('2.13 arch-review-loop v4 reviewer-reuse topology', () => {
     expect(phases.map((p) => p.id)).not.toContain('verify');
   });
 
-  it('loop-entry carries the standard Run Mode mode topic and report-input contract', () => {
+  it('loop-entry carries the scope interview contract — no Run Mode topic', () => {
     const task = String(phaseOf('loop-entry').task);
     expect(phaseOf('loop-entry').skill).toBe('atom-scope-interview');
-    // standard mode topic — Manual recommended/default, ask AFTER scope, echo rule
-    expect(task).toMatch(/Auto-approve mode/);
-    expect(task).toMatch(/Manual \(recommended, default\)/);
-    expect(task).toMatch(/NEVER auto-approved/);
-    expect(task).toMatch(/routingActions\[0\]/);
+    // Run Mode is a run field (graph_start mode param) — graphs declare nothing
+    expect(task).not.toMatch(/Auto-approve mode|auto_approve/);
+    expect(task).not.toMatch(/routingActions\[0\]/);
     // report input — existing report path (true closed loop) vs fresh review
     expect(task).toMatch(/report_input/);
     expect(task).toMatch(/existing report path/);
-    expect(task).toMatch(/auto_approve/);
+    expect(task).toMatch(/scope_complete/);
+    // per-round mandatory scope re-confirmation — round origin, never auto-skipped
+    expect(task).toMatch(/Mandatory per-round scope confirmation/);
+    expect(task).toMatch(/MUST be confirmed or\n.*adjusted by the user each run/);
+    expect(task).not.toMatch(/never re-asked/);
   });
 
-  it('no autoWhen fields anywhere — v3 Run Mode replaces the v2 node-level field', () => {
+  it('no autoWhen fields anywhere — Run Mode is a run field (v2 migration, replaces node-level field era)', () => {
     const raw = String(phases.map((p) => JSON.stringify(p)));
     expect(raw).not.toMatch(/autoWhen/);
   });
 
-  it('review + implement are flows; review = empty JUMP closure (dependsOn [], no when), implement stays entry-rooted', () => {
+  it('review + implement are flows; review dependsOn [loop-entry], implement dependsOn [review-accept] (round reset closure)', () => {
     expect(phaseOf('review').type).toBe('flow');
     expect(phaseOf('review').use).toBe('arch-review');
-    // empty closure — retry review re-runs only the review segment, never the entry
-    expect(phaseOf('review').dependsOn).toEqual([]);
+    // round origin — a jump to loop-entry resets the whole review segment
+    expect(phaseOf('review').dependsOn).toEqual(['loop-entry']);
     expect(phaseOf('review').when === undefined || phaseOf('review').when === null).toBe(true);
-    // node:loop-entry channel delivers report_path + mode (single source of truth)
-    expect(phaseOf('review').channels).toEqual(expect.arrayContaining(['node:loop-entry']));
+    // report_path + mode delivered via the dependency edge — no redundant channel
+    // declaration (contract warning "node already covered by depends" must stay silent)
+    expect(phaseOf('review').channels).toBeUndefined();
     expect(phaseOf('implement').type).toBe('flow');
     expect(phaseOf('implement').use).toBe('openspec-pipeline');
-    const deps = phaseOf('implement').dependsOn;
-    expect(deps === undefined || (deps as unknown[]).length === 0).toBe(true);
+    // implement follows the round's accept decision — jump closure resets it via review-accept
+    expect(phaseOf('implement').dependsOn).toEqual(['review-accept']);
   });
 
   it('implement channels carry the report path (node:loop-entry — single source of truth)', () => {
-    // review + review-accept are NOT upstream of implement — the closed loop
-    // re-runs only the pipeline segment; the confirmed path is never re-asked
+    // review-accept IS upstream (dependsOn) — implement follows the accept decision;
+    // node:loop-entry channel still delivers the current report path each round
     expect(phaseOf('implement').channels).toEqual(
       expect.arrayContaining(['node:review/arch-review', 'node:loop-entry']),
     );
   });
 
-  it('implement when-guard keys on decision label OR existing report input (no forbidden patterns)', () => {
+  it('implement when-guard keys on top_rec_remaining AND decision label OR existing report input (no forbidden patterns)', () => {
     const when = String(phaseOf('implement').when);
+    // implementation runs only while a Top Recommendation remains — no empty rounds
+    expect(when).toMatch(/review\/arch-review output shows top_rec_remaining: true/);
     expect(when).toMatch(/review-accept output shows decision label Implement Top Recommendation/);
     expect(when).toMatch(/report_input: existing/);
     expect(when).toMatch(/Stop — report only/);
@@ -956,14 +962,14 @@ describe('2.13 arch-review-loop v4 reviewer-reuse topology', () => {
     expect(task).toMatch(/transition to re-review semantics/);
   });
 
-  it('loop-gate — auto loop router: eval reads review/arch-review output, retry target review', () => {
+  it('loop-gate — auto loop router: eval reads review/arch-review output, retry target loop-entry', () => {
     const gate = phaseOf('loop-gate');
     expect(gate.type).toBe('gate');
     expect(gate.dependsOn).toEqual(['review/arch-review', 'loop-entry', 'review-accept']);
     const evals = gate.eval as Array<Record<string, unknown>>;
     expect(evals).toHaveLength(1);
     const cond = String(evals[0].when);
-    expect(cond).toMatch(/auto_approve: true/);
+    expect(cond).toMatch(/run mode is auto/);
     expect(cond).toMatch(/Implement Top Recommendation OR loop-entry output shows report_input: existing/);
     // field source = the round worker's unified output (was verify — deleted)
     expect(cond).toMatch(/review\/arch-review output shows top_rec_remaining: true/);
@@ -972,25 +978,25 @@ describe('2.13 arch-review-loop v4 reviewer-reuse topology', () => {
     // mechanism; ending the loop is always a human decision)
     expect(cond).toMatch(/round < 8/);
     expect(evals[0].action).toBe('retry');
-    // reviewer reuse — the loop re-runs the REVIEW, not the pipeline
-    expect(evals[0].target).toBe('review');
+    // round origin — the loop re-runs from loop-entry (scope re-confirmed each round)
+    expect(evals[0].target).toBe('loop-entry');
   });
 
-  it('loop-accept — round-end approval every round: Loop again default (retry review), Complete human-only', () => {
+  it('loop-accept — round-end approval: Loop again default (retry loop-entry), no-Top-Rec normal end', () => {
     const gate = phaseOf('loop-accept');
-    // no when guard — runs every round (round-end approval)
-    expect(gate.when === undefined || gate.when === null).toBe(true);
+    // when-skip — no Top Recommendation remains → normal end (loop-done), NOT force-end
+    expect(String(gate.when)).toMatch(/top_rec_remaining: false/);
     const actions = (gate.routing as { actions: Array<Record<string, unknown>> }).actions;
     expect(actions.map((a) => a.action)).toEqual(['retry', 'continue']);
     expect(actions.map((a) => a.label)).toEqual(['Loop again — re-review the report', 'Complete loop']);
-    // default = repeat → retry review (reviewer reuse); end = explicit user choice
+    // default = repeat → retry loop-entry (round origin, scope re-confirmed); end = explicit user choice
     expect(actions[0].action).toBe('retry');
-    expect(actions[0].target).toBe('review');
+    expect(actions[0].target).toBe('loop-entry');
     expect(actions[1].action).toBe('continue');
     expect(actions.some((a) => String(a.label).includes('Revise'))).toBe(false);
   });
 
-  it('loop-done is the execution terminal (implement is an entry-rooted flow, not a raw terminal of the run path)', () => {
+  it('loop-done is the sole execution terminal (implement follows review-accept — single forward path)', () => {
     const done = phaseOf('loop-done');
     expect(done.type).toBe('main');
     expect(done.dependsOn).toEqual(['loop-accept']);
@@ -998,9 +1004,10 @@ describe('2.13 arch-review-loop v4 reviewer-reuse topology', () => {
     for (const p of phases) {
       for (const dep of (p.dependsOn ?? []) as string[]) hasDownstream.add(dep);
     }
-    // entry-rooted implement (dependsOn: []) is unreferenced by raw dependsOn —
-    // like loop-entry it is a zero-in-degree root dispatched by declaration order;
-    // the run's forward path always terminates at loop-done (declared last)
+    // implement (flow) has no raw-graph downstream dependent — it is a flow whose
+    // flattened children terminate inside the pipeline; loop-done is the run-path
+    // terminal (declared last). The forward path is linear:
+    // loop-entry → review → review-accept → implement → loop-gate → loop-accept → loop-done
     const terminals = phases.filter((p) => !hasDownstream.has(String(p.id))).map((p) => String(p.id));
     expect(terminals.sort()).toEqual(['implement', 'loop-done']);
     expect(phases.map((p) => p.id).indexOf('loop-done')).toBe(phases.length - 1);

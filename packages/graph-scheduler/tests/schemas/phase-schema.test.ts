@@ -167,6 +167,20 @@ describe('PhaseSchema — removed fields rejected loudly', () => {
     expect(result.success).toBe(false);
     expect(result.error.issues.some((i) => i.path.join('.') === 'routing.context')).toBe(true);
   });
+
+  it('rejects constraints — project constraints inject via constraints.md, never declarable', () => {
+    const raw = { id: 'p1', type: 'main', task: 'x', constraints: ['lang: en'] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(result.error.issues.some((i) => i.path.join('.') === 'constraints')).toBe(true);
+  });
+
+  it('rejects runMode — auto-supplied from the run record, never declarable', () => {
+    const raw = { id: 'p1', type: 'main', task: 'x', runMode: 'auto' };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(result.error.issues.some((i) => i.path.join('.') === 'runMode')).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

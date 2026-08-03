@@ -8,13 +8,6 @@ phases:
     channels:
       - node:change-review
     task: |
-      Auto-approve mode (standard topic — confirm BEFORE work, NEVER auto-approved):
-      Manual (recommended, default) — every approval presents a decision card.
-      Auto — every approval in this run (entry confirmations excluded — they are
-      interviews, never auto) executes its recommended routing action (routingActions[0]).
-      Echo rule: scan current-run completed node outputs first — an existing
-      auto_approve field (nested composition) is inherited WITHOUT asking (no re-confirm).
-      Output includes: auto_approve (true|false).
 
       Implement tasks from the confirmed openspec change per openspec-apply-change skill.
 
@@ -87,7 +80,7 @@ phases:
     task: |
       Archive the completed openspec change via openspec archive CLI.
 
-      Load atom-kernel (injected). Read change-accept output (injected via dependsOn implicit context).
+      Read change-accept output (injected via dependsOn implicit context).
       Read apply-change output (injected via node:apply-change context channel) for change metadata.
 
       Execute per atom-openspec-archive flow:

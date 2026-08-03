@@ -12,18 +12,12 @@ phases:
     channels:
       - ./CONTEXT.md
     task: |
-      Execute scope interview per skill://atom-scope-interview (load atom-kernel).
+      Execute scope interview per skill://atom-scope-interview.
       Flow context: prefer upstream plan-parse skill_create_name (injected when orchestrated); else interview (skill Step 1).
 
       Topics: skill name and purpose; scope (what problem it solves); input/output contract (files/types needed and produced); dependencies (skills loaded via skill://); save location.
-      Auto-approve mode (standard topic — ask AFTER scope, NEVER auto-approved):
-      Manual (recommended, default) — every approval presents a decision card.
-      Auto — every approval in this run (entry confirmations excluded — they are
-      interviews, never auto) executes its recommended routing action (routingActions[0]).
-      Echo rule: scan current-run completed node outputs first — an existing
-      auto_approve field (nested composition) is inherited WITHOUT asking.
 
-      Output: confirmed scope (name, purpose, inputs, outputs), full skill plan (sections, references, context requirements, trigger phrases), scope_complete: true, save_location, auto_approve.
+      Output: confirmed scope (name, purpose, inputs, outputs), full skill plan (sections, references, context requirements, trigger phrases), scope_complete: true, save_location.
 
   # --- Create path: write new skill ---
   - id: skill-write
@@ -34,8 +28,7 @@ phases:
     task: |
       Write skill per confirmed plan using atom-kernel interview() solve mode for content confirmation.
 
-      Load atom-kernel (injected) for interview() behavior contract.
-      Read scope-confirm output (injected).
+            Read scope-confirm output (injected).
       Execute interview({ goal: "write SKILL.md for confirmed scope", research: true, context }) in solve mode:
 
       confirm(goal): Confirm writing scope with user — verify plan still accurate.
@@ -56,7 +49,7 @@ phases:
     dependsOn: [scope-confirm]
     when: 'scope-confirm output shows skill_path — edit mode'
     task: |
-      Load atom-kernel (injected). Conduct consensus interview per atom-kernel §interview() to confirm edit target.
+      Conduct consensus interview per atom-kernel §interview() to confirm edit target.
 
       1. Accept skill path or name from user input.
       2. Load existing SKILL.md — read frontmatter + body structure.
@@ -73,7 +66,7 @@ phases:
     type: main
     dependsOn: [skill-select]
     task: |
-      Load atom-kernel (injected). Interview to confirm edit scope per skill://atom-scope-interview. If plan incomplete, continue interview() solve mode until scope_complete: true.
+      Interview to confirm edit scope per skill://atom-scope-interview. If plan incomplete, continue interview() solve mode until scope_complete: true.
 
       Read skill-select output (injected via dependsOn implicit context).
       Interview per atom-kernel §interview() — one-at-a-time, recommendation-first:
@@ -98,8 +91,7 @@ phases:
     task: |
       Modify SKILL.md per confirmed diff plan using atom-kernel interview() solve mode for content confirmation.
 
-      Load atom-kernel (injected) for interview() behavior contract.
-      Read skill-select output, edit-scope-confirm output (both injected).
+            Read skill-select output, edit-scope-confirm output (both injected).
       Execute interview({ goal: "apply edits to SKILL.md as planned", research: true, context }) in solve mode:
 
       confirm(goal): Confirm edit scope with user — verify plan still accurate.

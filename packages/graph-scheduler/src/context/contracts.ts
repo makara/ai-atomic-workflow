@@ -233,26 +233,8 @@ export function validateGraphContracts(
     }
   }
 
-  // Run Mode (atom-graph-spec §Run Mode) — graphs with approval phases should
-  // offer the standard auto-approve mode topic at a main entry (default Manual).
-  // Flow entries (e.g. openspec-pipeline's grill, skill-change-workflow's plan)
-  // declare it in the composed child's entry — composition covers the parent's
-  // approvals (the child entry output carries auto_approve). e2e-minimal is a
-  // test fixture — excluded.
-  if (str(graph.name, '') !== 'e2e-minimal') {
-    const hasApproval = phases.some((p) => str(p.type, '') === 'approval');
-    if (hasApproval) {
-      const entryPhases = phases.filter((p) => ((p.dependsOn as string[] | undefined)?.length ?? 0) === 0);
-      const hasFlowEntry = entryPhases.some((p) => str(p.type, '') === 'flow');
-      const entryTasks = entryPhases.filter((p) => str(p.type, '') === 'main').map((p) => str(p.task, ''));
-      const offersModeTopic = hasFlowEntry || entryTasks.some((t) => /Auto-approve mode|auto_approve/.test(t));
-      if (!offersModeTopic) {
-        warnings.push(
-          `${filePath} — graph declares approval phases but no main entry offers the standard auto-approve mode topic (atom-graph-spec §Run Mode); add the mode topic to the entry task text (Manual default)`,
-        );
-      }
-    }
-  }
+  // Run Mode — mode is a run field set at graph_start; graphs declare nothing.
+  // The entry-topic heuristic was removed with the topic blocks themselves.
 
   return { errors, warnings };
 }
@@ -504,6 +486,7 @@ function checkReverseResolution(
     channels,
     dependsOn,
     contract: { upstream: skill.upstream, references: skill.references, files: skill.files, errors: [] },
+    runNodeIds: nodeIds,
   });
   for (const e of resolved.errors) {
     // phantom bare name that IS a graph node → warning suggesting node: prefix; else hard error

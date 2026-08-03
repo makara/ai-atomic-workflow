@@ -79,6 +79,13 @@ export const PhaseSchema = z
     def: z.unknown().optional(),
     maxDepth: z.unknown().optional(),
     context: z.unknown().optional(),
+    /**
+     * Removed fields — auto-supplied by the scheduler, never declarable.
+     * constraints: project constraints inject via .graph-scheduler/constraints.md;
+     * runMode: run-level mode (graph_start param) carried on every NodeDetail.
+     */
+    constraints: z.unknown().optional(),
+    runMode: z.unknown().optional(),
   })
   .refine(
     (data) => {
@@ -143,7 +150,7 @@ export const PhaseSchema = z
       });
     }
     // Removed fields — loud rejection, never silent strip (no backward compat).
-    for (const key of ['topic', 'retry', 'with', 'def', 'maxDepth', 'context'] as const) {
+    for (const key of ['topic', 'retry', 'with', 'def', 'maxDepth', 'context', 'constraints', 'runMode'] as const) {
       if (data[key] !== undefined) {
         ctx.addIssue({
           code: 'custom',

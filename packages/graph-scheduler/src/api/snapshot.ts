@@ -9,13 +9,16 @@
  */
 
 import { Effect } from 'effect';
+import { stripCrossRunChannels } from '../context/resolve-channels.js';
+import { debugLog } from '../debug.js';
 import { resolveArgs } from '../flow-flatten.js';
 import type { FsmNodeState } from '../fsm/effects.js';
 import type { FsmState, TaskflowGraph } from '../fsm/transition.js';
 import { UnknownPhaseTypeError } from '../phase-handler/errors.js';
 import { resolvePhaseHandler } from '../phase-handler/index.js';
 import type { IBaseNodeDetail, IFsmNodeState, INodeDetail } from '../phase-handler/types.js';
-import { DispatchConfigError } from '../types.js';
+import type { Phase } from '../schemas/index.js';
+import { DispatchConfigError, type NodeDetailInput } from '../types.js';
 
 /** Constant handler skill — dispatch types main/approval share it. */
 const HANDLER_SKILL = 'atom-phase-handler';
@@ -98,47 +101,56 @@ export function findActiveNode(
  *
  * Handler resolution is static by type (main/approval); handlerSkill is the
  * constant 'atom-phase-handler'. No registry in context.
+ * runMode is auto-supplied from the run record. Node-scope gate:
+ * `node:` channel targets outside the run's flattened node set are stripped
+ * at dispatch (shared predicate — stale-file protection).
  */
-export function buildNodeDetail(
-  phaseId: string,
-  nodeState: FsmNodeState,
-  graph: TaskflowGraph,
-  constraints: readonly string[],
-  args?: Record<string, unknown>,
-): Effect.Effect<INodeDetail | null, DispatchConfigError> {
+export function buildNodeDetail(input: NodeDetailInput): Effect.Effect<INodeDetail | null, DispatchConfigError> {
   return Effect.try({
     try: () => {
-      const phase = graph.phases.find((p) => p.id === phaseId);
+      const phase = input.graph.phases.find((p) => p.id === input.phaseId);
       if (!phase) return null;
+
+      // Dispatch-time run-scope gate — strip cross-run `node:` targets before
+      // they reach the agent (the agent can no longer see out-of-run references).
+      const runNodeIds = new Set(input.graph.phases.map((p) => p.id));
+      const { channels, warnings } = stripCrossRunChannels(phase.channels, runNodeIds);
+      for (const w of warnings) {
+        debugLog('runtime', { event: 'cross_run_channel_stripped', nodeId: input.phaseId, warning: w });
+      }
 
       // Base fields — common to all phase types
       const base: IBaseNodeDetail = {
-        nodeId: phaseId,
+        nodeId: input.phaseId,
         type: phase.type,
         dependsOn: phase.dependsOn,
         handlerSkill: HANDLER_SKILL,
         skill: phase.skill,
         when: phase.when,
-        constraints,
-        retryAttempt: nodeState.retryCount,
+        constraints: input.constraints,
+        runMode: input.runMode,
+        retryAttempt: input.nodeState.retryCount,
       };
 
       // Adapt FsmNodeState to IFsmNodeState for handler consumption
       const handlerState: IFsmNodeState = {
-        status: nodeState.status,
-        retryCount: nodeState.retryCount,
-        startedAt: nodeState.startedAt,
-        completedAt: nodeState.completedAt,
-        durationMs: nodeState.durationMs,
+        status: input.nodeState.status,
+        retryCount: input.nodeState.retryCount,
+        startedAt: input.nodeState.startedAt,
+        completedAt: input.nodeState.completedAt,
+        durationMs: input.nodeState.durationMs,
       };
 
-      // Static type dispatch — main/approval; unknown type fails dispatch
+      // Static type dispatch — main/approval; unknown type fails dispatch.
+      // effectivePhase carries the run-scope-stripped channels (agent never
+      // sees out-of-run `node:` references).
+      const effectivePhase: Phase = channels === phase.channels ? phase : { ...phase, channels: [...(channels ?? [])] };
       const handler = resolvePhaseHandler(phase.type);
-      const extras = handler.extendNodeDetail(base, phase, handlerState);
+      const extras = handler.extendNodeDetail(base, effectivePhase, handlerState);
       const detail = { ...base, ...extras };
       // Invocation args interpolation — {args.X} resolves against run start args
       if (typeof detail.task === 'string') {
-        detail.task = resolveArgs(detail.task, args) ?? detail.task;
+        detail.task = resolveArgs(detail.task, input.args) ?? detail.task;
       }
       return detail;
     },

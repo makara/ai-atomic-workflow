@@ -8,9 +8,9 @@
  */
 
 /** Current schema version — bump on DDL change. */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
-/** Create the graph_runs table — one row per graph execution run. */
+/** Create the graph_runs table — one row per graph execution run. v1 shape (pre-mode). */
 export const CREATE_GRAPH_RUNS = `
   CREATE TABLE IF NOT EXISTS graph_runs (
     run_id           TEXT PRIMARY KEY,
@@ -45,3 +45,9 @@ export const CREATE_NODE_STATES_TOPO_INDEX = `
 
 /** All DDL statements for the current schema version, in dependency order. */
 export const V1_DDL = [CREATE_GRAPH_RUNS, CREATE_NODE_STATES, CREATE_NODE_STATES_TOPO_INDEX] as const;
+
+/** v2 delta — run-level mode column (Run Mode as run field). */
+export const V2_DDL = [`ALTER TABLE graph_runs ADD COLUMN mode TEXT NOT NULL DEFAULT 'manual'`] as const;
+
+/** All versioned DDL ladders, in application order. */
+export const VERSIONED_DDL: ReadonlyArray<readonly string[]> = [V1_DDL, V2_DDL];

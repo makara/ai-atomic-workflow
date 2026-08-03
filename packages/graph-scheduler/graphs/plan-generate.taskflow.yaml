@@ -8,19 +8,13 @@ phases:
     channels:
       - ./CONTEXT.md
     task: |
-      Execute scope interview per skill://atom-scope-interview (load atom-kernel).
+      Execute scope interview per skill://atom-scope-interview.
 
       Topics: plan goal/problem; constraints (what must NOT change, limits); affected areas (domains, modules, artifacts).
-      Auto-approve mode (standard topic — ask AFTER scope, NEVER auto-approved):
-      Manual (recommended, default) — every approval presents a decision card.
-      Auto — every approval in this run (entry confirmations excluded — they are
-      interviews, never auto) executes its recommended routing action (routingActions[0]).
-      Echo rule: scan current-run completed node outputs first — an existing
-      auto_approve field (nested composition) is inherited WITHOUT asking.
 
       When scope_complete: true, run to-spec to synthesize PRD from interview findings. Publish to issue tracker. Save local copy for downstream phases. Do NOT prescribe section format or output path — to-spec owns its template and publishing conventions.
 
-      Output: prd_path (derived from to-spec native output), scope_complete: true, ticket_split_needed (complex >=4 distinct operations or cross-domain -> true), change_summary, auto_approve.
+      Output: prd_path (derived from to-spec native output), scope_complete: true, ticket_split_needed (complex >=4 distinct operations or cross-domain -> true), change_summary.
 
   # Phase 2: Scope gate — machine completeness check (bounded auto-rework)
   - id: scope-gate
@@ -62,7 +56,7 @@ phases:
     channels:
       - node:scope-confirm
     task: |
-      Load atom-kernel (injected). Run to-tickets on the PRD. Accept its native output.
+      Run to-tickets on the PRD. Accept its native output.
 
       1. Read PRD from scope-confirm output prd_path (injected via dependsOn implicit context).
       2. Run to-tickets — interview user to confirm split granularity, priority, blocking edges.

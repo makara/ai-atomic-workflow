@@ -5,13 +5,6 @@ phases:
     type: main
     dependsOn: []
     task: |
-      Auto-approve mode (standard topic — confirm BEFORE work, NEVER auto-approved):
-      Manual (recommended, default) — every approval presents a decision card.
-      Auto — every approval in this run (entry confirmations excluded — they are
-      interviews, never auto) executes its recommended routing action (routingActions[0]).
-      Echo rule: scan current-run completed node outputs first — an existing
-      auto_approve field (nested composition) is inherited WITHOUT asking (no re-confirm).
-      Output includes: auto_approve (true|false).
 
       Resolve work input and detect input source — NEVER ask the user.
 
@@ -117,7 +110,7 @@ phases:
     task: |
       Execute atom-openspec-archive flow (reverse-validated archive).
 
-      Load atom-kernel (injected). Read implement-accept output (injected via dependsOn implicit context).
+      Read implement-accept output (injected via dependsOn implicit context).
       Change name: from work-input output change_name field (injected via node:work-input channel) — NEVER ask;
       skill Step 0 `openspec list` fallback only when name absent (this graph has no apply-change upstream).
       Step 0 reverse-validation: task completion × code evidence (grep, contextFiles + implementation output);

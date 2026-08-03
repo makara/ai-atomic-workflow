@@ -12,7 +12,7 @@ phases:
       - ./CONTEXT.md
     when: 'skip when loop-entry output shows scope_complete: true (loop composition — scope pre-confirmed at the loop entry); run otherwise (standalone)'
     task: |
-      Execute scope interview per skill://atom-scope-interview (load atom-kernel).
+      Execute scope interview per skill://atom-scope-interview.
 
       Topics: architecture review domain/feature/problem; focus dimensions (depth/coupling/testability/naming/duplication); output path — MUST be explicitly confirmed by user.
       Recommend default output path: docs/reports/<YYYY-MM-DD>-arch-review-<topic>.md (date prefix — new convention); user MUST explicitly confirm, may override.

@@ -7,18 +7,12 @@ phases:
     channels:
       - ./CONTEXT.md
     task: |
-      Execute scope interview per skill://atom-scope-interview (load atom-kernel).
+      Execute scope interview per skill://atom-scope-interview.
       Flow context: prefer upstream plan-parse doc_update_files (injected when orchestrated); else interview (skill Step 1).
 
       Topics: target document paths; change type (new document / in-place edit / restructure / delete); change scope (full rewrite / section update / metadata update); dependencies (docs or skills referencing these documents); save location.
-      Auto-approve mode (standard topic — ask AFTER scope, NEVER auto-approved):
-      Manual (recommended, default) — every approval presents a decision card.
-      Auto — every approval in this run (entry confirmations excluded — they are
-      interviews, never auto) executes its recommended routing action (routingActions[0]).
-      Echo rule: scan current-run completed node outputs first — an existing
-      auto_approve field (nested composition) is inherited WITHOUT asking.
 
-      Output: confirmed scope (target files, change type, expected changes), impact analysis, scope_complete: true, save_locations, auto_approve.
+      Output: confirmed scope (target files, change type, expected changes), impact analysis, scope_complete: true, save_locations.
 
   - id: doc-write
     type: main
@@ -27,8 +21,7 @@ phases:
     task: |
       Execute document update per confirmed plan.
 
-      Load atom-kernel (injected) for interview() behavior contract.
-      Read doc-scope output (injected).
+            Read doc-scope output (injected).
 
       Execute interview({ goal: "write document updates per confirmed plan", research: true, context }) in solve mode:
 

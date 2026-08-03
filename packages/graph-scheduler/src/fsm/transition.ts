@@ -190,8 +190,14 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
         },
       ];
 
-      // Cascade-skip: a skipped node may force its downstream `any`-join nodes to skip too
+      // Cascade-skip: a skipped node may force its downstream nodes to skip too.
+      // Two classes (ADR 0036 D4 + ADR 0079):
+      //  - `any`-join nodes whose deps are all terminal with none done (dead OR-join)
+      //  - all-join nodes whose `when` text is identical to the skipped node's guard
+      //    (flow-propagated guard — the whole flow short-circuits atomically)
       if (isSkipped) {
+        const skippedPhase = graph.phases.find((p) => p.id === event.phaseId);
+        const skippedWhen = skippedPhase?.when;
         const downstreamIds = findDownstream(event.phaseId, graph.phases);
         // Sort by dependency count (topological depth) — shallower nodes cascade first
         const sortedIds = [...downstreamIds].sort((a, b) => {
@@ -203,7 +209,7 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
           const ds = phases[dsId];
           if (!ds || ds.status !== 'pending') continue;
           const dsPhase = graph.phases.find((p) => p.id === dsId);
-          if (!dsPhase || dsPhase.join !== 'any') continue;
+          if (!dsPhase) continue;
           const dsDeps = dsPhase.dependsOn ?? [];
           // Check: all deps terminal AND none done → cascade-skip
           const allTerminalDeps = dsDeps.every((d) => {
@@ -211,20 +217,22 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
             return dep && (dep.status === 'done' || dep.status === 'skipped');
           });
           const anyDone = dsDeps.some((d) => phases[d]?.status === 'done');
-          if (allTerminalDeps && !anyDone) {
-            phases[dsId] = {
-              ...ds,
-              status: 'skipped',
-              completedAt: now,
-              durationMs: 0,
-            };
-            effects.push({
-              type: 'persist_node_state',
-              runId: state.runId,
-              nodeId: dsId,
-              state: phases[dsId],
-            });
-          }
+          if (!allTerminalDeps || anyDone) continue;
+          const sameSourceWhen =
+            dsPhase.join !== 'any' && typeof skippedWhen === 'string' && dsPhase.when === skippedWhen;
+          if (dsPhase.join !== 'any' && !sameSourceWhen) continue;
+          phases[dsId] = {
+            ...ds,
+            status: 'skipped',
+            completedAt: now,
+            durationMs: 0,
+          };
+          effects.push({
+            type: 'persist_node_state',
+            runId: state.runId,
+            nodeId: dsId,
+            state: phases[dsId],
+          });
         }
       }
 

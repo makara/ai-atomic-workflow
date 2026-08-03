@@ -56,13 +56,13 @@ describe('atom-phase-handler SKILL.md — project constraints + gate branch cont
 
   it('prepends constraints block to main branch inline task', () => {
     const mainBranch = skill.slice(skill.indexOf('node.type = "main"'), skill.indexOf('node.type = "approval"'));
-    expect(mainBranch).toMatch(/Prepend project constraints block/);
+    expect(mainBranch).toMatch(/Prepend `## Run Mode: <node\.runMode>` block \(always\) \+ project constraints block/);
   });
 
   it('prepends constraints block to approval pre-call text', () => {
     const approvalSection = skill.slice(skill.indexOf('node.type = "approval"'));
     expect(approvalSection).toMatch(
-      /Prepend project constraints block \(per §Constraints Block Format\) to pre-call text/,
+      /Prepend `## Run Mode: <node\.runMode>` block \(always\) \+ project constraints block \(per §Constraints Block Format, when node\.constraints non-empty\) to pre-call text/,
     );
   });
 

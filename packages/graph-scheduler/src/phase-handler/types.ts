@@ -9,6 +9,7 @@
  */
 
 import type { Phase } from '../schemas/index.js';
+import type { RunMode } from '../types.js';
 
 /**
  * Phase handler — implemented once per supported phase type.
@@ -49,6 +50,8 @@ export interface IBaseNodeDetail {
   readonly when?: string;
   /** project constraints — loaded from .graph-scheduler/constraints.md, same level as when */
   readonly constraints: readonly string[];
+  /** Run Mode — run-level auto-approve mode, auto-supplied from the run record (never declarable in YAML) */
+  readonly runMode: RunMode;
   readonly retryAttempt: number;
 }
 
@@ -84,6 +87,8 @@ export interface INodeDetail {
   readonly when?: string;
   /** project constraints — from .graph-scheduler/constraints.md, all phase types carry */
   readonly constraints: readonly string[];
+  /** Run Mode — run-level auto-approve mode, auto-supplied from the run record */
+  readonly runMode: RunMode;
   /** Gate phase — eval conditions for machine auto-decision (no continue — auto-approval is a non-bypassable-gate violation) */
   readonly eval?: ReadonlyArray<IEvalCondition>;
   readonly retryAttempt: number;

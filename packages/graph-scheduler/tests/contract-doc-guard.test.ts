@@ -84,6 +84,7 @@ function baseNodeDetailKeys(): Set<string> {
     'agent',
     'when',
     'constraints',
+    'runMode',
     'retryAttempt',
   ]);
 }
@@ -103,6 +104,7 @@ function nodeDetailKeys(): Set<string> {
     'preText',
     'when',
     'constraints',
+    'runMode',
     'eval',
     'retryAttempt',
   ]);
@@ -125,6 +127,7 @@ function assertKeysCovered(keys: Set<string>): void {
     preText: true,
     when: true,
     constraints: true,
+    runMode: true,
     eval: true,
     retryAttempt: true,
   };
@@ -136,6 +139,7 @@ function assertKeysCovered(keys: Set<string>): void {
     skill: true,
     when: true,
     constraints: true,
+    runMode: true,
     retryAttempt: true,
   };
   const detailKeys = new Set(Object.keys(detailRecord));

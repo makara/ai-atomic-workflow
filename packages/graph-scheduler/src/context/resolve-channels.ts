@@ -189,6 +189,53 @@ export function fileChannelCoveredBy(channel: string, contractFile: string): boo
 }
 
 /**
+ * Shared run-scope gate — a `node:` channel target (or bare contract-upstream
+ * match) outside the current run's flattened node set is a cross-run reference:
+ * warn + skip (stale output files from other runs must never inject). Absent
+ * runNodeIds (validation paths without a run) → check skipped.
+ *
+ * Single implementation shared by:
+ * - resolveChannels (reverse resolution — runtime agent-side + CLI validate)
+ * - buildNodeDetail (scheduler dispatch-time strip)
+ */
+export function isNodeInRun(target: string, runNodeIds: ReadonlySet<string> | undefined): boolean {
+  if (!runNodeIds) return true;
+  return runNodeIds.has(target);
+}
+
+/** Run-scope warning text — same wording everywhere. */
+export function runScopeWarning(display: string): string {
+  return `"${display}" — target outside the current run's node set; cross-run output files are never injected (stale-file protection)`;
+}
+
+/**
+ * Strip `node:` channel entries whose target is outside the run node set.
+ * Returns surviving channels + warnings. Used by buildNodeDetail at dispatch
+ * (deterministic — prefix-only, no contract needed). Returns the input
+ * reference unchanged when nothing was stripped (identity check enables a
+ * zero-copy fast path at the caller).
+ */
+export function stripCrossRunChannels(
+  channels: readonly string[] | undefined,
+  runNodeIds: ReadonlySet<string> | undefined,
+): { channels: readonly string[] | undefined; warnings: string[] } {
+  if (!channels || !runNodeIds) return { channels, warnings: [] };
+  let kept: string[] | null = null;
+  const warnings: string[] = [];
+  for (let i = 0; i < channels.length; i++) {
+    const entry = channels[i];
+    const prefixed = stripPrefix(entry);
+    if (prefixed?.type === 'node' && !isNodeInRun(prefixed.target, runNodeIds)) {
+      warnings.push(runScopeWarning(entry));
+      kept ??= channels.slice(0, i); // lazy copy on first strip — prior entries preserved
+      continue;
+    }
+    if (kept !== null) kept.push(entry);
+  }
+  return { channels: kept ?? channels, warnings };
+}
+
+/**
  * Resolve a phase's `channels` against the skill contract.
  *
  * Type derivation order:
@@ -212,12 +259,11 @@ export function resolveChannels(input: IResolveInput): IResolveResult {
   // run-scoped gate — cross-run references warn + skip (stale-file protection);
   // both call sites pre-check dependsOn coverage before invoking this
   const runScoped = (target: string, display: string): boolean => {
-    if (!runNodeIds) return true;
-    if (runNodeIds.has(target)) return true;
-    warnings.push(
-      `"${display}" — target outside the current run's node set; cross-run output files are never injected (stale-file protection)`,
-    );
-    return false;
+    if (!isNodeInRun(target, runNodeIds)) {
+      warnings.push(runScopeWarning(display));
+      return false;
+    }
+    return true;
   };
 
   for (const entry of channels) {

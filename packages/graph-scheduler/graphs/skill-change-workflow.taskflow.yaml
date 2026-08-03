@@ -11,7 +11,7 @@ phases:
     type: main
     dependsOn: [plan]
     task: |
-      Load atom-kernel (injected). Read PRD from plan output. Extract skill-domain metadata.
+      Read PRD from plan output. Extract skill-domain metadata.
 
       1. Read PRD at prd_path from plan output (injected via dependsOn implicit context).
       2. Extract skill-specific metadata from PRD content:
@@ -115,7 +115,7 @@ phases:
     task: |
       Archive the completed OpenSpec change via openspec archive CLI.
 
-      Load atom-kernel (injected). Read change-accept output (injected via dependsOn implicit context).
+      Read change-accept output (injected via dependsOn implicit context).
 
       Execute per atom-openspec-archive flow:
       1. Determine change_name (NEVER ask): {args.changeName} if provided → `openspec list --json` filtered to complete changes (single entry) → else archive_status: blocked + candidates.

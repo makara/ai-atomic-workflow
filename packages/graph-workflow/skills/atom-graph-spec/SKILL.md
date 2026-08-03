@@ -96,6 +96,7 @@ Auto-supplied fields (NEVER write in YAML):
 - `handlerSkill` (string) — constant `atom-phase-handler` for main/approval/gate (no registry).
 - `skill` (string) — resolved from `skill` field; the execution skill for the phase's work.
 - `retryAttempt` (number) — runtime counter. 0-based.
+- `runMode` (`'manual' | 'auto'`) — the run's mode, read from the run record (§Run Mode). `constraints`/`runMode` declared in YAML → schema rejection.
 
 ## Route Fields (approval type)
 
@@ -268,24 +269,25 @@ Gate no-match (all eval conditions false / completion failure) falls through to 
 
 ### Loop Router Pattern (exception)
 
-A gate may act as a **loop router** — machine-iterating NEW artifacts instead of reworking the same one. Distinguishing shape (arch-review-loop `loop-gate`, v4 reviewer-reuse):
+A gate may act as a **loop router** — machine-iterating NEW artifacts instead of reworking the same one. Distinguishing shape (arch-review-loop `loop-gate`, v5 round-origin):
 
-- The eval condition references the reviewer's **affirmative continuation signal** (`review/arch-review` output `top_rec_remaining: true`) — the loop re-runs the **reviewer** while it affirms progress, not while it reports failure.
-- The retry target is the **round worker itself** (`review` — a flow id; flatten remaps it to the flow's entry, re-running the whole review segment). The flow declares an **empty JUMP closure** (`dependsOn: []`) + a `node:loop-entry` channel — retry re-runs only the review segment; the entry (scope + mode) is never re-asked.
+- The eval condition references the reviewer's **affirmative continuation signal** (`review/arch-review` output `top_rec_remaining: true`) — the loop re-runs while it affirms progress, not while it reports failure.
+- The retry target is the **round origin `loop-entry`** — the loop re-asks scope (user-confirmed/adjusted every round) and re-runs the whole round. Round reset is structural: `review` flow `dependsOn: [loop-entry]` + `implement` flow `dependsOn: [review-accept]` — the JUMP transitive closure resets scope → review → accept → implement in one hop. A `node:loop-entry` channel still delivers report_path + run-mode context.
 - Retry is bounded by the **round worker's own iteration counter** (`round < N` in the reviewer's output) instead of the gate's `retryAttempt` (the gate itself is never jumped). The bound caps the gate's retry only — it is NOT a termination mechanism: past the bound the gate no-matches and the round-end approval takes over.
-- **Termination is always an explicit human decision** (v4): the round-end approval runs every round with `Loop again → retry review` as the first action (default — Run Mode auto executes it, so auto mode repeats) and `Complete loop` as the explicit end. Auto mode does NOT auto-complete — the operator force-ends; the report's round marker provides progress.
+- **Termination is explicit**: `loop-accept` skips to `loop-done` (normal end) when `top_rec_remaining: false` — no force-end needed; with candidates the first action `Loop again → retry loop-entry` is the default (Run Mode auto executes it, so auto mode repeats) and `Complete loop` is the explicit end. Auto mode with candidates does NOT auto-complete — the operator force-ends; the report's round marker provides progress.
 - The gate may declare **eval-context dependsOn** beyond a single review dep (e.g. the entry decision node + the round worker's flattened id) — the eval reads those outputs directly (§DependsOn Rules #3 exception).
 
 ## Constraint Layering
 
 Project constraints — `.graph-scheduler/constraints.md` — inject into every node (main/approval) as `## Constraints` block. Layer order (additive floor):
 
-platform injection < project graph constraints < node-level task/context < skill-level `## Rules`
+platform injection < node-level task/context < skill-level `## Rules`
 
 - Lower layer appends only — never overrides upper layer
 - Same-dimension conflict (e.g. language) → keep both entries, agent judges by more specific layer
 - Dedup: skip entries duplicating `lang.conversation`/`lang.documents`/`git.policy` structured fields (atom-kernel rule 3 reuse)
 - Block cap 2 KB — exceed → explicit warning, never silent truncation
+- The YAML `constraints` phase field was removed (zero usage in built-in graphs) — project constraints are the single injection source
 
 ---
 
@@ -412,53 +414,39 @@ Gate nodes SHALL NOT replace approval acceptance semantics — gate eval actions
 
 # Run Mode
 
-Run Mode = run-level auto-approve convention. A run may opt into auto-approval at its entry: every approval in the run (except entry confirmations themselves — they are interviews, never auto) then executes its recommended routing action without a card. The mode is a **run attribute**, not a node-level field — zero schema additions, zero per-approval declarations.
+Run Mode = run-level auto-approve convention. A run may opt into auto-approval at its creation: every approval in the run (entry confirmations excluded — they are interviews, never auto) then executes its recommended routing action without a card. The mode is a **run attribute** carried as a **run field** — decided once at `graph_start`, persisted on the run record, auto-supplied on every dispatch as `node.runMode`. Zero schema additions, zero per-approval declarations, zero graph task-text topics.
 
-## Standard Entry Mode Topic
+## Mode decision (run creation)
 
-Graphs with approval phases SHALL offer the mode topic at their entry (default Manual). Two entry shapes:
+`graph_start { graphName, mode?: 'manual' | 'auto' }` — optional top-level param, default `'manual'` (absence is never silent Auto). The run creator decides: atom-pilot asks one question at run start (Manual recommended; `--auto`/`--manual` flags skip the question); direct MCP callers pass the param. Flow composition needs no plumbing — nested graphs share the run, so `runMode` propagates by construction at any nesting depth.
 
-- **atom-scope-interview entries** — the graph task text declares the standard topic; the skill handles it (ask AFTER scope, echo scan first).
-- **Work-type entries** — the task text carries the standard preamble; the executing agent confirms before work (same rules).
+- Graphs SHALL NOT declare a mode topic in entry task texts — the topic blocks were removed; entry output contracts carry no `auto_approve` field.
+- The mode is stable for the run lifetime — no mid-run switching.
 
-Standard topic text (graph entries):
+## Consumption (direct branch)
 
-```
-Auto-approve mode (standard topic — ask AFTER scope, NEVER auto-approved):
-Manual (recommended, default) — every approval presents a decision card.
-Auto — every approval in this run (entry confirmations excluded — they are
-interviews, never auto) executes its recommended routing action (routingActions[0]).
-Echo rule: scan current-run completed node outputs first — an existing
-auto_approve field (nested composition) is inherited WITHOUT asking.
-```
+atom-phase-handler approval branch checks `node.runMode`:
 
-**Entry output field**: `auto_approve: true|false` (machine-parseable). Absent field = Manual (never silent Auto).
+- `'auto'` → auto-execute `routingActions[0]`: `IApprovalDecision { action, target, label: first.label, note: 'run mode: auto' }`, decision file persisted WITH the label — downstream when-guards consume it exactly as the human path. Empty `routingActions` → human card (nothing to auto-execute).
+- `'manual'` → human card. No output scans, no parse/conflict fail-safe matrix — the run field is the single source of truth.
+
+## Context injection
+
+The handler injects `## Run Mode: <mode>` into every node dispatch context (main/approval/gate, same layer as `## Constraints`) — gate eval conditions may reference the mode (loop router pattern).
 
 ## Scope
 
 Run Mode controls **approval presentation only**:
 
 - Approval phases — auto-execute `routingActions[0]` (the graph-declared recommendation — question() "recommended first" convention) when the mode is Auto.
-- Main nodes (grill/scope interviews, work nodes) — NEVER auto-skipped, NEVER auto-decided. The mode topic never gates an interview.
-- Gate eval semantics unchanged — a gate may reference `auto_approve` explicitly in eval conditions (loop router pattern).
-
-## Consumption (deterministic scan)
-
-atom-phase-handler approval branch scans the current run's completed node outputs (snapshot-scoped — only `snapshot.nodes` with `status: done`) for the field `auto_approve: true`:
-
-- Match → auto-execute `routingActions[0]`: `IApprovalDecision { action, target, label: first.label, note: 'auto-approve mode' }`, decision file persisted WITH the label — downstream when-guards consume it exactly as the human path.
-- Snapshot absent / no match / parse failure / conflicting values / empty routingActions → human card (fail-safe — never auto-decide on uncertainty).
-- Stale outputs from prior runs are excluded by construction (snapshot-scoped).
-
-`graph_start` returns the run snapshot — entry dispatch carries it (echo scan + consumption share the mechanism).
-
-## Propagation (echo)
-
-Nested entries inherit the mode instead of re-asking: the entry interview scans the current run's completed outputs — an existing `auto_approve` field is echoed into this entry's output (no question). The scan is run-scoped (not conversation-scoped) — same-session consecutive runs do not leak. Standalone runs (zero completed outputs at entry) always ask. Flow composition needs no plumbing — the run-level scan is the propagation mechanism at any nesting depth.
+- Main nodes (grill/scope interviews, work nodes) — NEVER auto-skipped, NEVER auto-decided. The mode never gates an interview.
+- Gate eval semantics unchanged — a gate may reference the injected run-mode context in eval conditions.
 
 ## Loop Router Integration
 
-arch-review-loop demonstrates the full pattern: `loop-entry` (report input + mode topic) → approvals consumed by Run Mode → `loop-gate` (loop router — eval references `auto_approve`, decision label, and the round worker's `top_rec_remaining` + `round` bound, retry target `review`) → `loop-accept` first action `Loop again` (default repeat — the auto outcome is repeat, never auto-Complete; termination is always a human decision, force-end in auto mode).
+arch-review-loop demonstrates the full pattern: `loop-entry` (scope interview — **re-confirmed every round**: the round origin, never auto-skipped, jump-back target) → approvals consumed by Run Mode → `loop-gate` (loop router — eval references `run mode is auto`, decision label, and the round worker's `top_rec_remaining` + `round` bound, **retry target `loop-entry`**) → `loop-accept` first action `Loop again` (retry `loop-entry` — default repeat; **when-skip `top_rec_remaining: false` → normal end via loop-done, no force-end**; with candidates, termination is always a human decision, force-end in auto mode).
+
+Round reset semantics: `review` flow `dependsOn: [loop-entry]` + `implement` flow `dependsOn: [review-accept]` — a jump to `loop-entry` resets the whole round (scope → review → accept → implement) via the JUMP transitive closure. The implement pipeline's grilling is a **mandatory interview** (graph dispatch: zero-question degradation disabled — at least one question() per grill round; auto mode exempts approval cards only, never interviews).
 
 ---
 

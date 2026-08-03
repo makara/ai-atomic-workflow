@@ -4,20 +4,13 @@ phases:
     type: main
     dependsOn: []
     task: |
-      Auto-approve mode (standard topic — confirm BEFORE work, NEVER auto-approved):
-      Manual (recommended, default) — every approval presents a decision card.
-      Auto — every approval in this run (entry confirmations excluded — they are
-      interviews, never auto) executes its recommended routing action (routingActions[0]).
-      Echo rule: scan current-run completed node outputs first — an existing
-      auto_approve field (nested composition) is inherited WITHOUT asking (no re-confirm).
-      Output includes: auto_approve (true|false).
 
       If plan-parse upstream provides skill_delete_name (injected when orchestrated):
         Use it directly — skip interview
       Else (standalone context):
         Conduct interview() to collect scope
 
-      Load atom-kernel (injected). Conduct interview to confirm skill to delete.
+      Conduct interview to confirm skill to delete.
 
       1. Search conversation for user-provided skill name or path.
       2. If ambiguous, ask clarifying questions via question() per atom-kernel §question():
@@ -39,8 +32,7 @@ phases:
     task: |
       Analyze impact scope of deleting the confirmed skill.
 
-      Load atom-kernel (injected) for interview() behavior contract.
-      Read skill-select output (injected via dependsOn implicit context).
+            Read skill-select output (injected via dependsOn implicit context).
       Execute impact analysis:
 
       1. Reference graph analysis:

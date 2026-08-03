@@ -8,18 +8,12 @@ phases:
     channels:
       - ./CONTEXT.md
     task: |
-      Execute scope interview per skill://atom-scope-interview (load atom-kernel).
+      Execute scope interview per skill://atom-scope-interview.
 
       Topics: idea/goal (raw, unfogged), doc-trace intent (glossary terms + ADR offers expected),
       interview output record path.
-      Auto-approve mode (standard topic — ask AFTER scope, NEVER auto-approved):
-      Manual (recommended, default) — every approval presents a decision card.
-      Auto — every approval in this run (entry confirmations excluded — they are
-      interviews, never auto) executes its recommended routing action (routingActions[0]).
-      Echo rule: scan current-run completed node outputs first — an existing
-      auto_approve field (nested composition) is inherited WITHOUT asking.
 
-      Output: scope_complete, idea_goal, doc_trace_intent, output_path, auto_approve.
+      Output: scope_complete, idea_goal, doc_trace_intent, output_path.
 
   # Stage 2: Grilling — decision-tree conversation with inline domain-modeling side effects
   - id: grilling
@@ -33,6 +27,11 @@ phases:
     task: |
       Execute grilling graph mode per grilling skill — question() one question per turn,
       recommendation first, fact lookup before asking, walk every decision-tree branch.
+
+      Mandatory interview — graph-dispatched grilling SHALL conduct a real conversation:
+      at least one question() (idea/goal + scope confirmation) per execution. Zero-question
+      degradation does NOT apply to graph dispatch — complete context is never a reason to
+      skip asking; scope_complete/consensus requires user participation.
 
       Inline domain-modeling side effects (user-confirmed, never autonomous):
       - CONTEXT.md term updates at crystallization moments

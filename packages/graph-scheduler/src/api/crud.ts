@@ -28,8 +28,10 @@ import { RegistryLoader } from '../registry-loader.js';
 import type {
   DispatchConfigError,
   InvalidStateError,
+  NextNodeInput,
   NotFoundError,
   RegistryLoadError,
+  RunMode,
   SchedulerError,
 } from '../types.js';
 
@@ -90,25 +92,22 @@ function dispatchEvent(
 }
 
 /**
- * Per-run project constraints snapshot — set at graphStart, stable for run lifetime.
- * Same-run advance/jump reuse snapshot; new run re-reads constraints file.
- * In-memory only — server restart drops, next run reloads fresh.
- */
-/**
  * Build the next dispatchable node after a transition (null when run finished).
  * Shared tail for start/advance/jump.
  */
-function buildNextNode(
-  runId: string,
-  nextState: FsmState,
-  graph: TaskflowGraph,
-  args?: Record<string, unknown>,
-): Effect.Effect<NodeDetail | null, DispatchConfigError> {
+function buildNextNode(input: NextNodeInput): Effect.Effect<NodeDetail | null, DispatchConfigError> {
   return Effect.gen(function* () {
-    const active = nextState.status === 'running' ? findActiveNode(nextState.phases, graph) : null;
+    const active = input.state.status === 'running' ? findActiveNode(input.state.phases, input.graph) : null;
     if (!active) return null;
-    const constraints = runConstraints.get(runId) ?? loadConstraintsFile();
-    return yield* buildNodeDetail(active.phaseId, active.nodeState, graph, constraints, args);
+    const constraints = runConstraints.get(input.runId) ?? loadConstraintsFile();
+    return yield* buildNodeDetail({
+      phaseId: active.phaseId,
+      nodeState: active.nodeState,
+      graph: input.graph,
+      constraints,
+      runMode: input.mode,
+      args: input.args,
+    });
   });
 }
 
@@ -134,16 +133,19 @@ function invalidState(runId: string, currentStatus: string, attemptedAction: str
  *
  * @param graphName — graph name (resolved via registry or `${graphName}.taskflow.yaml`)
  * @param args      — optional invocation arguments (accessible via {args.X} in templates)
+ * @param mode      — Run Mode: 'auto' auto-executes routingActions[0] on every approval
+ *                    without a decision card; 'manual' (default) always presents the card.
  */
 export function graphStart(
   graphName: string,
   args?: Record<string, unknown>,
+  mode: RunMode = 'manual',
 ): Effect.Effect<
   {
     runId: string;
     node: NodeDetail | null;
     contractWarnings?: string[];
-    /** Run snapshot — same shape as advance/jump; entry dispatch carries it (Run Mode consumption). */
+    /** Run snapshot — same shape as advance/jump; entry dispatch carries it (jump nav + progress display). */
     snapshot: IGraphSnapshot;
   },
   SchedulerError | RegistryLoadError,
@@ -175,7 +177,7 @@ export function graphStart(
     graphLoadCache.set(runId, tf);
 
     // Create run row + node state rows in DB
-    yield* repo.createRun(runId, graphName, args);
+    yield* repo.createRun(runId, graphName, args, mode);
     const nodes = tf.phases.map((p: { id: string }, i: number) => ({
       nodeId: p.id,
       topoOrder: i,
@@ -186,7 +188,7 @@ export function graphStart(
     yield* executeEffects(result.effects, repo, graph);
 
     // Build next node
-    const node = yield* buildNextNode(runId, nextState, graph, args);
+    const node = yield* buildNextNode({ runId, state: nextState, graph, mode, args: args ?? null });
     // Contract warnings captured at load — surfaced for decision gates
     return { runId, node, contractWarnings: getContractWarnings(graphName), snapshot: buildSnapshot(nextState) };
   });
@@ -230,7 +232,7 @@ export function graphAdvance(
     // Build return
     const nextState = result.nextState;
     const snapshot = buildSnapshot(nextState);
-    const node = yield* buildNextNode(runId, nextState, graph, run.args ?? undefined);
+    const node = yield* buildNextNode({ runId, state: nextState, graph, mode: run.mode, args: run.args });
 
     return { snapshot, node };
   });
@@ -267,7 +269,7 @@ export function graphJump(
 
     const nextState = result.nextState;
     const snapshot = buildSnapshot(nextState);
-    const node = yield* buildNextNode(runId, nextState, graph, run.args ?? undefined);
+    const node = yield* buildNextNode({ runId, state: nextState, graph, mode: run.mode, args: run.args });
 
     return { snapshot, node };
   });

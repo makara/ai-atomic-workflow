@@ -8,6 +8,8 @@
  */
 
 import type { FileSystemError } from './filesystem.js';
+import type { FsmNodeState } from './fsm/effects.js';
+import type { FsmState, TaskflowGraph } from './fsm/transition.js';
 import type { NodeState, RegistryEntry } from './schemas/index.js';
 
 /** run not found — askNext/getStatus/resume/abort when runId missing */
@@ -76,6 +78,28 @@ export class DispatchConfigError extends Error {
     super(message);
     this.name = 'DispatchConfigError';
   }
+}
+
+/** Run Mode — run-level auto-approve convention; decided at run creation, stable for run lifetime. */
+export type RunMode = 'manual' | 'auto';
+
+/** NodeDetail construction input — single object, all fields required; args matches GraphRun (null when absent). */
+export interface NodeDetailInput {
+  readonly phaseId: string;
+  readonly nodeState: FsmNodeState;
+  readonly graph: TaskflowGraph;
+  readonly constraints: readonly string[];
+  readonly runMode: RunMode;
+  readonly args: Record<string, unknown> | null;
+}
+
+/** Next-node construction input — single object, all fields required; args matches GraphRun (null when absent). */
+export interface NextNodeInput {
+  readonly runId: string;
+  readonly state: FsmState;
+  readonly graph: TaskflowGraph;
+  readonly mode: RunMode;
+  readonly args: Record<string, unknown> | null;
 }
 
 /** runtime assembly failure — database open, DDL, or layer wiring */

@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { migrate } from '../../src/lib/db/migration.js';
 import { buildService, type GraphRepository } from '../../src/lib/db/repository.js';
+import { SCHEMA_VERSION } from '../../src/lib/db/schema.js';
 import type { NotFoundError } from '../../src/types.js';
 
 // ---------------------------------------------------------------------------
@@ -240,5 +241,63 @@ describe('initialize', () => {
     // Second initialize on same db
     const repo2 = buildService(db);
     await expect(Effect.runPromise(repo2.initialize())).resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Schema migration — v1-era → current (v2) in-place upgrade (Run Mode run field)
+// ---------------------------------------------------------------------------
+
+describe('schema migration v1-era → current', () => {
+  it('upgrades a v1 database in place: adds mode column, keeps rows', () => {
+    const db = new Database(':memory:');
+    // Simulate a v1 database: original DDL + version marker, no mode column.
+    db.exec(`
+      CREATE TABLE graph_runs (
+        run_id           TEXT PRIMARY KEY,
+        graph_name       TEXT NOT NULL,
+        fsm_state        TEXT NOT NULL DEFAULT 'idle',
+        args             TEXT,
+        created_at       TEXT NOT NULL,
+        updated_at       TEXT NOT NULL
+      );
+      CREATE TABLE node_states (
+        run_id        TEXT NOT NULL,
+        node_id       TEXT NOT NULL,
+        status        TEXT NOT NULL DEFAULT 'pending',
+        retry_count   INTEGER NOT NULL DEFAULT 0,
+        topo_order    INTEGER NOT NULL DEFAULT 0,
+        started_at    TEXT,
+        completed_at  TEXT,
+        PRIMARY KEY (run_id, node_id),
+        FOREIGN KEY (run_id) REFERENCES graph_runs(run_id)
+      );
+      CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+      INSERT INTO schema_version (version, applied_at) VALUES (1, '2026-08-01T00:00:00.000Z');
+      INSERT INTO graph_runs (run_id, graph_name, fsm_state, args, created_at, updated_at)
+      VALUES ('old-run', 'legacy-graph', 'completed', NULL, '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z');
+    `);
+
+    // Upgrade to current version.
+    Effect.runSync(migrate(db));
+
+    // Version marker reaches the current schema version.
+    const ver = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
+    expect(ver.v).toBe(SCHEMA_VERSION);
+
+    // Pre-existing row preserved, mode defaults to manual.
+    const row = db.prepare('SELECT mode FROM graph_runs WHERE run_id = ?').get('old-run') as
+      { mode: string } | undefined;
+    expect(row?.mode).toBe('manual');
+
+    // New run with explicit mode persists.
+    const repo = buildService(db);
+    Effect.runSync(repo.createRun('new-run', 'g', undefined, 'auto'));
+    const run = Effect.runSync(repo.getRun('new-run'));
+    expect(run.mode).toBe('auto');
+
+    // Idempotent — second migrate is a no-op.
+    Effect.runSync(migrate(db));
+    expect(Effect.runSync(repo.getRun('old-run')).mode).toBe('manual');
   });
 });

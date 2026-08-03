@@ -606,6 +606,49 @@ describe('transition()', () => {
       expect(phases['c'].status).toBe('active');
     });
   });
+
+  describe('Cascade-skip for same-source when (all-join)', () => {
+    const FLOW_GUARD = 'run only when upstream approves';
+
+    it('all-join chain with identical when cascade-skips in one event', () => {
+      const g: TaskflowGraph = {
+        name: 'same-when-cascade',
+        phases: [
+          { id: 'a', type: 'main', when: FLOW_GUARD },
+          { id: 'b', type: 'main', dependsOn: ['a'], when: FLOW_GUARD },
+          { id: 'c', type: 'main', dependsOn: ['b'], when: FLOW_GUARD },
+        ],
+      };
+      let state: FsmState = { status: 'idle' };
+      state = transition(state, startEvent(), g).nextState;
+
+      // skip a on its guard — b and c share the guard text → cascade in the same event
+      state = transition(state, { type: 'COMPLETE', phaseId: 'a', durationMs: 10, skip: true }, g).nextState;
+      expect(state.status).toBe('completed');
+      const completedState = state as Extract<FsmState, { status: 'completed' }>;
+      expect(completedState.phases['a'].status).toBe('skipped');
+      expect(completedState.phases['b'].status).toBe('skipped');
+      expect(completedState.phases['c'].status).toBe('skipped');
+    });
+
+    it('all-join node with different or absent when activates normally (no cascade)', () => {
+      const g: TaskflowGraph = {
+        name: 'different-when-no-cascade',
+        phases: [
+          { id: 'a', type: 'main', when: FLOW_GUARD },
+          { id: 'b', type: 'main', dependsOn: ['a'], when: 'run only when something-else' },
+          { id: 'c', type: 'main', dependsOn: ['b'] },
+        ],
+      };
+      let state: FsmState = { status: 'idle' };
+      state = transition(state, startEvent(), g).nextState;
+
+      state = transition(state, { type: 'COMPLETE', phaseId: 'a', durationMs: 10, skip: true }, g).nextState;
+      const phases = narrowRunning(state).phases;
+      // b: skipped counts as terminal dep → activates (agent evaluates its own guard later)
+      expect(phases['b'].status).toBe('active');
+    });
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════

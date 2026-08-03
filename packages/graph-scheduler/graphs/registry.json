@@ -48,7 +48,7 @@
     {
       "name": "arch-review-loop",
       "path": "arch-review-loop.taskflow.yaml",
-      "description": "Closed-loop architecture review: entry (existing report or fresh review + auto-approve mode) → arch-review re-review (round worker) → approve Top Rec → openspec-pipeline → round-end approval (Loop again default, Complete = user ends) → loop until the user approves ending"
+      "description": "Closed-loop architecture review: entry (existing report or fresh review; Run Mode is a graph_start run param) → arch-review re-review (round worker) → approve Top Rec → openspec-pipeline → round-end approval (Loop again default, Complete = user ends) → loop until the user approves ending"
     },
     {
       "name": "implement",

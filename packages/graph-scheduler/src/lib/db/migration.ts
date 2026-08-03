@@ -1,10 +1,11 @@
 /**
- * Database initialization — single consolidated version.
+ * Database initialization — versioned migration ladder.
  *
  * Tracks applied version in a `schema_version` meta-table.
- * v1: full schema (graph_runs + node_states + topo index). Fresh databases
- * initialize in one step; older databases are disposable run state and are
- * never upgraded (release recreates them).
+ * v1: full schema (graph_runs + node_states + topo index).
+ * v2: graph_runs.mode column (Run Mode as run field).
+ * Fresh databases apply the ladder in one pass; existing databases upgrade
+ * only the missing versions (idempotent).
  *
  * @module
  */
@@ -14,7 +15,7 @@ import Database from 'libsql';
 import { debugLog } from '../../debug.js';
 import type { PersistenceError } from '../../types.js';
 import { tryDb } from './helpers.js';
-import { SCHEMA_VERSION, V1_DDL } from './schema.js';
+import { SCHEMA_VERSION, VERSIONED_DDL } from './schema.js';
 
 /** Ensure the schema_version meta-table exists (idempotent). */
 function ensureVersionTable(db: ReturnType<typeof Database>): void {
@@ -47,7 +48,7 @@ export function currentVersion(db: ReturnType<typeof Database>): Effect.Effect<n
  * Initialize the database up to SCHEMA_VERSION.
  *
  * Idempotent — no-op once the applied version is >= SCHEMA_VERSION.
- * Runs inside a transaction.
+ * Applies versioned DDL ladders inside one transaction per version.
  *
  * @param db — open libsql Database handle
  * @returns Effect that completes when the database is initialized
@@ -61,16 +62,22 @@ export function migrate(db: ReturnType<typeof Database>): Effect.Effect<void, Pe
       return;
     }
 
-    // Single consolidated init — no versioned migration ladder (databases are disposable run state).
-    yield* tryDb('migrate_v1', () => {
-      db.transaction(() => {
-        for (const ddl of V1_DDL) {
-          db.exec(ddl);
-        }
-        db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (1, ?)').run(new Date().toISOString());
-      })();
-    });
-    debugLog('runtime', { event: 'migration_applied', from: version, to: 1 });
+    // Versioned ladder — apply each missing version in order.
+    for (let v = version; v < SCHEMA_VERSION; v++) {
+      const ddl = VERSIONED_DDL[v] ?? [];
+      yield* tryDb(`migrate_v${v + 1}`, () => {
+        db.transaction(() => {
+          for (const statement of ddl) {
+            db.exec(statement);
+          }
+          db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(
+            v + 1,
+            new Date().toISOString(),
+          );
+        })();
+      });
+      debugLog('runtime', { event: 'migration_applied', from: version, to: v + 1 });
+    }
 
     debugLog('runtime', { event: 'migration_complete', version: SCHEMA_VERSION });
   });

@@ -8,7 +8,7 @@ phases:
       - ./CONTEXT.md
       - docs/adr/*.md
     task: |
-      Execute scope interview per skill://atom-scope-interview (load atom-kernel). Detect input source type:
+      Execute scope interview per skill://atom-scope-interview. Detect input source type:
         - wayfinder-map: read map, extract closed decisions
         - arch-review: read review report, extract findings
         - grill-consensus: read composed grill-with-docs output — extract decisions + doc_updates + adr_created
@@ -18,8 +18,10 @@ phases:
       ADR judgment — inline conversation side effect (decisions crystallize in dialogue;
       judgment is never a separate autonomous step):
       - Sharpened inputs (wayfinder-map / arch-review / grill-consensus): decisions already
-        crystallized upstream — check docs/adr/ for an existing ADR covering the change's
-        decisions; reuse it (adr_created: true, adr_path) without re-testing.
+        crystallized upstream — adr_created ECHOES the upstream judgment (grill-consensus
+        adr_created / review report decision), no re-derivation. Check docs/adr/ for an
+        existing ADR covering the change's decisions and record it in adr_path (reuse —
+        informational only, NEVER flips adr_created).
       - Direct input: at decision-crystallization moments apply the three-condition test
         (hard-to-reverse / surprising-without-context / real-trade-off); PROPOSE the ADR to
         the user — write to docs/adr/ only after explicit user confirmation; a declined ADR
@@ -28,15 +30,9 @@ phases:
       - adr_created MUST always be present in output — a missing judgment is an incomplete scope.
 
       Topics: spec domain + change type + input artifacts + destination (change name).
-      Auto-approve mode (standard topic — ask AFTER scope, NEVER auto-approved):
-      Manual (recommended, default) — every approval presents a decision card.
-      Auto — every approval in this run (entry confirmations excluded — they are
-      interviews, never auto) executes its recommended routing action (routingActions[0]).
-      Echo rule: scan current-run completed node outputs first — an existing
-      auto_approve field (nested composition) is inherited WITHOUT asking.
 
       Output: scope_complete, input_source, change_name, affected_domains, spec_plan,
-      adr_created, adr_path?, decision_summary, decisions, auto_approve.
+      adr_created, adr_path?, decision_summary, decisions.
 
   - id: spec-gate
     type: gate

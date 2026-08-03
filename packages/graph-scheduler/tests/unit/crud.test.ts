@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { RunModeSchema } from '../../server.js';
 import { graphLoadCache, runConstraints } from '../../src/api/run-caches.js';
 import type { SchedulerRuntime } from '../../src/scheduler-runtime.js';
 import { createRuntime } from '../../src/scheduler-runtime.js';
@@ -427,5 +428,94 @@ describe('run cache lifecycle', () => {
     await fix.rt.graphCleanAll();
     expect(runConstraints.size).toBe(0);
     expect(graphLoadCache.size).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Run Mode — graph_start mode param
+// ---------------------------------------------------------------------------
+
+describe('run mode', () => {
+  let fix: Fixture;
+
+  afterEach(() => {
+    fix?.cleanup();
+  });
+
+  it('graph_start with mode auto persists run mode and dispatches runMode: auto', async () => {
+    fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
+    const { runId, node } = await fix.rt.graphStart('linear-agent', undefined, 'auto');
+
+    expect(node?.runMode).toBe('auto');
+    const snapshot = await fix.rt.graphStatus(runId);
+    expect(snapshot.runId).toBe(runId);
+
+    // runMode persists across advance — comes from the run row, not the start call
+    const next = await fix.rt.graphAdvance(runId, 'agent-a', 10);
+    expect(next.node?.runMode).toBe('auto');
+  });
+
+  it('graph_start without mode defaults to manual', async () => {
+    fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
+    const { node } = await fix.rt.graphStart('linear-agent');
+
+    expect(node?.runMode).toBe('manual');
+  });
+
+  it('rejects invalid mode at the MCP schema layer', () => {
+    // The runtime facade is typed — invalid mode is rejected by the server
+    // input schema (RunModeSchema enum), never reaching the persistence path.
+    expect(RunModeSchema.safeParse('auto').success).toBe(true);
+    expect(RunModeSchema.safeParse('invalid').success).toBe(false);
+    expect(RunModeSchema.safeParse(undefined).success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dispatch-time run-scope gate — cross-run node: channels stripped
+// ---------------------------------------------------------------------------
+
+describe('run-scope channel gate', () => {
+  let fix: Fixture;
+
+  afterEach(() => {
+    fix?.cleanup();
+  });
+
+  it('strips node: channel targets outside the run node set at dispatch', async () => {
+    // standalone graph referencing loop-entry (exists only in composed runs)
+    const standalone = JSON.stringify({
+      name: 'standalone',
+      version: 1,
+      phases: [
+        {
+          id: 'main-a',
+          type: 'main',
+          task: 'do a',
+          channels: ['node:loop-entry'],
+        },
+      ],
+    });
+    fix = await makeFixture({ standalone });
+    const { node } = await fix.rt.graphStart('standalone');
+
+    expect(node?.channels).toEqual([]);
+  });
+
+  it('keeps node: channel targets inside the run node set', async () => {
+    const g = JSON.stringify({
+      name: 'two-node',
+      version: 1,
+      phases: [
+        { id: 'writer', type: 'main', task: 'write' },
+        { id: 'reader', type: 'main', task: 'read', dependsOn: ['writer'], channels: ['node:writer'] },
+      ],
+    });
+    fix = await makeFixture({ 'two-node': g });
+    const start = await fix.rt.graphStart('two-node');
+    expect(start.node?.nodeId).toBe('writer');
+
+    const next = await fix.rt.graphAdvance(start.runId, 'writer', 10);
+    expect(next.node?.channels).toEqual(['node:writer']);
   });
 });

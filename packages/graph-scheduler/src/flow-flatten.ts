@@ -23,10 +23,7 @@ export const MAX_FLOW_DEPTH = 5;
  * Resolve `{args.key}` template expressions in a string against run invocation args.
  * Unmatched keys are kept as-is for debugging visibility.
  */
-export const resolveArgs = (
-  text: string | undefined,
-  args: Record<string, unknown> | undefined,
-): string | undefined => {
+export const resolveArgs = (text: string | undefined, args: Record<string, unknown> | null): string | undefined => {
   if (!text || !args) return text;
   return text.replace(/\{args\.(\w+)\}/g, (_, key: string) => {
     const val = args[key];

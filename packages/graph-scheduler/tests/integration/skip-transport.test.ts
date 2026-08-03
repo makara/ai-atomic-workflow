@@ -50,7 +50,45 @@ function makeFixture(): Fixture {
   };
   writeFileSync(join(taskflowDir, 'skip-test.taskflow.yaml'), JSON.stringify(graph, null, 2));
 
-  const registry = { graphs: [{ name: 'skip-test', path: 'skip-test.taskflow.yaml' }] };
+  // flow-shape chain — every child carries the same flow-propagated guard text
+  const flowGraph = {
+    name: 'flow-skip-test',
+    version: 1,
+    phases: [
+      {
+        id: 'entry',
+        type: 'main',
+        skill: 'scenario-agent-skill',
+        task: 'flow-entry',
+        when: 'run only when upstream approves',
+        dependsOn: [],
+      },
+      {
+        id: 'mid',
+        type: 'main',
+        skill: 'scenario-agent-skill',
+        task: 'flow-mid',
+        when: 'run only when upstream approves',
+        dependsOn: ['entry'],
+      },
+      {
+        id: 'tail',
+        type: 'main',
+        skill: 'scenario-agent-skill',
+        task: 'flow-tail',
+        when: 'run only when upstream approves',
+        dependsOn: ['mid'],
+      },
+    ],
+  };
+  writeFileSync(join(taskflowDir, 'flow-skip-test.taskflow.yaml'), JSON.stringify(flowGraph, null, 2));
+
+  const registry = {
+    graphs: [
+      { name: 'skip-test', path: 'skip-test.taskflow.yaml' },
+      { name: 'flow-skip-test', path: 'flow-skip-test.taskflow.yaml' },
+    ],
+  };
   const registryPath = join(taskflowDir, 'registry.json');
   writeFileSync(registryPath, JSON.stringify(registry, null, 2));
 
@@ -147,6 +185,26 @@ describe('skip transport seam', () => {
     expect(r2.snapshot.fsmState).toBe('completed');
     expect(nodeStatus(r2.snapshot, 'all-c')).toBe('skipped');
     expect(r2.node).toBeNull();
+
+    await rt.dispose();
+  });
+
+  it('same-source when guard cascades the whole all-join chain in one advance', async () => {
+    const rt = await createTestRuntime(fix);
+    const { runId, node: n1 } = await rt.graphStart('flow-skip-test');
+    expect(n1!.nodeId).toBe('entry');
+
+    // Flow guard evaluates false on the entry → advance with skip:true
+    const r = await rt.graphAdvance(runId, 'entry', 0, true);
+
+    // entry: skipped by agent judgment
+    expect(nodeStatus(r.snapshot, 'entry')).toBe('skipped');
+    // mid + tail: identical when text → cascade-skipped in the same event — no dispatch
+    expect(nodeStatus(r.snapshot, 'mid')).toBe('skipped');
+    expect(nodeStatus(r.snapshot, 'tail')).toBe('skipped');
+    // whole flow terminal → run completed, no next node
+    expect(r.snapshot.fsmState).toBe('completed');
+    expect(r.node).toBeNull();
 
     await rt.dispose();
   });

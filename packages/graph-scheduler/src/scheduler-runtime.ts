@@ -64,7 +64,7 @@ import { cleanAll, cleanCompleted, graphInit, type IGraphInitReport, type IGraph
 import { graphList, graphStatus } from './api/query.js';
 import type { IGraphSnapshot } from './api/snapshot.js';
 
-import type { ConfigError } from './types.js';
+import type { ConfigError, RunMode } from './types.js';
 
 /** Run summary — returned by graphList. */
 export interface RunSummary {
@@ -80,12 +80,13 @@ export interface SchedulerRuntime {
   readonly graphStart: (
     graphName: string,
     args?: Record<string, unknown>,
+    mode?: RunMode,
   ) => Promise<{
     readonly runId: string;
     readonly node: NodeDetail | null;
     /** contract warnings captured at load — empty when clean (optional) */
     readonly contractWarnings?: string[];
-    /** run snapshot — entry dispatch carries it (Run Mode consumption) */
+    /** run snapshot — entry dispatch carries it (jump nav + progress display) */
     readonly snapshot: IGraphSnapshot;
   }>;
 
@@ -350,7 +351,8 @@ export function createRuntime(config?: Partial<SchedulerConfig>): Effect.Effect<
 
     // Build the Promise-wrapped facade
     const schedulerRuntime: SchedulerRuntime = {
-      graphStart: (graphName: string, args?: Record<string, unknown>) => run(graphStart(graphName, args)),
+      graphStart: (graphName: string, args?: Record<string, unknown>, mode: RunMode = 'manual') =>
+        run(graphStart(graphName, args, mode)),
 
       graphAdvance: (runId: string, nodeId: string, durationMs: number, skip?: boolean) =>
         run(graphAdvance(runId, nodeId, durationMs, skip)),
