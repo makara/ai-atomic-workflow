@@ -1,8 +1,8 @@
 name: skill-author
 phases:
-  # Mode detection: create vs edit
+  # Mode detection: create vs edit (case-5 self-judgment — mode-gate deleted)
   # create path: scope-confirm → skill-write → skill-review → skill-accept → output-examples
-  # edit path: skill-select → edit-scope-confirm → skill-edit-write → skill-review → skill-accept → output-examples
+  # edit path: scope-confirm → skill-select → edit-scope-confirm → skill-edit-write → skill-review → skill-accept → output-examples
 
   # --- Shared entry: scope confirmation ---
   - id: scope-confirm
@@ -12,23 +12,28 @@ phases:
     channels:
       - ./CONTEXT.md
     task: |
-      Execute scope interview per skill://atom-scope-interview.
+      Execute scope interview per atom-scope-interview.
       Flow context: prefer upstream plan-parse skill_create_name (injected when orchestrated); else interview (skill Step 1).
 
-      Topics: skill name and purpose; scope (what problem it solves); input/output contract (files/types needed and produced); dependencies (skills loaded via skill://); save location.
+      Topics: skill name and purpose; scope (what problem it solves); input/output contract (files/types needed and produced); dependencies (skills loaded via skill); save location.
 
       Output: confirmed scope (name, purpose, inputs, outputs), full skill plan (sections, references, context requirements, trigger phrases), scope_complete: true, save_location.
 
-  # --- Create path: write new skill ---
+  # --- Create path: write new skill (case-5: edit mode → no work) ---
   - id: skill-write
     type: main
     dependsOn: [scope-confirm]
     skill: atom-skill-writer
-    when: 'scope-confirm output shows save_location and no skill_path — create mode'
     task: |
-      Write skill per confirmed plan using atom-kernel interview() solve mode for content confirmation.
+      Case-5 self-judgment: if scope-confirm output does not show save_location
+      AND no skill_path (edit mode — a skill_path is present), this node has NO
+      WORK — output empty (no SKILL.md written) and finish; this is normal
+      execution, not a skip.
 
-            Read scope-confirm output (injected).
+      Otherwise write skill per confirmed plan using atom-kernel interview() solve mode for content confirmation.
+
+      Read scope-confirm output (injected).
+
       Execute interview({ goal: "write SKILL.md for confirmed scope", research: true, context }) in solve mode:
 
       confirm(goal): Confirm writing scope with user — verify plan still accurate.
@@ -43,13 +48,16 @@ phases:
     channels:
       - skill:atom-skill-spec
 
-  # --- Edit path: select existing skill ---
+  # --- Edit path: select existing skill (case-5: create mode → no work) ---
   - id: skill-select
     type: main
     dependsOn: [scope-confirm]
-    when: 'scope-confirm output shows skill_path — edit mode'
     task: |
-      Conduct consensus interview per atom-kernel §interview() to confirm edit target.
+      Case-5 self-judgment: if scope-confirm output does not show skill_path
+      (create mode — no existing skill to edit), this node has NO WORK — output
+      empty (no skill_path) and finish; this is normal execution, not a skip.
+
+      Otherwise conduct consensus interview per atom-kernel §interview() to confirm edit target.
 
       1. Accept skill path or name from user input.
       2. Load existing SKILL.md — read frontmatter + body structure.
@@ -61,18 +69,22 @@ phases:
         - current_frontmatter: <summary>
         - current_sections: [list]
 
-  # --- Edit path: confirm edit scope ---
+  # --- Edit path: confirm edit scope (case-5: create mode → no work) ---
   - id: edit-scope-confirm
     type: main
     dependsOn: [skill-select]
     task: |
-      Interview to confirm edit scope per skill://atom-scope-interview. If plan incomplete, continue interview() solve mode until scope_complete: true.
+      Case-5 self-judgment: if skill-select output shows no skill_path (create
+      mode — no edit target), this node has NO WORK — output empty and finish;
+      this is normal execution, not a skip.
+
+      Otherwise interview to confirm edit scope per atom-scope-interview. If plan incomplete, continue interview() solve mode until scope_complete: true.
 
       Read skill-select output (injected via dependsOn implicit context).
       Interview per atom-kernel §interview() — one-at-a-time, recommendation-first:
       - What to change: description, trigger phrases, body sections, remove sections?
       - Scope of each change: full rewrite or incremental?
-      - Any new skill:// dependencies to add or remove?
+      - Any new skill dependencies to add or remove?
       Assess plan completeness:
       - Plan "complete" if all changes specified with clear diff plan
       - If scope_complete: false → continue interview() solve mode: research atom-skill-spec rules → think diff plan → interview → repeat until scope_complete: true
@@ -80,18 +92,23 @@ phases:
         - scope_complete: true
         - changes: [list of change descriptions]
         - diff_plan: [detailed section-by-section diff]
-        - dependencies: [skill:// refs to add/remove]
+        - dependencies: [skill refs to add/remove]
         - trigger_phrases: [updates]
 
-  # --- Edit path: apply edits ---
+  # --- Edit path: apply edits (case-5: create mode → no work) ---
   - id: skill-edit-write
     type: main
     dependsOn: [edit-scope-confirm]
     skill: atom-skill-writer
     task: |
-      Modify SKILL.md per confirmed diff plan using atom-kernel interview() solve mode for content confirmation.
+      Case-5 self-judgment: if skill-select output shows no skill_path (create
+      mode — nothing to edit), this node has NO WORK — output empty (no diff)
+      and finish; this is normal execution, not a skip.
 
-            Read skill-select output, edit-scope-confirm output (both injected).
+      Otherwise modify SKILL.md per confirmed diff plan using atom-kernel interview() solve mode for content confirmation.
+
+      Read skill-select output, edit-scope-confirm output (both injected).
+
       Execute interview({ goal: "apply edits to SKILL.md as planned", research: true, context }) in solve mode:
 
       confirm(goal): Confirm edit scope with user — verify plan still accurate.
@@ -108,16 +125,18 @@ phases:
       - skill:atom-skill-spec
 
   # --- Shared: review (create or edit output) ---
+  # Default join (all) — both writers run unconditionally now (case-5); review
+  # waits for BOTH to complete (the no-work writer finishes with an empty
+  # output). No explicit join: all — join accepts only 'any'; the default is all.
   - id: skill-review
     type: main
     dependsOn: [skill-write, skill-edit-write]
-    join: any
     skill: code-review
     agent: [reviewer, task]
     task: |
       Review SKILL.md per code-review (use ## Agent hints for axis sub-agents).
 
-      Artifact: SKILL.md path from skill-write or skill-edit-write output (injected).
+      Artifact: SKILL.md path from skill-write or skill-edit-write output (injected) — exactly one writer produces the artifact (create → skill-write, edit → skill-edit-write; the other is a case-5 no-work node with an empty output).
       Standards: atom-skill-spec (injected) — structural rules (frontmatter + body + language + reference).
       Spec: scope-confirm output (injected) — skill matches confirmed scope. Edit mode: additionally read the edit-scope-confirm upstream output (present only in edit mode) — check frontmatter consistency, section structure integrity, no orphan references.
 
@@ -128,29 +147,20 @@ phases:
 
   # --- Shared: approval gate ---
   # Dual-writer graph (create skill-write / edit skill-edit-write, mutually
-  # exclusive via when guards) — no single rework point: eval omitted, FAIL
-  # falls through to human gate with per-mode retry targets
-  # (atom-graph-spec §Auto-Rework (gate) Rules — single-writer scope).
+  # exclusive by mode) — no single rework point: no auto-rework, the human
+  # card decides; per-mode retry targets are AI-generated dynamic options
+  # (single-writer auto-rework scope rule).
   - id: skill-accept
     type: approval
     dependsOn: [skill-review]
-    routing:
-      actions:
-        - action: continue
-          label: 'Accept skill'
-          description: 'Skill ready — proceed'
-        - action: retry
-          target: skill-write
-          label: 'Revise new skill'
-          description: 'Created skill needs changes — re-run skill-write with review feedback'
-        - action: retry
-          target: skill-edit-write
-          label: 'Revise edited skill'
-          description: 'Edited skill needs changes — re-run skill-edit-write with review feedback'
-        - action: jump
-          target: scope-confirm
-          label: 'Revise plan'
-          description: 'Fundamental plan issues — revise requirements'
+    task: |
+      Accept the skill?
+
+      Skill written/edited per confirmed scope and reviewed (code-review
+      output). Recommendation follows the review verdict (overall: pass |
+      fail); free input overrides. Dynamic options include revise (re-run the
+      active writer — skill-write for create mode, skill-edit-write for edit
+      mode) and revise plan (jump back to scope-confirm).
 
   # --- Shared: output ---
   - id: output-examples

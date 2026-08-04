@@ -7,7 +7,7 @@ version: 1.2.0
 last_updated: '2026-08-03'
 ---
 
-> **Runtime constraints** — load `skill://atom-kernel` for interview() and question() behavior contracts.
+> **Runtime constraints** — load `atom-kernel` for interview() and question() behavior contracts.
 
 ## Entry
 

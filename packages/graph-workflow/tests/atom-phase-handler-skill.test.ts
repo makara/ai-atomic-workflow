@@ -90,35 +90,37 @@ describe('atom-phase-handler SKILL.md — project constraints + gate branch cont
     expect(format).toMatch(/result table \+ approval pre-call/);
   });
 
-  // ── Gate branch contract ──────────────────────────────────
-  // Content pins for the gate dispatch branch (authority-split followup): the
-  // contract is documentation-only for the agent side — completion() behavior
-  // is not unit-testable; these assertions keep the written contract honest.
+  // ── Gate jump contract ──────────────────────────────────
+  // Content pins for the gate dispatch branch (route-first): the contract is
+  // documentation-only for the agent side — completion() behavior is not
+  // unit-testable; these assertions keep the written contract honest.
 
-  it('defines the gate branch with array-order short-circuit eval', () => {
+  it('defines the gate jump with declaration-order evaluation and pass-through', () => {
     const gateSection = skill.slice(skill.indexOf('node.type = "gate"'));
-    expect(gateSection).toMatch(/array order, short-circuit/);
+    expect(gateSection).toMatch(/For each jump \(declaration order\)/);
+    expect(gateSection).toMatch(/first "true" selects the jump — stop evaluating/);
+    expect(gateSection).toMatch(/no hit → pass through/);
   });
 
-  it('persists gate decisions without a label (machine path)', () => {
+  it('documents the backward jump decision (target + label, mechanical reset)', () => {
     const gateSection = skill.slice(skill.indexOf('node.type = "gate"'));
-    expect(gateSection).toMatch(/label absent/);
+    expect(gateSection).toMatch(/IApprovalDecision \{ action: "jump", target: <jump\.to>, label: <jump\.when> \}/);
+    expect(skill).toMatch(/resets target \+ downstream terminal nodes/);
   });
 
-  it('defines the no-match marker with conservative degradation', () => {
+  it('defines the no-hit fallback as pass through (no default edge exists)', () => {
     const gateSection = skill.slice(skill.indexOf('node.type = "gate"'));
-    expect(gateSection).toContain('<no-match>');
-    expect(gateSection).toMatch(/conservative/);
+    expect(gateSection).toMatch(/action: "continue" \} \(no target — pass through/);
+    expect(gateSection).not.toMatch(/node\.default/);
   });
 
-  it('fails loud on empty/absent eval (gate without conditions is a pass-through)', () => {
-    const gateSection = skill.slice(skill.indexOf('node.type = "gate"'));
-    expect(gateSection).toMatch(/Eval empty\/absent → `status: "failed"`/);
+  it('fails loud on empty/absent jumps (gate without jumps is a pass-through)', () => {
+    expect(skill).toMatch(/gate without rework jumps is a silent pass-through/);
   });
 
-  it('documents completion-failure degradation as no-match fall-through', () => {
+  it('documents judgment failure as conservative pass-through', () => {
     const gateSection = skill.slice(skill.indexOf('node.type = "gate"'));
-    expect(gateSection).toMatch(/completion fails/);
+    expect(gateSection).toMatch(/never fabricate a jump/);
   });
 
   // ── Language / reference hygiene ──────────────────────────

@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { migrate } from '../../src/lib/db/migration.js';
 import { buildService, type GraphRepository } from '../../src/lib/db/repository.js';
-import { SCHEMA_VERSION } from '../../src/lib/db/schema.js';
+import { SCHEMA_VERSION, VERSIONED_DDL } from '../../src/lib/db/schema.js';
 import type { NotFoundError } from '../../src/types.js';
 
 // ---------------------------------------------------------------------------
@@ -99,13 +99,9 @@ describe('node state operations', () => {
     repo = makeRepo();
   });
 
-  const NODES = [
-    { nodeId: 'n1', type: 'main', topoOrder: 0 },
-    { nodeId: 'n2', type: 'main', topoOrder: 1 },
-    { nodeId: 'n3', type: 'main', topoOrder: 2 },
-  ] as const;
+  const NODES = [{ nodeId: 'n1' }, { nodeId: 'n2' }, { nodeId: 'n3' }] as const;
 
-  it('createNodeStates → getNodeStates returns all nodes in topo order', async () => {
+  it('createNodeStates → getNodeStates returns all nodes in insertion order', async () => {
     await Effect.runPromise(repo.createRun('r1', 'test-graph'));
     await Effect.runPromise(repo.createNodeStates('r1', NODES));
 
@@ -272,6 +268,7 @@ describe('schema migration v1-era → current', () => {
         PRIMARY KEY (run_id, node_id),
         FOREIGN KEY (run_id) REFERENCES graph_runs(run_id)
       );
+      CREATE INDEX idx_node_states_topo ON node_states(run_id, topo_order);
       CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
       INSERT INTO schema_version (version, applied_at) VALUES (1, '2026-08-01T00:00:00.000Z');
       INSERT INTO graph_runs (run_id, graph_name, fsm_state, args, created_at, updated_at)
@@ -290,6 +287,28 @@ describe('schema migration v1-era → current', () => {
       { mode: string } | undefined;
     expect(row?.mode).toBe('manual');
 
+    // Pre-existing row preserved, routes defaults to '{}'.
+    const rowRoutes = db.prepare('SELECT routes FROM graph_runs WHERE run_id = ?').get('old-run') as
+      { routes: string } | undefined;
+    expect(rowRoutes?.routes).toBe('{}');
+
+    // Pre-existing row preserved, constraints defaults to '[]'.
+    const rowConstraints = db.prepare('SELECT constraints FROM graph_runs WHERE run_id = ?').get('old-run') as
+      { constraints: string } | undefined;
+    expect(rowConstraints?.constraints).toBe('[]');
+
+    // v2 cleanup applied — topo_order / idx / applied_at dropped.
+    const nodeCols = (db.prepare('PRAGMA table_info(node_states)').all() as Array<{ name: string }>).map((c) => c.name);
+    expect(nodeCols).not.toContain('topo_order');
+    const versionCols = (db.prepare('PRAGMA table_info(schema_version)').all() as Array<{ name: string }>).map(
+      (c) => c.name,
+    );
+    expect(versionCols).not.toContain('applied_at');
+    const indexes = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_node_states_topo'")
+      .all() as Array<{ name: string }>;
+    expect(indexes).toHaveLength(0);
+
     // New run with explicit mode persists.
     const repo = buildService(db);
     Effect.runSync(repo.createRun('new-run', 'g', undefined, 'auto'));
@@ -299,5 +318,18 @@ describe('schema migration v1-era → current', () => {
     // Idempotent — second migrate is a no-op.
     Effect.runSync(migrate(db));
     expect(Effect.runSync(repo.getRun('old-run')).mode).toBe('manual');
+  });
+
+  it('V2_DDL covers every v1-created obsolete field — ghost-DDL tripwire', () => {
+    // The ladder contract: v2 delivers the final shape by dropping the three
+    // v1-created obsolete artifacts and adding the run-context columns. A
+    // statement-set edit after the version is recorded without a version bump
+    // (ghost DDL) leaves DBs behind — this test pins the coverage so the next
+    // drift is a test failure, not a silent residue.
+    const v2 = VERSIONED_DDL[1];
+    expect(v2.some((s) => s.includes('DROP INDEX IF EXISTS idx_node_states_topo'))).toBe(true);
+    expect(v2.some((s) => s.includes('ALTER TABLE node_states DROP COLUMN topo_order'))).toBe(true);
+    expect(v2.some((s) => s.includes('ALTER TABLE schema_version DROP COLUMN applied_at'))).toBe(true);
+    expect(v2.some((s) => s.includes('ALTER TABLE graph_runs ADD COLUMN constraints'))).toBe(true);
   });
 });

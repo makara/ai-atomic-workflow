@@ -8,13 +8,9 @@ phases:
   - id: approval-review
     type: approval
     dependsOn: [agent-echo]
-    task: 'Approval Review'
-    routing:
-      actions:
-        - action: continue
-          label: 'Accept output'
-          description: 'Output OK — proceed'
-        - action: retry
-          target: agent-echo
-          label: 'Regenerate output'
-          description: 'Output needs changes — re-run agent-echo with feedback'
+    task: |
+      Approval Review
+
+      Agent output produced. Accept → proceed. Recommendation: accept when the
+      output is correct; free input overrides; dynamic option regenerate
+      re-runs agent-echo with feedback.

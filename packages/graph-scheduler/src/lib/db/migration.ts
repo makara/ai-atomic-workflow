@@ -2,8 +2,9 @@
  * Database initialization — versioned migration ladder.
  *
  * Tracks applied version in a `schema_version` meta-table.
- * v1: full schema (graph_runs + node_states + topo index).
- * v2: graph_runs.mode column (Run Mode as run field).
+ * v1: original full schema (graph_runs + node_states + topo index).
+ * v2: final shape — mode + routes columns, unused-field cleanup (topo_order /
+ * topo index / applied_at dropped).
  * Fresh databases apply the ladder in one pass; existing databases upgrade
  * only the missing versions (idempotent).
  *
@@ -22,7 +23,7 @@ function ensureVersionTable(db: ReturnType<typeof Database>): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_version (
       version INTEGER PRIMARY KEY,
-      applied_at TEXT NOT NULL
+      applied_at TEXT
     )
   `);
 }
@@ -70,10 +71,7 @@ export function migrate(db: ReturnType<typeof Database>): Effect.Effect<void, Pe
           for (const statement of ddl) {
             db.exec(statement);
           }
-          db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(
-            v + 1,
-            new Date().toISOString(),
-          );
+          db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(v + 1);
         })();
       });
       debugLog('runtime', { event: 'migration_applied', from: version, to: v + 1 });

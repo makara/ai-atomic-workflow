@@ -1,7 +1,7 @@
 /**
  * PhaseHandler types — PhaseHandler interface, BaseNodeDetail, NodeDetail DTO, error types.
  *
- * Static type dispatch — main/approval handlers resolved by type at
+ * Static type dispatch — main/approval/gate handlers resolved by type at
  * dispatch (no registry service). FSM/topology/DB layers
  * never reference concrete handlers — only this interface.
  *
@@ -14,10 +14,10 @@ import type { RunMode } from '../types.js';
 /**
  * Phase handler — implemented once per supported phase type.
  *
- * Resolved statically by type (main/approval) at dispatch — no registry.
+ * Resolved statically by type (main/approval/gate) at dispatch — no registry.
  */
 export interface IPhaseHandler {
-  /** Phase type string — "main" or "approval" */
+  /** Phase type string — "main", "approval" or "gate" */
   readonly phaseType: string;
 
   /**
@@ -31,7 +31,8 @@ export interface IPhaseHandler {
   /**
    * Extend the base NodeDetail with type-specific fields.
    * Base fields (nodeId, type, handlerSkill, skill, retryAttempt) set by core.
-   * Handler adds type-specific fields (task, topic, routingActions, preText, channels, eval, etc.).
+   * Handler adds type-specific fields (task, topic, routingActions,
+   * channels, jumps, route, etc.).
    */
   extendNodeDetail(base: IBaseNodeDetail, phase: Phase, nodeState: IFsmNodeState): Partial<INodeDetail>;
 }
@@ -46,9 +47,7 @@ export interface IBaseNodeDetail {
   readonly handlerSkill: string;
   /** execution skill — phase.skill, the skill that executes this phase's work (main type; optional) */
   readonly skill?: string;
-  /** when guard — natural-language skip condition */
-  readonly when?: string;
-  /** project constraints — loaded from .graph-scheduler/constraints.md, same level as when */
+  /** project constraints — run-record snapshot (frozen at graph_start, stable for run lifetime) */
   readonly constraints: readonly string[];
   /** Run Mode — run-level auto-approve mode, auto-supplied from the run record (never declarable in YAML) */
   readonly runMode: RunMode;
@@ -79,50 +78,51 @@ export interface INodeDetail {
   readonly topic?: string;
   /** Approval phase — decision routing actions (replaces deprecated routes) */
   readonly routingActions?: ReadonlyArray<IApprovalAction>;
-  /** Main phase — channel patterns (skill names, file globs, node:<id>) resolved against the execution skill contract before inline context assembly */
+  /** All types — channel patterns (main: skill names/file globs/node:<id> against the skill contract; gate/approval: node:<id> judgment context only) */
   readonly channels?: string[];
-  /** Approval phase — decision-card pre-call text (never channel-resolved) */
-  readonly preText?: string;
-  /** when guard — natural-language skip condition */
-  readonly when?: string;
-  /** project constraints — from .graph-scheduler/constraints.md, all phase types carry */
+  /** project constraints — run-record snapshot (frozen at graph_start), all phase types carry */
   readonly constraints: readonly string[];
   /** Run Mode — run-level auto-approve mode, auto-supplied from the run record */
   readonly runMode: RunMode;
-  /** Gate phase — eval conditions for machine auto-decision (no continue — auto-approval is a non-bypassable-gate violation) */
-  readonly eval?: ReadonlyArray<IEvalCondition>;
+  /** Gate phase — rework jumps (route-first): agent evaluates when against judgment context; hit → backward jump target */
+  readonly jumps?: ReadonlyArray<IJumpCondition>;
+  /** Route membership — all phase types (optional; absent = implicit default route) */
+  readonly route?: string;
   readonly retryAttempt: number;
 }
 
 /**
- * Eval condition — auto-decision rule evaluated by agent on gate nodes.
+ * Gate jump condition — rework rule evaluated by the agent.
  *
- * When natural-language `when` condition matches upstream review output,
- * handler auto-produces IApprovalDecision with configured action.
- * Conditions evaluated in array order — first match short-circuits.
+ * Natural-language `when` condition read against the judgment context
+ * (direct dependsOn outputs + node: channels) + snapshot + run mode; a match
+ * reports a backward jump to the explicit `to` target
+ * (target + downstream terminal nodes reset, upstream kept). Conditions
+ * evaluated in array order — first match wins; no match = pass through.
+ * Targets SHALL be upstream terminal nodes (validator-enforced).
  */
-export interface IEvalCondition {
-  /** Natural-language condition — evaluated by agent via completion(smol) */
+export interface IJumpCondition {
+  /** Natural-language condition — evaluated by agent (judgment stays agent-side) */
   readonly when: string;
-  /** Auto-routing action when condition matches — continue rejected (silent gate bypass is unexpressible) */
-  readonly action: 'retry' | 'jump';
-  /** Target node ID for retry or jump. Routing targets SHALL be explicit; absent retry target degrades to continue. */
-  readonly target?: string;
-  /** Auto-decision note — injected as IApprovalDecision.note */
-  readonly note?: string;
+  /** Explicit backward jump target node ID */
+  readonly to: string;
 }
 
 /**
- * Approval routing action — discriminated union.
+ * Approval routing action — decision option.
  *
- * Replaces the shallow IRoute interface. `action` carries routing semantics
- * explicitly so handler never needs to guess intent from label text.
+ * Branch-route scenario only: declared actions carry `target` (route or node
+ * id — activating a route, or a retry/jump re-run target) and `value` (stable
+ * machine identifier for the persisted decision). The default approval card
+ * is Accept + free input + AI-generated options — no declared actions needed.
  */
 export interface IApprovalAction {
-  /** Routing semantics: continue → advance, retry → re-execute target, jump → go to target node */
-  readonly action: 'continue' | 'retry' | 'jump';
-  /** Target node ID for retry or jump. Routing targets SHALL be explicit; absent retry target degrades to continue (pilot fallback). */
+  /** Routing semantics: continue → advance, end → complete the run, retry → re-execute target, jump → go to target node */
+  readonly action: 'continue' | 'retry' | 'jump' | 'end';
+  /** Branch-route option target (continue, route or node id) or re-run target (retry/jump, node id) */
   readonly target?: string;
+  /** Stable machine identifier — carried in the decision output */
+  readonly value?: string;
   /** Display label used in question() options[].label */
   readonly label: string;
   /** Display description used in question() options[].description */
@@ -136,13 +136,15 @@ export interface IApprovalAction {
  */
 export interface IApprovalDecision {
   /** Chosen routing action */
-  readonly action: 'continue' | 'retry' | 'jump';
-  /** Target node ID for retry or jump. Routing targets SHALL be explicit; absent retry target degrades to continue. */
+  readonly action: 'continue' | 'retry' | 'jump' | 'end';
+  /** Branch-route target (continue) or re-run target (retry/jump) */
   readonly target?: string;
   /** Free-text input from question() custom:true text box — semantics vary by action */
   readonly note?: string;
   /** Chosen routing option label — distinguishes same-action options (e.g. two continues) */
   readonly label?: string;
+  /** Chosen routing option value — stable machine identifier */
+  readonly value?: string;
 }
 
 /** Minimal FSM node state passed to handler.extendNodeDetail(). */

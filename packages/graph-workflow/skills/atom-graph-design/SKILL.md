@@ -6,7 +6,7 @@ version: 1.2.0
 last_updated: '2026-08-03'
 ---
 
-> **Runtime constraints** — load `skill://atom-kernel` for interview() behavior contract (solve mode). Graph dispatch: atom-graph-spec arrives via `skill:` channel (handler-injected); standalone use loads it directly. Load `skill://atom-phase-handler` for phase type knowledge.
+> **Runtime constraints** — load `atom-kernel` for interview() behavior contract (solve mode). Graph dispatch: atom-graph-spec arrives via `skill:` channel (handler-injected); standalone use loads it directly. Load `atom-phase-handler` for phase type knowledge.
 
 # Atom-Graph-Design
 
@@ -49,11 +49,11 @@ Never skip — goal consensus required before design.
 
 #### research
 
-Load `skill://atom-graph-spec`. Look up:
+Load `atom-graph-spec`. Look up:
 
-- PhaseSchema fields — id, type, dependsOn, when, join, task, channels, preText
+- PhaseSchema fields — id, type, dependsOn, route, agent, skill, task, channels, routing, jumps, join
 - Topology constraints — acyclic, minimal deps, single entry
-- When guard rules — deterministic, observable facts
+- Gate jump rules — bounded conditions, observable facts, judgment context (direct dependsOn + node: channels)
 - Flow phase constraints — use required (def removed), depth cap, name collision
 - Approval routing patterns — continue/retry/jump
 
@@ -65,23 +65,25 @@ Design complete phase topology:
 
 1. **Root phases** — `dependsOn: []`, start of workflow (scope confirm, input gather)
 2. **Work phases** — dependsOn upstream, main body (design, write, review)
-3. **Gate phases** — approval type with routing.actions (continue/retry/jump)
-4. **Output phases** — final step, dependsOn gate
+3. **Gate phases** — pure rework nodes (jumps: when/to backward pairs, bounded by target retryCount)
+4. **Approval phases** — decision confirmation (card: task text + Accept + free input; branch-route routing only for track selection)
 
 For each phase:
 
 - `id`: kebab-case, unique, descriptive
-- `type`: main / approval / flow per semantics
-- `dependsOn`: list upstream phase ids — DAG, no cycles
-- `when`: (optional) skip condition referencing upstream output
-- `join`: (optional) `"any"` for any-dependency gates
-- `task`: sketch — full text filled by graph author
+- `type`: main / approval / gate / flow per semantics
+- `dependsOn`: list upstream phase ids — DAG, no cycles; leaf deps only (judgment context rides channels, never transitive dependsOn)
+- `join`: (optional) `any` — branch-route convergence only (direct upstreams span ≥2 routes); absent = all; `all` is never written
+- `task`: sketch — full text filled by graph author; approval task = card prompt (first line = header)
+- `channels`: main — from entry skill Context Requirements contract; gate/approval — node: entries for cross-level judgment context
+- gate `jumps`: when/to pairs — conditions reference direct dependsOn ∪ channels node: outputs, bounded (`<target> retryCount < N`)
 
 Validate per atom-graph-spec §Topology Constraints:
 
 - No cycles in dependsOn edges
 - Every phase reachable from root
-- When guards reference upstream outputs
+- Gate jump conditions reference declared judgment context and carry retryCount bounds
+- Gate jump targets are writer nodes (not reviewers), upstream of the gate
 - Flow phases declare use (required — def removed)
 
 #### interview(details)
@@ -92,9 +94,9 @@ Confirm:
 
 - Graph name — matches scope
 - Phase count and types — complete, no missing steps
-- dependsOn edges — correct DAG
-- When guards — deterministic
-- Approval routing — correct actions
+- dependsOn edges — correct DAG, leaf deps only
+- Gate jumps — bounded conditions, writer targets
+- Approval routing — branch-route actions only where tracks exist
 
 User rejects any decision → return to think. Revise. Re-interview affected decisions only.
 
@@ -109,14 +111,14 @@ phases:
   - id: <id>
     type: <type>
     dependsOn: [<ids>]
-    when: <condition or null>
-    join: <all | any>
+    join: <any | absent>
     task_summary: <one-line>
-    channels: [<channel entries — derived from entry skill Context Requirements contract>]
+    channels: [<channel entries — contract-derived for main; node: for gate/approval>]
+    jumps: <gate only — when/to pairs, retryCount-bounded>
 validation:
   cycles: passed | failed
   reachability: passed | failed
-  when_deterministic: passed | failed
+  jump_bounds: passed | failed
 ```
 
 Return `solution` per interview() solve mode contract.

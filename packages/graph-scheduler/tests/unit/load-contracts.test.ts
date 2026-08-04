@@ -44,14 +44,20 @@ describe('load-time contract validation', () => {
   });
 
   it('rejects graph_start with GraphDefinitionError on a contract breach — no run created', async () => {
-    // approval with two dependsOn — violates single review-convergence rule
+    // gate jump targets a downstream (non-upstream) phase — forward routing
+    // is an approval branch-route decision, so this is a contract breach
     const bad = {
-      name: 'bad-approval',
+      name: 'bad-gate-jump',
       version: 1,
       phases: [
-        { id: 'writer-a', type: 'main', skill: 'scenario-agent-skill', task: 'a', dependsOn: [] },
-        { id: 'writer-b', type: 'main', skill: 'scenario-agent-skill', task: 'b', dependsOn: [] },
-        { id: 'gate', type: 'approval', dependsOn: ['writer-a', 'writer-b'] },
+        { id: 'writer', type: 'main', skill: 'scenario-agent-skill', task: 'a', dependsOn: [] },
+        {
+          id: 'gate',
+          type: 'gate',
+          dependsOn: ['writer'],
+          jumps: [{ when: 'writer output shows overall: fail', to: 'accept' }],
+        },
+        { id: 'accept', type: 'approval', dependsOn: ['gate'] },
       ],
     };
     writeGraph(fixture, 'bad-approval', bad);
@@ -78,12 +84,14 @@ describe('load-time contract validation', () => {
       const raw = (res.left as { error?: unknown }).error ?? res.left;
       const err = raw as { _tag?: string; message?: string; violations?: string[] };
       expect(err._tag).toBe('GraphDefinitionError');
-      expect(err.violations?.some((v: string) => v.includes('approval dependsOn must contain exactly'))).toBe(true);
+      expect(
+        err.violations?.some((v: string) => v.includes("gate jump targets 'accept' which is NOT upstream of the gate")),
+      ).toBe(true);
     }
   });
 
   it('loads a graph with only warnings — non-blocking', async () => {
-    // eval retry without retryAttempt bound → warning, load succeeds
+    // unbounded jump (no retryCount bound) → warning, load succeeds
     const warny = {
       name: 'warny',
       version: 1,
@@ -94,8 +102,9 @@ describe('load-time contract validation', () => {
           id: 'gate',
           type: 'gate',
           dependsOn: ['review'],
-          eval: [{ when: 'output shows fail', action: 'retry', target: 'writer' }],
+          jumps: [{ when: 'review output shows overall: fail', to: 'writer' }],
         },
+        { id: 'accept', type: 'approval', dependsOn: ['gate'] },
       ],
     };
     writeGraph(fixture, 'warny', warny);
@@ -118,7 +127,7 @@ describe('load-time contract validation', () => {
     expect(res._tag).toBe('Right');
     if (res._tag === 'Right') {
       expect(res.right.node?.nodeId).toBe('writer');
-      // warning graph carries the summary — unbounded eval surfaced at start
+      // warning graph carries the summary — unbounded retry branch surfaced at start
       expect(res.right.contractWarnings?.some((w: string) => w.includes('unbounded'))).toBe(true);
     }
   });
@@ -133,8 +142,9 @@ describe('load-time contract validation', () => {
           id: 'gate',
           type: 'gate',
           dependsOn: ['writer'],
-          eval: [{ when: 'output shows fail AND retryAttempt < 2', action: 'retry', target: 'writer' }],
+          jumps: [{ when: 'writer output shows overall: fail AND writer retryCount < 2', to: 'writer' }],
         },
+        { id: 'accept', type: 'approval', dependsOn: ['gate'] },
       ],
     };
     writeGraph(fixture, 'clean-graph', clean);

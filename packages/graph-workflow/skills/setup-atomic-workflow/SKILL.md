@@ -5,7 +5,7 @@ version: 1.0.0
 last_updated: '2026-08-01'
 ---
 
-> **Runtime constraints** — load `skill://atom-kernel` for question() decision UI rules.
+> **Runtime constraints** — load `atom-kernel` for question() decision UI rules.
 
 # Setup-Atomic-Workflow
 

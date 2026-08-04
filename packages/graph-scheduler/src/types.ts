@@ -99,6 +99,8 @@ export interface NextNodeInput {
   readonly state: FsmState;
   readonly graph: TaskflowGraph;
   readonly mode: RunMode;
+  /** project constraints — run-record snapshot (same source as mode) */
+  readonly constraints: readonly string[];
   readonly args: Record<string, unknown> | null;
 }
 

@@ -6,7 +6,7 @@ phases:
     use: plan-generate
     dependsOn: []
 
-  # Stage 1b: Parse PRD — extract skill-specific metadata for downstream when-guards
+  # Stage 1b: Parse PRD — extract skill-specific metadata for writer self-judgment
   - id: plan-parse
     type: main
     dependsOn: [plan]
@@ -36,30 +36,52 @@ phases:
         - doc_update_files: [list of doc paths]
         - spec_needed: true/false
         - change_summary: <from plan output>
+
+  # Stage 1c: Writer flows — branch-gate deleted (route-first: no forward
+  # routing, no parallel branches). Each writer now runs unconditionally and
+  # self-judges on its own plan-parse flag (case 5: no work when the flag is
+  # absent — normal execution, not a skip).
   - id: skill-delete-foo
     type: flow
     use: skill-delete
     dependsOn: [plan-parse]
-    when: 'plan-parse output shows skill_delete_needed: true — skill deletion in plan'
+    task: |
+      Case-5 self-judgment: if plan-parse output does not show
+      skill_delete_needed: true, this flow has NO WORK — finish with an empty
+      declaration (echo skill_delete_needed: false) and no artifact; this is
+      normal execution, not a skip.
 
   - id: skill-author-foo
     type: flow
     use: skill-author
     dependsOn: [plan-parse]
-    when: 'plan-parse output shows skill_create_needed: true — skill authoring in plan'
+    task: |
+      Case-5 self-judgment: if plan-parse output does not show
+      skill_create_needed: true, this flow has NO WORK — finish with an empty
+      declaration (echo skill_create_needed: false) and no artifact; this is
+      normal execution, not a skip.
 
   - id: doc-update
     type: flow
     use: doc-update
     dependsOn: [plan-parse]
-    when: 'plan-parse output shows doc_update_needed: true — doc update in plan'
+    task: |
+      Case-5 self-judgment: if plan-parse output does not show
+      doc_update_needed: true, this flow has NO WORK — finish with an empty
+      declaration (echo doc_update_needed: false) and no artifact; this is
+      normal execution, not a skip.
 
   - id: openspec-create-foo
     type: flow
     use: openspec-create
     dependsOn: [plan-parse]
-    when: 'plan-parse output shows spec_needed: true — capability/spec change in plan'
-  # Stage 2: Cross review — inter-artifact consistency audit
+    task: |
+      Case-5 self-judgment: if plan-parse output does not show spec_needed:
+      true, this flow has NO WORK — finish with an empty declaration (echo
+      spec_needed: false) and no artifact; this is normal execution, not a skip.
+
+  # Stage 2: Cross review — inter-artifact consistency audit (all four writers
+  # complete unconditionally; non-needed writers finish with empty outputs)
   - id: cross-review
     type: main
     skill: code-review
@@ -68,9 +90,9 @@ phases:
     task: |
       Cross-artifact consistency review per code-review (use ## Agent hints for axis sub-agents).
 
-      Artifact: PRD at prd_path + plan-parse output (injected); upstream artifacts auto-resolved from skill-author-foo, skill-delete-foo, doc-update, openspec-create-foo.
+      Artifact: PRD at prd_path + plan-parse output (injected); upstream artifacts auto-resolved from skill-author-foo, skill-delete-foo, doc-update, openspec-create-foo (a writer that self-judged no work produces no artifact — review only the artifacts that exist).
       Standards: per-artifact format — atom-skill-spec rules (skills), atom-graph-spec rules (graphs), Markdown structural checks (docs).
-      Spec: cross-artifact consistency — skill://<name> references resolve; graph use:/skill: fields match registered names; doc links present in artifact set; no name collisions; scope matches PRD User Stories and Out of Scope.
+      Spec: cross-artifact consistency — plain-name skill references resolve; graph use:/skill: fields match registered names; doc links present in artifact set; no name collisions; scope matches PRD User Stories and Out of Scope.
 
       Output structured YAML report — overall: pass | fail, per-violation findings, cross-artifact conflicts. Write audit report (main agent collects).
     channels:
@@ -78,34 +100,21 @@ phases:
       - skill:atom-skill-spec
       - skill:atom-graph-spec
 
-  # Stage 3: Approval — final quality gate
-  # Multi-writer graph (3 writer flows) — no single rework point: eval omitted,
-  # FAIL falls through to human gate with per-writer retry targets
-  # (atom-graph-spec §Auto-Rework (gate) Rules — single-writer scope).
+  # Stage 3: Approval — final quality gate (decision confirmation; per-writer
+  # retry targets are AI-generated dynamic options — multi-writer graph, no
+  # single rework point: no auto-rework).
   - id: change-accept
     type: approval
     dependsOn: [cross-review]
-    routing:
-      actions:
-        - action: continue
-          label: 'Accept change'
-          description: 'All changes are complete and reviewed — finalize'
-        - action: retry
-          target: skill-author-foo
-          label: 'Revise skill authoring'
-          description: 'New skill needs corrections — re-run skill-author with cross-review feedback'
-        - action: retry
-          target: skill-delete-foo
-          label: 'Revise skill deletion'
-          description: 'Skill deletion needs corrections — re-run skill-delete with cross-review feedback'
-        - action: retry
-          target: doc-update
-          label: 'Revise doc update'
-          description: 'Document update needs corrections — re-run doc-update with cross-review feedback'
-        - action: jump
-          target: plan
-          label: 'Revise plan'
-          description: 'Fundamental plan issues — re-plan from plan-generate'
+    task: |
+      Accept the change?
+
+      All flagged writers completed and cross-reviewed (code-review output).
+      Recommendation follows the cross-review verdict and which writers
+      actually produced artifacts; free input overrides. Dynamic options
+      include revise (re-run the affected writer — skill-author-foo /
+      skill-delete-foo / doc-update / openspec-create-foo) and revise plan
+      (jump back to plan-generate).
 
   # Stage 4: Archive — finalize completed OpenSpec change
   - id: archive

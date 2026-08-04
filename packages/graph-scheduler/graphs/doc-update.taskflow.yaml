@@ -7,7 +7,7 @@ phases:
     channels:
       - ./CONTEXT.md
     task: |
-      Execute scope interview per skill://atom-scope-interview.
+      Execute scope interview per atom-scope-interview.
       Flow context: prefer upstream plan-parse doc_update_files (injected when orchestrated); else interview (skill Step 1).
 
       Topics: target document paths; change type (new document / in-place edit / restructure / delete); change scope (full rewrite / section update / metadata update); dependencies (docs or skills referencing these documents); save location.
@@ -21,7 +21,7 @@ phases:
     task: |
       Execute document update per confirmed plan.
 
-            Read doc-scope output (injected).
+      Read doc-scope output (injected).
 
       Execute interview({ goal: "write document updates per confirmed plan", research: true, context }) in solve mode:
 
@@ -55,25 +55,22 @@ phases:
   - id: doc-gate
     type: gate
     dependsOn: [doc-review]
-    eval:
-      - when: 'doc-review output shows overall: fail AND retryAttempt < 2'
-        action: retry
-        target: doc-write
-        note: 'auto: review found blocking issues — fix and re-review'
+    jumps:
+      - when: 'doc-review output shows overall: fail AND doc-write retryCount < 2'
+        to: doc-write
 
+  # Accept — decision confirmation (route-first: no written actions).
+  # Recommendation follows the review verdict; revise/revise-plan are AI-generated
+  # dynamic options, not written.
   - id: doc-accept
     type: approval
     dependsOn: [doc-gate]
-    routing:
-      actions:
-        - action: continue
-          label: 'Accept document'
-          description: 'Document is ready — proceed'
-        - action: retry
-          target: doc-write
-          label: 'Revise document'
-          description: 'Document needs changes — re-run doc-write with review feedback'
-        - action: jump
-          target: doc-scope
-          label: 'Revise plan'
-          description: 'Fundamental plan issues — revise change plan'
+    channels:
+      - node:doc-review
+    task: |
+      Accept the document?
+
+      doc-review reported the document review verdict. Recommendation follows
+      the review verdict and the rework bound: accept when the document passes;
+      otherwise revise (re-run doc-write with review feedback) or revise the plan
+      (re-run the scope interview).

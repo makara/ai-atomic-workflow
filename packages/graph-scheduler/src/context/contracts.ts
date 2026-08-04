@@ -22,6 +22,8 @@ function str(v: unknown, fallback: string): string {
 /**
  * Transitive closure of upstream phase ids (stack traversal over dependsOn).
  * Used by the redundant-dependency check. Traversal order irrelevant — reachability only.
+ * Load-time twin of the runtime reachability helpers — kept local because it
+ * runs against the flattened graph (post-flatten validation).
  */
 function upstreamClosure(id: string, byId: Map<string, Record<string, unknown>>): Set<string> {
   const seen = new Set<string>();
@@ -68,6 +70,21 @@ export function validateGraphContracts(
     const deps = (phase.dependsOn ?? []) as string[];
     const prefix = `${filePath}: phases.${id}`;
 
+    // target existence: every routing/jump target must resolve in the graph.
+    // Pre-flatten graphs may reference flow phase ids (remapped at flatten) or
+    // flattened-style '<flow>/<child>' ids — both valid; route ids (declared
+    // `route:` values and flow ids as routes) resolve for approval targets.
+    const flowIds = new Set(phases.filter((p) => str(p.type, '') === 'flow').map((p) => str(p.id, '')));
+    const routeIds = new Set(
+      phases
+        .map((p) => str(p.route, ''))
+        .filter((r) => r !== '')
+        .concat([...flowIds]),
+    );
+    function targetResolvable(t: string): boolean {
+      return byId.has(t) || routeIds.has(t) || [...flowIds].some((f) => t.startsWith(`${f}/`));
+    }
+
     // 2.0 — enabled type set: unregistered type fails at load via
     // toTaskflowGraph (resolvePhaseHandler → UnknownPhaseTypeError →
     // GraphDefinitionError). No separate static gate — one enforcement path.
@@ -104,132 +121,182 @@ export function validateGraphContracts(
       }
     }
 
-    // 2.2 — approval dependsOn converges on a single review node; routing targets explicit
+    // 2.2 — approval: declared branch-route/retry targets resolvable; retry/jump
+    // targets may be absent (AI dynamic options — no written actions needed)
     if (type === 'approval') {
-      if (deps.length !== 1) {
-        errors.push(
-          `${prefix} — approval dependsOn must contain exactly the review-convergence node (found ${deps.length}: ${deps.join(', ') || '(none)'}). Writer phases are transitive deps of review — list review only.`,
-        );
-      }
       const actions = ((phase.routing as Record<string, unknown> | undefined)?.actions ?? []) as Array<
         Record<string, unknown>
       >;
       for (const action of actions) {
         const actionType = str(action.action, '');
-        if ((actionType === 'retry' || actionType === 'jump') && !action.target) {
+        const target = str(action.target, '');
+        if (target && !targetResolvable(target)) {
+          errors.push(
+            `${prefix} — routing action '${actionType}' (${str(action.label, '')}) targets missing phase/route '${target}'; declare an existing phase id or route id`,
+          );
+        }
+        if ((actionType === 'retry' || actionType === 'jump') && !target) {
           warnings.push(
-            actionType === 'jump'
-              ? `${prefix} — routing action 'jump' (${str(action.label, '')}) lacks explicit target; snapshot.nodes runtime expansion applies (M2) — declare explicit target per atom-graph-spec §Approval Routing.`
-              : `${prefix} — routing action 'retry' (${str(action.label, '')}) lacks explicit target; dependsOn[0] fallback is deprecated.`,
+            `${prefix} — routing action '${actionType}' (${str(action.label, '')}) lacks explicit target; re-run target is resolved at runtime from context`,
           );
         }
       }
     }
 
-    // 2.2 — gate eval hygiene; targets explicit, bounded, writer-targeted
+    // 2.2 — gate jump hygiene (route-first): jumps are backward-only rework —
+    // target must sit upstream of the gate; bounded by target retryCount
     if (type === 'gate') {
-      for (const evalRule of (phase.eval ?? []) as Array<Record<string, unknown>>) {
-        const actionType = str(evalRule.action, '');
-        if ((actionType === 'retry' || actionType === 'jump') && !evalRule.target) {
-          warnings.push(
-            actionType === 'jump'
-              ? `${prefix} — eval condition action 'jump' lacks explicit target; snapshot.nodes runtime expansion applies (M2) — declare explicit target per atom-graph-spec §Gate.`
-              : `${prefix} — eval condition action 'retry' lacks explicit target; dependsOn[0] fallback is deprecated.`,
+      const jumps = (phase.jumps ?? []) as Array<Record<string, unknown>>;
+      const gateUpstream = upstreamClosure(str(phase.id, ''), byId);
+      for (const jump of jumps) {
+        const jumpTarget = str(jump.to, '');
+        const whenText = str(jump.when, '');
+        const targetPhase = byId.get(jumpTarget);
+        // Jump semantics: the target sits upstream of the gate — routing back
+        // re-executes the target + downstream (JUMP). Forward targets are a
+        // graph-definition error (approval decides forward routing).
+        const isUpstream = targetPhase !== undefined && gateUpstream.has(jumpTarget);
+        if (!isUpstream && jumpTarget !== '') {
+          errors.push(
+            `${prefix} — gate jump targets '${jumpTarget}' which is NOT upstream of the gate; gates are backward-only rework nodes — forward routing is an approval branch-route decision`,
           );
         }
-        // Auto-rework hygiene — atom-graph-spec §Auto-Rework (gate) Rules.
-        // Termination signal: retryAttempt (the gate's own jump count) OR a
-        // reviewer iteration counter (e.g. verify `round < N`) — loop routers
-        // iterate NEW artifacts and bound by the reviewer's own counter.
-        const whenText = str(evalRule.when, '');
-        if (actionType === 'retry' && whenText && !/retryAttempt/i.test(whenText) && !/\bround\s*</.test(whenText)) {
+        if (isUpstream && whenText && !/retryCount/i.test(whenText)) {
           warnings.push(
-            `${prefix} — eval condition is unbounded (no retryAttempt/round bound); auto-rework risks an infinite loop — add 'AND retryAttempt < N' (or a reviewer iteration bound) per atom-graph-spec §Auto-Rework (gate) Rules.`,
+            `${prefix} — jump is unbounded (no retryCount bound); auto-rework risks an infinite loop — add 'AND <target> retryCount < N' per atom-graph-spec §Auto-Rework (gate) Rules.`,
           );
         }
-        if (actionType === 'retry' && evalRule.target) {
-          const targetId = str(evalRule.target, '');
+        if (isUpstream && targetPhase) {
           const depends = (phase.dependsOn ?? []) as string[];
-          const targetPhase = byId.get(targetId);
-          // Reviewer = code-review dispatch or review-named node. Retrying it
+          // Reviewer = code-review dispatch or review-named node. Jumping it
           // re-runs unchanged artifacts — same verdict, wasted cycle. Integrity
           // gates (scope-confirm/spec-scope style writers) are not reviewers.
-          const isReviewNode =
-            targetPhase !== undefined && (str(targetPhase.skill, '') === 'code-review' || targetId.includes('review'));
-          if (isReviewNode && depends.includes(targetId)) {
+          const isReviewNode = str(targetPhase.skill, '') === 'code-review' || jumpTarget.includes('review');
+          if (isReviewNode && depends.includes(jumpTarget)) {
             warnings.push(
-              `${prefix} — eval retry targets reviewer node '${targetId}' (the gate's direct dependency); re-running the reviewer over unchanged artifacts reproduces the same verdict — target the writer node instead per atom-graph-spec §Auto-Rework (gate) Rules.`,
+              `${prefix} — jump targets reviewer node '${jumpTarget}' (the gate's direct dependency); re-running the reviewer over unchanged artifacts reproduces the same verdict — target the writer node instead per atom-graph-spec §Auto-Rework (gate) Rules.`,
             );
           }
         }
       }
     }
 
-    // target existence: every routing/eval target must resolve
-    // in the flattened graph. Pre-flatten graphs may reference flow phase ids
-    // (remapped to the flow's entry node at flatten) or flattened-style
-    // '<flow>/<child>' ids — both valid; anything else unresolved is an error,
-    // never a silent no-op jump.
-    const flowIds = new Set(phases.filter((p) => str(p.type, '') === 'flow').map((p) => str(p.id, '')));
-    const targetResolvable = (t: string): boolean =>
-      byId.has(t) || flowIds.has(t) || [...flowIds].some((f) => t.startsWith(`${f}/`));
-    if (type === 'approval') {
-      const actions = ((phase.routing as Record<string, unknown> | undefined)?.actions ?? []) as Array<
-        Record<string, unknown>
-      >;
-      for (const action of actions) {
-        const actionTarget = str(action.target, '');
-        if (actionTarget && !targetResolvable(actionTarget)) {
-          errors.push(
-            `${prefix} — routing action '${str(action.label, '')}' targets missing phase '${actionTarget}'; declare an existing phase id (flow ids remap to the flow's flattened entry)`,
-          );
-        }
-      }
-    }
     if (type === 'gate') {
-      for (const evalRule of (phase.eval ?? []) as Array<Record<string, unknown>>) {
-        const evalTarget = str(evalRule.target, '');
-        if (evalTarget && !targetResolvable(evalTarget)) {
+      for (const jump of (phase.jumps ?? []) as Array<Record<string, unknown>>) {
+        const jumpTarget = str(jump.to, '');
+        if (jumpTarget && !targetResolvable(jumpTarget)) {
           errors.push(
-            `${prefix} — eval condition targets missing phase '${evalTarget}'; declare an existing phase id (flow ids remap to the flow's flattened entry)`,
+            `${prefix} — gate jump targets missing phase '${jumpTarget}'; declare an existing phase id (flow ids remap to the flow's flattened entry)`,
           );
         }
       }
     }
 
-    // 2.2b — redundant transitive dependencies rejected for ALL phases except gates
-    // (graph-scheduling §DependsOn #3). Gates declare eval-CONTEXT inputs — the eval
-    // reads direct dependsOn outputs; a transitive node whose output the eval references
-    // (e.g. a loop router reading the entry decision) is load-bearing, not ordering
-    // redundancy.
-    if (type !== 'gate') {
-      for (let i = 0; i < deps.length; i++) {
-        for (let j = 0; j < deps.length; j++) {
-          if (i === j) continue;
-          const a = deps[i];
-          const b = deps[j];
-          if (upstreamClosure(a, byId).has(b)) {
+    // 2.2b — redundant transitive dependencies rejected for ALL phases
+    // (graph-scheduling §DependsOn #3). The gate exemption is removed —
+    // judgment context declares via channels node: entries, never by padding
+    // dependsOn with transitive nodes.
+    for (let i = 0; i < deps.length; i++) {
+      for (let j = 0; j < deps.length; j++) {
+        if (i === j) continue;
+        const a = deps[i];
+        const b = deps[j];
+        if (upstreamClosure(a, byId).has(b)) {
+          errors.push(
+            `${prefix} — redundant transitive dependency: '${a}' depends on '${b}' (directly or transitively); declare only leaf deps per §DependsOn Rules #3.`,
+          );
+        }
+      }
+    }
+
+    // 2.3 — gate jump conditions reference observable declared-context fields
+    // only. Scope = direct dependsOn ∪ channels node: targets ∪ jump targets
+    // (the rework target's retryCount bound is part of the condition contract).
+    if (type === 'gate') {
+      const contextScope = new Set<string>(deps);
+      for (const ch of (phase.channels ?? []) as string[]) {
+        if (ch.startsWith('node:')) contextScope.add(ch.slice('node:'.length));
+      }
+      for (const jump of (phase.jumps ?? []) as Array<Record<string, unknown>>) {
+        const jumpTarget = str(jump.to, '');
+        if (jumpTarget) contextScope.add(jumpTarget);
+        const jumpWhen = str(jump.when, '');
+        if (jumpWhen) {
+          if (HARDCODED_OUTPUT_PATH_RE.test(jumpWhen)) {
             errors.push(
-              `${prefix} — redundant transitive dependency: '${a}' depends on '${b}' (directly or transitively); declare only leaf deps per §DependsOn Rules #3.`,
+              `${prefix} — gate jump condition hardcodes runtime output path '.taskflow/outputs/'; reference the upstream node output instead (e.g. '<nodeId> output shows …').`,
             );
+          }
+          if (SIBLING_OUTPUT_EXISTENCE_RE.test(jumpWhen)) {
+            errors.push(
+              `${prefix} — gate jump condition depends on sibling output existence ('no … output present'); conditions must reference observable fields of the declared judgment context (direct dependsOn ∪ channels node: targets ∪ jump targets).`,
+            );
+          }
+          for (const id of byId.keys()) {
+            const esc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const mentioned = new RegExp(`(?<![\\w/-])${esc}(?![\\w/-])`).test(jumpWhen);
+            if (mentioned && !contextScope.has(id)) {
+              errors.push(
+                `${prefix} — gate jump condition references '${id}' which is outside the declared judgment context (direct dependsOn ∪ channels node: targets ∪ jump targets); declare it via channels: [node:${id}] or drop the reference`,
+              );
+            }
           }
         }
       }
     }
 
-    // 2.3 — when guards reference observable upstream fields only
-    const when = str(phase.when, '');
-    if (when) {
-      if (HARDCODED_OUTPUT_PATH_RE.test(when)) {
+    // 2.3b — gate/approval channels are node:-only judgment context. The
+    // schema enforces this per file; this post-flatten re-check catches
+    // merged flow-input channels that bypassed the per-file schema pass
+    // (flow channels propagate into entry children, which may be gates).
+    if ((type === 'gate' || type === 'approval') && phase.channels !== undefined) {
+      for (const entry of phase.channels as string[]) {
+        if (!entry.startsWith('node:')) {
+          errors.push(
+            `${prefix} — '${type}' phase channels entries must be 'node:<id>' references (judgment context = node outputs); '${entry}' is not a node: entry`,
+          );
+        }
+      }
+    }
+
+    // 2.4 — join:any is the branch-route convergence pattern: direct upstreams
+    // must span at least two distinct routes (a single-route any-join has
+    // nothing to converge and hides a deadlock-prone mistake).
+    if (phase.join === 'any') {
+      const upstreamRoutes = new Set(
+        deps.map((d) => str((byId.get(d) as Record<string, unknown> | undefined)?.route, '') || '__default__'),
+      );
+      if (upstreamRoutes.size < 2) {
         errors.push(
-          `${prefix} — when guard hardcodes runtime output path '.taskflow/outputs/'; reference the upstream node output instead (e.g. '<nodeId> output shows …').`,
+          `${prefix} — join: any requires direct upstreams spanning at least 2 distinct routes (branch-route convergence); upstreams sit on: ${[...upstreamRoutes].join(', ')}`,
         );
       }
-      if (SIBLING_OUTPUT_EXISTENCE_RE.test(when)) {
-        errors.push(
-          `${prefix} — when guard depends on sibling output existence ('no … output present'); guards must reference observable fields of direct upstream outputs.`,
-        );
+    }
+  }
+
+  // Route hygiene (route-first): a declared route unreferenced by any written
+  // routing action has a soft activation path — only an AI-dynamic approval
+  // recommendation can activate it (approval branchTo with a route id). That
+  // is legal but fragile (a missed target silently leaves the route dormant),
+  // so it surfaces as a warning: declare a routing action or delete the route.
+  const routeIds = new Set(phases.map((p) => str(p.route, '')).filter((r) => r !== ''));
+  const referencedRoutes = new Set<string>();
+  for (const phase of phases) {
+    if (str(phase.type, '') !== 'approval') continue;
+    const actions = ((phase.routing as Record<string, unknown> | undefined)?.actions ?? []) as Array<
+      Record<string, unknown>
+    >;
+    for (const action of actions) {
+      if (str(action.action, '') === 'continue' && str(action.target, '') !== '') {
+        referencedRoutes.add(str(action.target, ''));
       }
+    }
+  }
+  for (const routeId of routeIds) {
+    if (!referencedRoutes.has(routeId)) {
+      warnings.push(
+        `${filePath}: route '${routeId}' is declared but no written routing action targets it — activation depends on AI-dynamic judgment (soft path); declare a routing action or delete the route`,
+      );
     }
   }
 
@@ -408,8 +475,9 @@ function checkPhaseChannels(
   for (const phase of phases) {
     const type = str(phase.type, '');
     const skillName = str(phase.skill, '');
-    // Channel validation covers main phases (agent type removed).
-    // Other types (approval/flow) never carry channels.
+    // Channel validation covers main phases. Approval/gate channels are
+    // node:-only judgment context — enforced by the schema superRefine and
+    // re-checked post-flatten below (merged flow channels must not bypass it).
     if (type !== 'main') continue;
     const prefix = `${filePath}: phases.${str(phase.id, '?')}`;
     const channels = (phase.channels ?? []) as string[];

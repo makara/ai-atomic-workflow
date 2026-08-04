@@ -16,7 +16,6 @@ export type {
   IApprovalAction,
   IApprovalDecision,
   IBaseNodeDetail,
-  IEvalCondition,
   IFsmNodeState,
   INodeDetail,
   IPhaseHandler,

@@ -11,11 +11,26 @@
  * FSM event discriminated union — 4 event types covering graph lifecycle.
  *
  * Event provenance:
- * - START        → api/crud.graphStart()
- * - COMPLETE     → api/crud.graphAdvance() for agent/approval nodes (normal completion, or skip:true from when guard)
+ * - START    → api/crud.graphStart()
+ * - COMPLETE → api/crud.graphAdvance() — normal completion; branchTo carries a
+ *              gate jump decision (backward rework) or an approval branch-route
+ *              decision (route activation); endRun completes the run (approval
+ *              `end` action) — route-first redesign (route-first redesign)
  */
 export type FsmEvent =
   | { readonly type: 'START'; readonly graphName: string; readonly args?: Record<string, unknown> }
-  | { readonly type: 'COMPLETE'; readonly phaseId: string; readonly durationMs: number; readonly skip?: boolean }
+  | {
+      readonly type: 'COMPLETE';
+      readonly phaseId: string;
+      readonly durationMs: number;
+      /**
+       * Routing decision target (route-first): gate jump target (backward
+       * rework — target must be an upstream terminal node) or approval
+       * branch-route target (node or route id — activates the route).
+       */
+      readonly branchTo?: string;
+      /** Approval `end` action — complete the run immediately (no end node). */
+      readonly endRun?: boolean;
+    }
   | { readonly type: 'JUMP'; readonly targetPhaseId: string }
   | { readonly type: 'FORCE_END' };

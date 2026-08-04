@@ -10,7 +10,8 @@ import type { Phase } from '../src/types.js';
 // ── Phase factories ────────────────────────────────────────────────────────
 
 function phase(id: string, type: Phase['type'], dependsOn?: string[]): Phase {
-  return { id, type, dependsOn };
+  // join absent = default all (explicit 'all' rejected by schema — redundant default)
+  return { id, type, dependsOn, mode: 'exclusive' };
 }
 
 function main(id: string, dependsOn?: string[]): Phase {
@@ -135,20 +136,16 @@ describe('resolveReady', () => {
 
 describe('resolveReady — join mode', () => {
   it('join: "all" (default) — all deps must complete', () => {
-    const phases = [
-      { id: 'a', type: 'main', dependsOn: [] },
-      { id: 'b', type: 'main', dependsOn: [] },
-      { id: 'c', type: 'main', dependsOn: ['a', 'b'] },
-    ];
+    const phases = [main('a', []), main('b', []), main('c', ['a', 'b'])];
     // only a done — c still blocked on b
     expect(resolveReady(phases, new Set(['a'])).map((p) => p.id)).toEqual(['b']);
   });
 
   it('join: "any" — one dep completed activates phase', () => {
-    const phases = [
-      { id: 'a', type: 'main', dependsOn: [] },
-      { id: 'b', type: 'main', dependsOn: [] },
-      { id: 'c', type: 'main', dependsOn: ['a', 'b'], join: 'any' as const },
+    const phases: Phase[] = [
+      main('a', []),
+      main('b', []),
+      { id: 'c', type: 'main', dependsOn: ['a', 'b'], join: 'any' as const, mode: 'exclusive' as const },
     ];
     // only a done — c is ready with join:'any'
     const phaseMap = { a: { status: 'done' as const }, b: { status: 'active' as const } };
@@ -157,18 +154,19 @@ describe('resolveReady — join mode', () => {
   });
 
   it('join: "any" — no deps completed, phase not ready', () => {
-    const phases = [
-      { id: 'a', type: 'main', dependsOn: [] },
-      { id: 'c', type: 'main', dependsOn: ['a'], join: 'any' as const },
+    const phases: Phase[] = [
+      main('a', []),
+      { id: 'c', type: 'main', dependsOn: ['a'], join: 'any' as const, mode: 'exclusive' as const },
     ];
     // nothing completed
     expect(resolveReady(phases, new Set()).map((p) => p.id)).toEqual(['a']);
   });
   it('sibling with different join modes — each resolved correctly', () => {
-    const phases = [
-      { id: 'root', type: 'main', dependsOn: [] },
-      { id: 'child-all', type: 'main', dependsOn: ['root'], join: 'all' as const },
-      { id: 'child-any', type: 'main', dependsOn: ['root'], join: 'any' as const },
+    const phases: Phase[] = [
+      main('root', []),
+      // child-all: join absent = default all (explicit 'all' rejected by schema)
+      { id: 'child-all', type: 'main', dependsOn: ['root'], mode: 'exclusive' as const },
+      { id: 'child-any', type: 'main', dependsOn: ['root'], join: 'any' as const, mode: 'exclusive' as const },
     ];
     const phaseMap = { root: { status: 'done' as const } };
     const ready = resolveReady(phases, new Set(['root']), phaseMap);
@@ -176,11 +174,7 @@ describe('resolveReady — join mode', () => {
   });
 
   it('join absent — defaults to "all" behavior', () => {
-    const phases = [
-      { id: 'a', type: 'main', dependsOn: [] },
-      { id: 'b', type: 'main', dependsOn: [] },
-      { id: 'c', type: 'main', dependsOn: ['a', 'b'] },
-    ];
+    const phases = [main('a', []), main('b', []), main('c', ['a', 'b'])];
     // only a done — c still blocked (all behavior)
     expect(resolveReady(phases, new Set(['a'])).map((p) => p.id)).toEqual(['b']);
   });
@@ -232,11 +226,12 @@ describe('built-in graph DAG validation', () => {
       id: p.id as string,
       type: p.type as Phase['type'],
       dependsOn: (p.dependsOn as string[]) ?? [],
+      mode: 'exclusive' as const,
     }));
     // topoLayers throws if cycle detected — acyclic assertion
     const layers = topoLayers(phases);
     expect(layers.length).toBeGreaterThan(0);
-    // Verify all 7 phases appear in layers
+    // Verify all 7 phases appear in layers (route-first: gates/end removed)
     const allIds = layers
       .flat()
       .map((p) => p.id)
@@ -285,11 +280,12 @@ describe('built-in graph DAG validation — skill-change-workflow', () => {
       id: p.id as string,
       type: p.type as Phase['type'],
       dependsOn: (p.dependsOn as string[]) ?? [],
+      mode: 'exclusive' as const,
     }));
     // topoLayers throws if cycle detected — acyclic assertion
     const layers = topoLayers(phases);
     expect(layers.length).toBeGreaterThan(0);
-    // Verify all 9 phases appear in layers
+    // Verify all 9 phases appear in layers (route-first: branch-gate/end removed)
     const allIds = layers
       .flat()
       .map((p) => p.id)
@@ -299,11 +295,11 @@ describe('built-in graph DAG validation — skill-change-workflow', () => {
       'change-accept',
       'cross-review',
       'doc-update',
+      'openspec-create-foo',
       'plan',
       'plan-parse',
       'skill-author-foo',
       'skill-delete-foo',
-      'openspec-create-foo',
     ].sort();
     expect(allIds).toEqual(expectedIds);
   });
@@ -368,7 +364,7 @@ describe('built-in graph DAG validation — skill-change-workflow', () => {
     }
   });
 
-  it('skill-change-workflow.taskflow.yaml when guards reference observable upstream output', () => {
+  it('skill-change-workflow.taskflow.yaml gate branch conditions reference observable upstream output', () => {
     const { readFileSync } = require('node:fs');
     const { join } = require('node:path');
     const { parse: parseYaml } = require('yaml');
@@ -378,13 +374,21 @@ describe('built-in graph DAG validation — skill-change-workflow', () => {
     const graph = parseYaml(raw);
 
     for (const phase of graph.phases) {
-      if (phase.when && phase.type !== 'approval') {
-        const when = phase.when as string;
-        // guard hygiene per atom-graph-spec: reference observable upstream output fields,
+      if (phase.type !== 'gate') continue;
+      for (const branch of phase.branches ?? []) {
+        const when = branch.when as string;
+        // branch hygiene per atom-graph-spec: reference observable upstream output fields,
         // never sibling output existence or hardcoded runtime paths
         expect(when).toMatch(/output shows/);
         expect(when).not.toMatch(/\.taskflow\/outputs\//);
         expect(when).not.toMatch(/output present/);
+        // branch targets resolve in-graph
+        const phaseIds = new Set(graph.phases.map((p: { id: string }) => p.id));
+        expect(phaseIds.has(branch.to)).toBe(true);
+      }
+      // parallel gate — no default required (all-match semantics)
+      if (phase.mode !== 'parallel') {
+        expect(phase.default).toBeDefined();
       }
     }
   });
@@ -403,7 +407,7 @@ describe('built-in graph DAG validation — skill-change-workflow', () => {
     expect(crossReview.skill).toBe('code-review');
   });
 
-  it('skill-change-workflow.taskflow.yaml approval is human gate with per-writer retry targets', () => {
+  it('skill-change-workflow.taskflow.yaml change-accept is a decision confirmation (no written actions)', () => {
     const { readFileSync } = require('node:fs');
     const { join } = require('node:path');
     const { parse: parseYaml } = require('yaml');
@@ -414,18 +418,8 @@ describe('built-in graph DAG validation — skill-change-workflow', () => {
 
     const approval = graph.phases.find((p: { id: string }) => p.id === 'change-accept');
     expect(approval).toBeDefined();
-    // Multi-writer graph — no eval (atom-graph-spec §Auto-Rework Rules: single-writer scope)
-    expect(approval.eval).toBeUndefined();
-    // Human gate exposes per-writer retry targets + plan jump
-    const retryTargets = (approval.routing?.actions ?? [])
-      .filter((a: { action: string }) => a.action === 'retry')
-      .map((a: { target: string }) => a.target);
-    expect(retryTargets).toContain('skill-author-foo');
-    expect(retryTargets).toContain('skill-delete-foo');
-    expect(retryTargets).toContain('doc-update');
-    const jumpTargets = (approval.routing?.actions ?? [])
-      .filter((a: { action: string }) => a.action === 'jump')
-      .map((a: { target: string }) => a.target);
-    expect(jumpTargets).toContain('plan');
+    // Route-first: approvals carry NO written routing actions (except the
+    // branch-route scenario) — Accept + free input + AI-generated options
+    expect(approval.routing).toBeUndefined();
   });
 });

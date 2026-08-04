@@ -44,20 +44,23 @@ describe('Internal type shapes', () => {
       id: 'agent-a',
       type: 'main',
       dependsOn: ['phase-0'],
+      mode: 'exclusive',
     };
     expect(p.id).toBe('agent-a');
     expect(p.type).toBe('main');
     expect(p.dependsOn).toEqual(['phase-0']);
   });
 
-  it('Phase with retry config', () => {
+  it('Phase retry field is removed — unknown surface, never typed (loud rejection)', () => {
     const p: Phase = {
       id: 'gate-1',
       type: 'main',
-      retry: { max: 3, backoffMs: 100, factor: 2 },
+      mode: 'exclusive',
     };
-    expect(p.retry?.max).toBe(3);
-    expect(p.retry?.backoffMs).toBe(100);
+    expect(p.retry).toBeUndefined();
+    // retry is declared unknown for schema-level loud rejection — accessing it
+    // as a config object must go through the unknown escape hatch
+    expect((p as unknown as { retry?: { max: number } }).retry).toBeUndefined();
   });
 });
 

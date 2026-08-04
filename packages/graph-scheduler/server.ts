@@ -86,15 +86,24 @@ const GraphStartSchema = z.object({
   ),
 });
 
-const GraphAdvanceSchema = z.object({
-  runId: z.string().min(1).describe('Graph run ID — UUID returned by graph_start'),
-  nodeId: z.string().min(1).describe('ID of the completed node'),
-  durationMs: z.number().int().min(0).describe('Execution duration in milliseconds'),
-  skip: z
-    .boolean()
-    .optional()
-    .describe('Optional — pass true when the when-guard evaluates false; node is marked skipped'),
-});
+export const GraphAdvanceSchema = z
+  .object({
+    runId: z.string().min(1).describe('Graph run ID — UUID returned by graph_start'),
+    nodeId: z.string().min(1).describe('ID of the completed node'),
+    durationMs: z.number().int().min(0).describe('Execution duration in milliseconds'),
+    branchTo: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'Optional — routing decision target (route-first). Gate: backward jump target (rework — terminal upstream node). Approval: branch-route target (node or route id — activates the route)',
+      ),
+    endRun: z
+      .boolean()
+      .optional()
+      .describe('Optional — approval `end` action: complete the run immediately (no end node)'),
+  })
+  .strict();
 
 const GraphJumpSchema = z.object({
   runId: z.string().min(1).describe('Graph run ID'),
@@ -160,7 +169,7 @@ server.tool(
   async (args) => {
     const rt = await getRuntime();
     try {
-      const result = await rt.graphAdvance(args.runId, args.nodeId, args.durationMs, args.skip);
+      const result = await rt.graphAdvance(args.runId, args.nodeId, args.durationMs, args.branchTo, args.endRun);
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result) }],
       };
@@ -178,7 +187,7 @@ server.tool(
 // Tool 3: graph_jump — directed jump to target phase
 server.tool(
   'graph_jump',
-  'Jump to a specific node — re-run a phase after an approval REWORK decision. Resets the target node and its upstream dependencies to pending.',
+  'Jump to a specific node — re-run a phase after an approval REWORK decision. Resets the target node and its downstream terminal nodes to pending (upstream kept).',
   GraphJumpSchema.shape,
   async (args) => {
     const rt = await getRuntime();
@@ -201,7 +210,7 @@ server.tool(
 // Tool 4: graph_force_end — force terminate a run
 server.tool(
   'graph_force_end',
-  'Force-terminate a graph run. All unfinished nodes are marked skipped; run status becomes terminated. Irreversible.',
+  'Force-terminate a graph run. All unfinished nodes are marked aborted; run status becomes terminated. Irreversible.',
   GraphForceEndSchema.shape,
   async (args) => {
     const rt = await getRuntime();

@@ -10,8 +10,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { RunModeSchema } from '../../server.js';
-import { graphLoadCache, runConstraints } from '../../src/api/run-caches.js';
+import { GraphAdvanceSchema, RunModeSchema } from '../../server.js';
+import { graphLoadCache } from '../../src/api/run-caches.js';
 import type { SchedulerRuntime } from '../../src/scheduler-runtime.js';
 import { createRuntime } from '../../src/scheduler-runtime.js';
 
@@ -70,7 +70,7 @@ async function makeFixture(graphs: Record<string, string>): Promise<Fixture> {
   };
 }
 
-/** Minimal two-node linear graph. */
+/** Minimal two-node linear graph (route-first: run completes by natural drain). */
 function linearAgentGraph(): string {
   return JSON.stringify({
     name: 'linear-agent',
@@ -227,10 +227,10 @@ describe('graphAdvance', () => {
     expect(result.node?.nodeId).toBe('agent-b');
   });
 
-  it('completes the run when advancing the last node', async () => {
+  it('completes the run by natural drain when the last node completes (route-first)', async () => {
     await fix.rt.graphAdvance(runId, 'agent-a', 50);
+    // agent-b is the final node — its completion drains the run (no end node)
     const result = await fix.rt.graphAdvance(runId, 'agent-b', 50);
-
     expect(result.snapshot.fsmState).toBe('completed');
     expect(result.node).toBeNull();
   });
@@ -243,6 +243,100 @@ describe('graphAdvance', () => {
     await fix.rt.graphAdvance(runId, 'agent-a', 50);
     await fix.rt.graphAdvance(runId, 'agent-b', 50);
     await expect(fix.rt.graphAdvance(runId, 'agent-a', 50)).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// graphAdvance — gate branch transport (branch-routing redesign)
+// ---------------------------------------------------------------------------
+
+describe('graphAdvance branchTo', () => {
+  let fix: Fixture;
+
+  afterEach(() => {
+    fix?.cleanup();
+  });
+
+  /** seed → gate (backward jump to seed) → alpha — no end node (drain completion). */
+  function gateRunGraph(): string {
+    return JSON.stringify({
+      name: 'gate-run',
+      version: 1,
+      phases: [
+        { id: 'seed', type: 'main', task: 'seed' },
+        {
+          id: 'gate',
+          type: 'gate',
+          dependsOn: ['seed'],
+          jumps: [{ when: 'seed output shows source: bad AND seed retryCount < 2', to: 'seed' }],
+        },
+        { id: 'alpha', type: 'main', task: 'alpha', dependsOn: ['gate'] },
+      ],
+    });
+  }
+
+  it('gate pass-through (absent branchTo) activates the downstream node', async () => {
+    fix = await makeFixture({ 'gate-run': gateRunGraph() });
+
+    const { runId } = await fix.rt.graphStart('gate-run');
+    await fix.rt.graphAdvance(runId, 'seed', 10);
+    const gate = await fix.rt.graphAdvance(runId, 'gate', 10);
+
+    expect(gate.node?.nodeId).toBe('alpha');
+    expect(gate.snapshot.nodes.find((n) => n.nodeId === 'alpha')?.status).toBe('active');
+  });
+
+  it('gate jump branchTo resets the upstream target via JUMP — retryCount increments', async () => {
+    fix = await makeFixture({ 'gate-run': gateRunGraph() });
+
+    const { runId } = await fix.rt.graphStart('gate-run');
+    await fix.rt.graphAdvance(runId, 'seed', 10);
+
+    const jump = await fix.rt.graphAdvance(runId, 'gate', 10, 'seed');
+    expect(jump.node?.nodeId).toBe('seed');
+    expect(jump.node?.retryAttempt).toBe(1);
+    expect(jump.snapshot.nodes.find((n) => n.nodeId === 'seed')?.retryCount).toBe(1);
+    expect(jump.snapshot.nodes.find((n) => n.nodeId === 'gate')?.status).toBe('pending');
+  });
+
+  it('run completes by natural drain — no end marker node', async () => {
+    fix = await makeFixture({ 'gate-run': gateRunGraph() });
+
+    const { runId } = await fix.rt.graphStart('gate-run');
+    await fix.rt.graphAdvance(runId, 'seed', 10);
+    await fix.rt.graphAdvance(runId, 'gate', 10);
+    const done = await fix.rt.graphAdvance(runId, 'alpha', 10);
+    expect(done.snapshot.fsmState).toBe('completed');
+    expect(done.node).toBeNull();
+  });
+
+  it('branchTo to a terminal upstream node resets it via JUMP — retryCount increments', async () => {
+    const g = JSON.stringify({
+      name: 'gate-rework',
+      version: 1,
+      phases: [
+        { id: 'w', type: 'main', task: 'write' },
+        { id: 'r', type: 'main', task: 'review', dependsOn: ['w'] },
+        {
+          id: 'g',
+          type: 'gate',
+          dependsOn: ['r'],
+          jumps: [{ when: 'r output shows overall: fail AND w retryCount < 2', to: 'w' }],
+        },
+        { id: 'a', type: 'main', task: 'accept', dependsOn: ['g'] },
+      ],
+    });
+    fix = await makeFixture({ 'gate-rework': g });
+
+    const { runId } = await fix.rt.graphStart('gate-rework');
+    await fix.rt.graphAdvance(runId, 'w', 10);
+    await fix.rt.graphAdvance(runId, 'r', 10);
+
+    const jump = await fix.rt.graphAdvance(runId, 'g', 10, 'w');
+    expect(jump.node?.nodeId).toBe('w');
+    expect(jump.node?.retryAttempt).toBe(1);
+    expect(jump.snapshot.nodes.find((n) => n.nodeId === 'w')?.retryCount).toBe(1);
+    expect(jump.snapshot.nodes.find((n) => n.nodeId === 'g')?.status).toBe('pending');
   });
 });
 
@@ -318,7 +412,7 @@ describe('graphStatus', () => {
     expect(status.graphName).toBe('linear-agent');
   });
 
-  it('reports completed state after full advance', async () => {
+  it('reports completed state after full advance (natural drain)', async () => {
     fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
     const { runId } = await fix.rt.graphStart('linear-agent');
     await fix.rt.graphAdvance(runId, 'agent-a', 50);
@@ -365,7 +459,8 @@ describe('graphStatus', () => {
 });
 
 // ---------------------------------------------------------------------------
-// run caches — lifecycle: created at start, dropped on force-end/cleanup, kept on jump
+// run caches — graph definition cache: created at start, dropped on force-end/cleanup, kept on jump
+// (constraints are NOT process-cached — they snapshot into the run record at graph_start)
 // ---------------------------------------------------------------------------
 
 describe('run cache lifecycle', () => {
@@ -375,58 +470,52 @@ describe('run cache lifecycle', () => {
     if (fix?.cleanup) fix.cleanup();
   });
 
-  it('populates caches at graphStart', async () => {
+  it('populates graph cache at graphStart', async () => {
     fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
     const { runId } = await fix.rt.graphStart('linear-agent');
-    expect(runConstraints.has(runId)).toBe(true);
     expect(graphLoadCache.has(runId)).toBe(true);
   });
 
-  it('drops caches on graphForceEnd', async () => {
+  it('drops graph cache on graphForceEnd', async () => {
     fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
     const { runId } = await fix.rt.graphStart('linear-agent');
-    expect(runConstraints.has(runId)).toBe(true);
+    expect(graphLoadCache.has(runId)).toBe(true);
 
     await fix.rt.graphForceEnd(runId);
-    expect(runConstraints.has(runId)).toBe(false);
     expect(graphLoadCache.has(runId)).toBe(false);
   });
 
-  it('keeps caches on graphJump — run stays active', async () => {
+  it('keeps graph cache on graphJump — run stays active', async () => {
     fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
     const { runId } = await fix.rt.graphStart('linear-agent');
     await fix.rt.graphJump(runId, 'agent-a');
-    expect(runConstraints.has(runId)).toBe(true);
     expect(graphLoadCache.has(runId)).toBe(true);
   });
 
-  it('drops caches for completed runs only on graphCleanCompleted', async () => {
+  it('drops graph cache for completed runs only on graphCleanCompleted', async () => {
     fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
     const { runId: doneRun } = await fix.rt.graphStart('linear-agent');
     await fix.rt.graphAdvance(doneRun, 'agent-a', 50);
     await fix.rt.graphAdvance(doneRun, 'agent-b', 50);
     const { runId: liveRun } = await fix.rt.graphStart('linear-agent');
-    expect(runConstraints.has(doneRun)).toBe(true);
-    expect(runConstraints.has(liveRun)).toBe(true);
+    expect(graphLoadCache.has(doneRun)).toBe(true);
+    expect(graphLoadCache.has(liveRun)).toBe(true);
 
     const { deleted } = await fix.rt.graphCleanCompleted();
     expect(deleted).toBe(1);
-    expect(runConstraints.has(doneRun)).toBe(false);
     expect(graphLoadCache.has(doneRun)).toBe(false);
     // live run untouched
-    expect(runConstraints.has(liveRun)).toBe(true);
     expect(graphLoadCache.has(liveRun)).toBe(true);
   });
 
-  it('clears all caches on graphCleanAll', async () => {
+  it('clears all graph caches on graphCleanAll', async () => {
     fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
-    const before = runConstraints.size + graphLoadCache.size;
+    const before = graphLoadCache.size;
     await fix.rt.graphStart('linear-agent');
     await fix.rt.graphStart('linear-agent');
-    expect(runConstraints.size).toBe(before / 2 + 2);
+    expect(graphLoadCache.size).toBe(before + 2);
 
     await fix.rt.graphCleanAll();
-    expect(runConstraints.size).toBe(0);
     expect(graphLoadCache.size).toBe(0);
   });
 });
@@ -468,6 +557,26 @@ describe('run mode', () => {
     expect(RunModeSchema.safeParse('auto').success).toBe(true);
     expect(RunModeSchema.safeParse('invalid').success).toBe(false);
     expect(RunModeSchema.safeParse(undefined).success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// graph_advance input schema — strict, branchTo only (branch-routing redesign, skip removed)
+// ---------------------------------------------------------------------------
+
+describe('graph_advance input schema', () => {
+  it('accepts runId/nodeId/durationMs/branchTo', () => {
+    const ok = GraphAdvanceSchema.safeParse({ runId: 'r', nodeId: 'n', durationMs: 10, branchTo: 'target' });
+    expect(ok.success).toBe(true);
+    const minimal = GraphAdvanceSchema.safeParse({ runId: 'r', nodeId: 'n', durationMs: 0 });
+    expect(minimal.success).toBe(true);
+  });
+
+  it('rejects unknown params — skip is gone, strict schema (branch-routing redesign)', () => {
+    const withSkip = GraphAdvanceSchema.safeParse({ runId: 'r', nodeId: 'n', durationMs: 10, skip: true });
+    expect(withSkip.success).toBe(false);
+    const withUnknown = GraphAdvanceSchema.safeParse({ runId: 'r', nodeId: 'n', durationMs: 10, garbage: 1 });
+    expect(withUnknown.success).toBe(false);
   });
 });
 

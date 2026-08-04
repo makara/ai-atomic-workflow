@@ -8,7 +8,7 @@ phases:
       - ./CONTEXT.md
       - docs/adr/*.md
     task: |
-      Execute scope interview per skill://atom-scope-interview. Detect input source type:
+      Execute scope interview per atom-scope-interview. Detect input source type:
         - wayfinder-map: read map, extract closed decisions
         - arch-review: read review report, extract findings
         - grill-consensus: read composed grill-with-docs output — extract decisions + doc_updates + adr_created
@@ -34,14 +34,16 @@ phases:
       Output: scope_complete, input_source, change_name, affected_domains, spec_plan,
       adr_created, adr_path?, decision_summary, decisions.
 
+  # Spec gate — bounded auto-rework: re-run the scope interview while the scope is
+  # incomplete or the ADR judgment is missing. Bound = spec-scope retryCount < 2
+  # (JUMP counter, never zeroed — route-first redesign). No match → pass through to
+  # spec-generate (degrades observably, e.g. spec_status: blocked).
   - id: spec-gate
     type: gate
     dependsOn: [spec-scope]
-    eval:
-      - when: '(scope_complete false or missing OR adr_created missing) AND retryAttempt < 2'
-        action: retry
-        target: spec-scope
-        note: 'auto: spec scope incomplete or ADR judgment missing — re-run scope interview'
+    jumps:
+      - when: 'spec-scope output shows (scope_complete: false or missing OR adr_created: missing) AND spec-scope retryCount < 2'
+        to: spec-scope
 
   - id: spec-generate
     type: main
@@ -54,8 +56,8 @@ phases:
 
       Change name: from spec-scope output; if absent -> {args.changeName}; else openspec list --json single active; else spec_status: blocked + candidates.
 
-      Echo adr_created from spec-scope output (injected via node:spec-scope channel) — downstream
-      pipeline when guards select the implementation track from this field.
+      Echo adr_created from spec-scope output (injected via node:spec-scope channel) — the
+      downstream pipeline track gate selects the implementation track from this field.
 
       Output contract: change_name, domains, file_paths, validation_result, spec_status,
       adr_created (echo).

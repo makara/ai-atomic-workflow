@@ -3,6 +3,12 @@
  *
  * All modules are pure functions — zero DB, zero filesystem, zero Effect-TS.
  * Tested via vitest with direct imports.
+ *
+ * branch-routing redesign semantics: skip/cascade removed. Node states are
+ * pending | active | done | aborted. COMPLETE carries an optional branchTo —
+ * pending target → activate, terminal target → JUMP reset. The run completes
+ * by natural drain when the final node reaches terminal; unchosen branch
+ * nodes stay pending and never block completion (no end node type).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -16,34 +22,107 @@ import {
   type TaskflowGraph,
   type TransitionResult,
 } from '../../src/fsm/transition.js';
+import type { Phase } from '../../src/schemas/index.js';
 
 // ══════════════════════════════════════════════════════════════════════════
 // Helpers
 // ══════════════════════════════════════════════════════════════════════════
 
-function singleAgentGraph(name?: string): TaskflowGraph {
-  return {
-    name: name ?? 'test-graph',
-    phases: [{ id: 'n1', type: 'main' }],
-  };
+/** Phase factory — fills zod-defaulted mode so literals stay terse (join default = all). */
+function ph(id: string, overrides: Partial<Phase> = {}): Phase {
+  return { id, type: 'main', mode: 'exclusive', ...overrides };
 }
 
-function linearTwoGraph(): TaskflowGraph {
-  return {
-    name: 'linear-two',
-    phases: [
-      { id: 'n1', type: 'main' },
-      { id: 'n2', type: 'main', dependsOn: ['n1'] },
-    ],
-  };
+function graph(name: string, phases: readonly Phase[]): TaskflowGraph {
+  return { name, phases };
+}
+
+/** Main-only entry graph — START/FORCE_END tests (drains after n1 completes). */
+function entryOnlyGraph(name?: string): TaskflowGraph {
+  return graph(name ?? 'test-graph', [ph('n1')]);
+}
+
+/** Linear chain — n1 → n2 (drains to completed after n2). */
+function linearEndGraph(): TaskflowGraph {
+  return graph('linear-end', [ph('n1'), ph('n2', { dependsOn: ['n1'] })]);
+}
+
+/**
+ * Approval branch-route graph — branchTo activates route `t1`; `b` (route t1,
+ * dep accept) activates via the route; `x` sits on an unselected route and
+ * stays pending forever.
+ *   a → accept (approval, branchTo t1|t2) ; b (route t1) ; x (route other)
+ */
+function branchForwardGraph(): TaskflowGraph {
+  return graph('branch-forward', [
+    ph('a'),
+    ph('accept', {
+      type: 'approval',
+      dependsOn: ['a'],
+    }),
+    ph('b', { route: 't1', dependsOn: ['accept'] }),
+    ph('x', { route: 'other' }),
+  ]);
+}
+
+/**
+ * Gate rework graph — gate jumps target the terminal upstream writer:
+ * writer → review → gate. branchTo=writer triggers JUMP reset
+ * (writer + review + gate → pending, retryCount + 1; upstream kept).
+ */
+function branchJumpGraph(): TaskflowGraph {
+  return graph('branch-jump', [
+    ph('writer'),
+    ph('review', { dependsOn: ['writer'] }),
+    ph('gate', {
+      type: 'gate',
+      dependsOn: ['review'],
+      jumps: [{ when: 'review output shows overall: fail AND writer retryCount < 2', to: 'writer' }],
+    }),
+  ]);
+}
+
+/**
+ * Route-clear graph — approval activates route t1; a downstream gate jumps
+ * back to the activator (accept). The jump closure resets the activator, so
+ * its route activation must clear — and the cleared map must reach the
+ * persisted state (stateless server rebuilds from the DB every dispatch).
+ *   a → accept (approval, branchTo t1|t2) ; b (route t1) ; c (route t2) ;
+ *   gate (dep b, jumps to accept)
+ */
+function routeClearGraph(): TaskflowGraph {
+  return graph('route-clear', [
+    ph('a'),
+    ph('accept', { type: 'approval', dependsOn: ['a'] }),
+    ph('b', { route: 't1', dependsOn: ['accept'] }),
+    ph('c', { route: 't2', dependsOn: ['accept'] }),
+    ph('gate', { type: 'gate', dependsOn: ['b'], jumps: [{ when: 'x', to: 'accept' }] }),
+  ]);
+}
+
+/**
+ * Branch-route graph — approval branchTo activates route `t1`; the run drains
+ * while the unselected route `t2` stays pending forever.
+ *   a → accept (approval, branchTo t1|t2 routes) ; t1, t2 (routes, depend on accept)
+ */
+function endCompletionGraph(): TaskflowGraph {
+  return graph('end-completion', [
+    ph('a'),
+    ph('accept', {
+      type: 'approval',
+      dependsOn: ['a'],
+    }),
+    ph('t1', { route: 't1', dependsOn: ['accept'] }),
+    ph('t2', { route: 't2', dependsOn: ['accept'] }),
+  ]);
 }
 
 function startEvent(graphName?: string): FsmEvent {
   return { type: 'START', graphName: graphName ?? 'test-graph' };
 }
 
-function completeEvent(phaseId: string, durationMs?: number): FsmEvent {
-  return { type: 'COMPLETE', phaseId, durationMs: durationMs ?? 42 };
+function completeEvent(phaseId: string, durationMs?: number, branchTo?: string): FsmEvent {
+  return { type: 'COMPLETE', phaseId, durationMs: durationMs ?? 42, ...(branchTo !== undefined ? { branchTo } : {}) };
 }
 
 const forceEndEvent: FsmEvent = { type: 'FORCE_END' };
@@ -73,9 +152,9 @@ function narrowTerminated(state: FsmState) {
 // ══════════════════════════════════════════════════════════════════════════
 
 // Test-local pure dispatch — legality check + transition, no stateful handle.
-function dispatchState(state: FsmState, event: FsmEvent, graph: TaskflowGraph): TransitionResult {
+function dispatchState(state: FsmState, event: FsmEvent, g: TaskflowGraph): TransitionResult {
   assertLegalTransition(state.status, event.type);
-  return transition(state, event, graph);
+  return transition(state, event, g);
 }
 
 const idleState = (): FsmState => ({ status: 'idle' });
@@ -110,7 +189,7 @@ describe('isLegalTransition / dispatch', () => {
 
   describe('START event', () => {
     it('idle → running, first node active', () => {
-      const result = dispatchState(idleState(), startEvent(), singleAgentGraph());
+      const result = dispatchState(idleState(), startEvent(), entryOnlyGraph());
 
       expect(result.nextState.status).toBe('running');
       const rs = narrowRunning(result.nextState);
@@ -122,14 +201,14 @@ describe('isLegalTransition / dispatch', () => {
 
     it('START generates a valid UUID v4 runId', () => {
       const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-      const result = dispatchState(idleState(), startEvent(), singleAgentGraph());
+      const result = dispatchState(idleState(), startEvent(), entryOnlyGraph());
       const rs = narrowRunning(result.nextState);
 
       expect(rs.runId).toMatch(UUID_V4_RE);
     });
 
     it('START records startedAt timestamp', () => {
-      const result = dispatchState(idleState(), startEvent(), singleAgentGraph());
+      const result = dispatchState(idleState(), startEvent(), entryOnlyGraph());
       const rs = narrowRunning(result.nextState);
 
       expect(rs.startedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
@@ -137,17 +216,17 @@ describe('isLegalTransition / dispatch', () => {
     });
 
     it('START produces persist_run_state effect with running status', () => {
-      const result = dispatchState(idleState(), startEvent(), singleAgentGraph());
+      const result = dispatchState(idleState(), startEvent(), entryOnlyGraph());
 
       const runEffect = result.effects.find(
-        (e): e is { type: 'persist_run_state'; runId: string; status: string } => e.type === 'persist_run_state',
+        (e): e is { type: 'persist_run_state'; runId: string; status: FsmRunStatus } => e.type === 'persist_run_state',
       );
       expect(runEffect).toBeDefined();
       expect(runEffect!.status).toBe('running');
     });
 
     it('START produces persist_node_state effects for all phases', () => {
-      const result = dispatchState(idleState(), startEvent(), singleAgentGraph());
+      const result = dispatchState(idleState(), startEvent(), entryOnlyGraph());
 
       const nodeEffects = result.effects.filter(
         (e): e is { type: 'persist_node_state'; runId: string; nodeId: string; state: FsmNodeState } =>
@@ -158,15 +237,15 @@ describe('isLegalTransition / dispatch', () => {
     });
 
     it('START on non-idle throws InvalidStateTransitionError', () => {
-      const running = dispatchState(idleState(), startEvent(), singleAgentGraph()).nextState;
+      const running = dispatchState(idleState(), startEvent(), entryOnlyGraph()).nextState;
 
-      expect(() => dispatchState(running, startEvent(), singleAgentGraph())).toThrow(InvalidStateTransitionError);
+      expect(() => dispatchState(running, startEvent(), entryOnlyGraph())).toThrow(InvalidStateTransitionError);
     });
   });
 
   describe('COMPLETE event', () => {
     it('COMPLETE marks node done and advances to next pending', () => {
-      const g = linearTwoGraph();
+      const g = linearEndGraph();
       const started = dispatchState(idleState(), startEvent(), g).nextState;
 
       const result = dispatchState(started, completeEvent('n1'), g);
@@ -178,36 +257,37 @@ describe('isLegalTransition / dispatch', () => {
     });
 
     it('COMPLETE on idle throws InvalidStateTransitionError', () => {
-      expect(() => dispatchState(idleState(), completeEvent('n1'), singleAgentGraph())).toThrow(
+      expect(() => dispatchState(idleState(), completeEvent('n1'), entryOnlyGraph())).toThrow(
         InvalidStateTransitionError,
       );
     });
 
     it('COMPLETE for non-existent phaseId throws', () => {
-      const started = dispatchState(idleState(), startEvent(), singleAgentGraph()).nextState;
+      const started = dispatchState(idleState(), startEvent(), entryOnlyGraph()).nextState;
 
-      expect(() => dispatchState(started, completeEvent('nonexistent'), singleAgentGraph())).toThrow(
+      expect(() => dispatchState(started, completeEvent('nonexistent'), entryOnlyGraph())).toThrow(
         InvalidStateTransitionError,
       );
     });
 
     it('COMPLETE for non-active phaseId throws', () => {
-      const g = linearTwoGraph();
+      const g = linearEndGraph();
       const started = dispatchState(idleState(), startEvent(), g).nextState;
 
       // n2 is pending, not active
       expect(() => dispatchState(started, completeEvent('n2'), g)).toThrow(InvalidStateTransitionError);
     });
 
-    it('COMPLETE last node → completed with persist_run_state', () => {
-      const g = singleAgentGraph();
+    it('COMPLETE last node → completed with persist_run_state (natural drain)', () => {
+      const g = linearEndGraph();
       const started = dispatchState(idleState(), startEvent(), g).nextState;
+      const afterN1 = dispatchState(started, completeEvent('n1'), g).nextState;
 
-      const result = dispatchState(started, completeEvent('n1'), g);
+      const result = dispatchState(afterN1, completeEvent('n2'), g);
       expect(result.nextState.status).toBe('completed');
 
       const runEffect = result.effects.find(
-        (e): e is { type: 'persist_run_state'; runId: string; status: string } => e.type === 'persist_run_state',
+        (e): e is { type: 'persist_run_state'; runId: string; status: FsmRunStatus } => e.type === 'persist_run_state',
       );
       expect(runEffect).toBeDefined();
       expect(runEffect!.status).toBe('completed');
@@ -215,40 +295,54 @@ describe('isLegalTransition / dispatch', () => {
   });
 
   describe('FORCE_END event', () => {
-    it('FORCE_END from running → terminated, unfinished nodes skipped', () => {
-      const g = linearTwoGraph();
+    it('FORCE_END from running → terminated, unfinished nodes aborted', () => {
+      const g = linearEndGraph();
       const started = dispatchState(idleState(), startEvent(), g).nextState;
 
       const result = dispatchState(started, forceEndEvent, g);
       expect(result.nextState.status).toBe('terminated');
 
       const phases = narrowTerminated(result.nextState).phases;
-      expect(phases['n1'].status).toBe('skipped');
-      expect(phases['n2'].status).toBe('skipped');
+      // route-first redesign — termination produces 'aborted'
+      expect(phases['n1'].status).toBe('aborted');
+      expect(phases['n2'].status).toBe('aborted');
 
       const runEffect = result.effects.find(
-        (e): e is { type: 'persist_run_state'; runId: string; status: string } => e.type === 'persist_run_state',
+        (e): e is { type: 'persist_run_state'; runId: string; status: FsmRunStatus } => e.type === 'persist_run_state',
       );
       expect(runEffect).toBeDefined();
       expect(runEffect!.status).toBe('terminated');
     });
 
+    it('FORCE_END keeps already-done nodes done', () => {
+      const g = linearEndGraph();
+      let state: FsmState = { status: 'idle' };
+      state = dispatchState(state, startEvent(), g).nextState;
+      state = dispatchState(state, completeEvent('n1'), g).nextState;
+
+      const result = dispatchState(state, forceEndEvent, g);
+      const phases = narrowTerminated(result.nextState).phases;
+      expect(phases['n1'].status).toBe('done');
+      expect(phases['n2'].status).toBe('aborted');
+    });
+
     it('FORCE_END from idle throws', () => {
-      expect(() => dispatchState(idleState(), forceEndEvent, singleAgentGraph())).toThrow(InvalidStateTransitionError);
+      expect(() => dispatchState(idleState(), forceEndEvent, entryOnlyGraph())).toThrow(InvalidStateTransitionError);
     });
 
     it('FORCE_END from completed throws', () => {
-      const g = singleAgentGraph();
+      const g = linearEndGraph();
       const started = dispatchState(idleState(), startEvent(), g).nextState;
       const completed = dispatchState(started, completeEvent('n1'), g).nextState;
+      const completed2 = dispatchState(completed, completeEvent('n2'), g).nextState;
 
-      expect(() => dispatchState(completed, forceEndEvent, g)).toThrow(InvalidStateTransitionError);
+      expect(() => dispatchState(completed2, forceEndEvent, g)).toThrow(InvalidStateTransitionError);
     });
   });
 
   describe('Full cycle', () => {
-    it('START → COMPLETE×N → completed (linear 2-node)', () => {
-      const g = linearTwoGraph();
+    it('START → COMPLETE×N → completed (linear 2-node, natural drain)', () => {
+      const g = linearEndGraph();
 
       const r1 = dispatchState(idleState(), startEvent(), g);
       expect(r1.nextState.status).toBe('running');
@@ -266,15 +360,16 @@ describe('isLegalTransition / dispatch', () => {
     });
 
     it('completed state is terminal', () => {
-      const g = singleAgentGraph();
+      const g = linearEndGraph();
       const started = dispatchState(idleState(), startEvent(), g).nextState;
       const completed = dispatchState(started, completeEvent('n1'), g).nextState;
+      const completed2 = dispatchState(completed, completeEvent('n2'), g).nextState;
 
-      expect(() => dispatchState(completed, completeEvent('n1'), g)).toThrow(InvalidStateTransitionError);
+      expect(() => dispatchState(completed2, completeEvent('n1'), g)).toThrow(InvalidStateTransitionError);
     });
 
     it('terminated state is terminal', () => {
-      const g = singleAgentGraph();
+      const g = entryOnlyGraph();
       const started = dispatchState(idleState(), startEvent(), g).nextState;
       const terminated = dispatchState(started, forceEndEvent, g).nextState;
 
@@ -282,7 +377,7 @@ describe('isLegalTransition / dispatch', () => {
     });
 
     it('state threading tracks the full lifecycle', () => {
-      const g = singleAgentGraph();
+      const g = linearEndGraph();
       let state: FsmState = idleState();
       expect(state.status).toBe('idle');
 
@@ -290,13 +385,16 @@ describe('isLegalTransition / dispatch', () => {
       expect(state.status).toBe('running');
 
       state = dispatchState(state, completeEvent('n1'), g).nextState;
+      expect(state.status).toBe('running');
+
+      state = dispatchState(state, completeEvent('n2'), g).nextState;
       expect(state.status).toBe('completed');
     });
   });
 
   describe('JUMP event', () => {
     it('JUMP from running succeeds', () => {
-      const g = singleAgentGraph();
+      const g = entryOnlyGraph();
       const started = dispatchState(idleState(), startEvent(), g).nextState;
 
       expect(() => dispatchState(started, jumpEvent('n1'), g)).not.toThrow();
@@ -313,7 +411,7 @@ describe('isLegalTransition / dispatch', () => {
     }
 
     it('JUMP increments target retryCount from 0 to 1', () => {
-      const g = linearTwoGraph();
+      const g = linearEndGraph();
       const running = runToPartialDone(g);
 
       const result = transition(running, jumpEvent('n1'), g);
@@ -322,20 +420,22 @@ describe('isLegalTransition / dispatch', () => {
       expect(phases['n1'].retryCount).toBe(1);
     });
 
-    it('JUMP increments upstream closure retryCount', () => {
-      const g = linearTwoGraph();
+    it('JUMP keeps upstream closure (route-first — inputs already produced)', () => {
+      const g = linearEndGraph();
       const running = runToPartialDone(g);
 
-      // Jump to n2 — n1 is upstream closure, both reset
+      // Jump to n2 — n1 is upstream closure and stays terminal (upstream kept);
+      // n2 (target) resets with incremented retryCount
       const result = transition(running, jumpEvent('n2'), g);
       const phases = narrowRunning(result.nextState).phases;
-      expect(phases['n1'].status).toBe('active');
-      expect(phases['n1'].retryCount).toBe(1);
+      expect(phases['n1'].status).toBe('done');
+      expect(phases['n1'].retryCount).toBe(0);
+      expect(phases['n2'].status).toBe('active');
       expect(phases['n2'].retryCount).toBe(1);
     });
 
     it('JUMP accumulates retryCount across repeated jumps', () => {
-      const g = linearTwoGraph();
+      const g = linearEndGraph();
       let state = runToPartialDone(g);
 
       state = transition(state, jumpEvent('n1'), g).nextState;
@@ -346,8 +446,8 @@ describe('isLegalTransition / dispatch', () => {
       expect(phases['n1'].retryCount).toBe(2);
     });
 
-    it('JUMP preserves retryCount of untouched nodes', () => {
-      const g = linearTwoGraph();
+    it('JUMP resets downstream closure with incremented retryCount', () => {
+      const g = linearEndGraph();
       const running = runToPartialDone(g);
 
       const result = transition(running, jumpEvent('n1'), g);
@@ -360,7 +460,7 @@ describe('isLegalTransition / dispatch', () => {
 
   describe('effects', () => {
     it('START effects: persist_run_state + persist_node_state for each phase', () => {
-      const result = dispatchState(idleState(), startEvent(), singleAgentGraph());
+      const result = dispatchState(idleState(), startEvent(), entryOnlyGraph());
 
       const types = result.effects.map((e) => e.type);
       expect(types).toContain('persist_run_state');
@@ -368,7 +468,7 @@ describe('isLegalTransition / dispatch', () => {
     });
 
     it('effects are readonly (array runtime check)', () => {
-      const result = dispatchState(idleState(), startEvent(), singleAgentGraph());
+      const result = dispatchState(idleState(), startEvent(), entryOnlyGraph());
       expect(Array.isArray(result.effects)).toBe(true);
       expect(result.effects.length).toBeGreaterThan(0);
     });
@@ -380,11 +480,11 @@ describe('isLegalTransition / dispatch', () => {
 // ══════════════════════════════════════════════════════════════════════════
 
 describe('transition()', () => {
-  const graph = singleAgentGraph();
+  const entryGraph = entryOnlyGraph();
 
   describe('START transition', () => {
     it('idle → running, produces runId and phases', () => {
-      const result = transition({ status: 'idle' }, startEvent(), graph);
+      const result = transition({ status: 'idle' }, startEvent(), entryGraph);
 
       expect(result.nextState.status).toBe('running');
       const rs = narrowRunning(result.nextState);
@@ -395,7 +495,7 @@ describe('transition()', () => {
     });
 
     it('START returns TransitionResult with effects', () => {
-      const result = transition({ status: 'idle' }, startEvent(), graph);
+      const result = transition({ status: 'idle' }, startEvent(), entryGraph);
       expect(result.effects.length).toBeGreaterThan(0);
       expect(result.effects[0].type).toBe('persist_run_state');
     });
@@ -406,16 +506,17 @@ describe('transition()', () => {
         runId: 'r1',
         graphName: 'g',
         phases: { n1: { status: 'active', retryCount: 0 } },
+        routes: {},
         startedAt: '2024-01-01T00:00:00Z',
       };
 
-      expect(() => transition(runningState, startEvent(), graph)).toThrow(InvalidStateTransitionError);
+      expect(() => transition(runningState, startEvent(), entryGraph)).toThrow(InvalidStateTransitionError);
     });
   });
 
   describe('COMPLETE transition', () => {
     it('marks node done, next node active (linear graph)', () => {
-      const g = linearTwoGraph();
+      const g = linearEndGraph();
       const startResult = transition({ status: 'idle' }, startEvent(), g);
 
       const result = transition(startResult.nextState, completeEvent('n1'), g);
@@ -426,26 +527,35 @@ describe('transition()', () => {
       expect(result.nextState.status).toBe('running');
     });
 
-    it('COMPLETE last node → completed', () => {
-      const g = singleAgentGraph();
+    it('COMPLETE last node → completed (natural drain)', () => {
+      const g = linearEndGraph();
       const startResult = transition({ status: 'idle' }, startEvent(), g);
+      const afterN1 = transition(startResult.nextState, completeEvent('n1'), g).nextState;
 
-      const result = transition(startResult.nextState, completeEvent('n1'), g);
+      const result = transition(afterN1, completeEvent('n2'), g);
       expect(result.nextState.status).toBe('completed');
       expect(
         result.effects.some((e) => e.type === 'persist_run_state' && 'status' in e && e.status === 'completed'),
       ).toBe(true);
     });
 
+    it('COMPLETE of a plain node does NOT complete the run (not drained yet)', () => {
+      const g = linearEndGraph();
+      const startResult = transition({ status: 'idle' }, startEvent(), g);
+
+      const result = transition(startResult.nextState, completeEvent('n1'), g);
+      expect(result.nextState.status).toBe('running');
+    });
+
     it('COMPLETE non-existent phaseId throws', () => {
-      const g = singleAgentGraph();
+      const g = entryOnlyGraph();
       const startResult = transition({ status: 'idle' }, startEvent(), g);
 
       expect(() => transition(startResult.nextState, completeEvent('bad-id'), g)).toThrow(InvalidStateTransitionError);
     });
 
     it('COMPLETE non-active phaseId throws', () => {
-      const g = linearTwoGraph();
+      const g = linearEndGraph();
       const startResult = transition({ status: 'idle' }, startEvent(), g);
 
       expect(() => transition(startResult.nextState, completeEvent('n2'), g)).toThrow(InvalidStateTransitionError);
@@ -453,35 +563,28 @@ describe('transition()', () => {
   });
 
   describe('FORCE_END transition', () => {
-    it('FORCE_END from running → terminated, pending/active nodes skipped', () => {
-      const g = linearTwoGraph();
+    it('FORCE_END from running → terminated, pending/active nodes aborted', () => {
+      const g = linearEndGraph();
       let state: FsmState = { status: 'idle' };
       state = transition(state, startEvent(), g).nextState;
 
       const result = transition(state, forceEndEvent, g);
       expect(result.nextState.status).toBe('terminated');
       const phases = narrowTerminated(result.nextState).phases;
-      expect(phases['n1'].status).toBe('skipped');
-      expect(phases['n2'].status).toBe('skipped');
+      expect(phases['n1'].status).toBe('aborted');
+      expect(phases['n2'].status).toBe('aborted');
     });
 
     it('FORCE_END from idle throws', () => {
-      expect(() => transition({ status: 'idle' }, forceEndEvent, singleAgentGraph())).toThrow(
+      expect(() => transition({ status: 'idle' }, forceEndEvent, entryOnlyGraph())).toThrow(
         InvalidStateTransitionError,
       );
     });
   });
 
-  describe('Completed after all done', () => {
-    it('linear 3-node: START → COMPLETE×3 → completed', () => {
-      const g: TaskflowGraph = {
-        name: 'triple',
-        phases: [
-          { id: 'n1', type: 'main' },
-          { id: 'n2', type: 'main', dependsOn: ['n1'] },
-          { id: 'n3', type: 'main', dependsOn: ['n2'] },
-        ],
-      };
+  describe('Completed by natural drain', () => {
+    it('linear 2-node: START → COMPLETE×2 → completed', () => {
+      const g = linearEndGraph();
 
       let state: FsmState = { status: 'idle' };
       state = transition(state, startEvent(), g).nextState;
@@ -491,162 +594,294 @@ describe('transition()', () => {
       expect(state.status).toBe('running');
 
       state = transition(state, completeEvent('n2'), g).nextState;
-      expect(state.status).toBe('running');
-
-      const result = transition(state, completeEvent('n3'), g);
-      expect(result.nextState.status).toBe('completed');
+      expect(state.status).toBe('completed');
     });
   });
 
-  describe('COMPLETE with skip', () => {
-    it('skip: true → node status = skipped', () => {
-      const g = singleAgentGraph();
-      const startResult = transition({ status: 'idle' }, startEvent(), g);
+  // ── ROUTE routing (route-first redesign) ──────────────────────────────────────────────
 
-      const result = transition(
-        startResult.nextState,
-        { type: 'COMPLETE', phaseId: 'n1', durationMs: 10, skip: true },
-        g,
-      );
-      expect(result.nextState.status).toBe('completed');
-      const cs = result.nextState as Extract<FsmState, { status: 'completed' }>;
-      expect(cs.phases['n1'].status).toBe('skipped');
-    });
-    it('skip: false → node status = done (normal)', () => {
-      const g = singleAgentGraph();
-      const startResult = transition({ status: 'idle' }, startEvent(), g);
-
-      const result = transition(
-        startResult.nextState,
-        { type: 'COMPLETE', phaseId: 'n1', durationMs: 10, skip: false },
-        g,
-      );
-      expect(result.nextState.status).toBe('completed');
-      const cs = result.nextState as Extract<FsmState, { status: 'completed' }>;
-      expect(cs.phases['n1'].status).toBe('done');
-    });
-
-    it('skip absent → node status = done (backward compat)', () => {
-      const g = singleAgentGraph();
-      const startResult = transition({ status: 'idle' }, startEvent(), g);
-
-      const result = transition(startResult.nextState, { type: 'COMPLETE', phaseId: 'n1', durationMs: 10 }, g);
-      // single-node graph → completed after node done
-      expect(result.nextState.status).toBe('completed');
-      const completedState = result.nextState as Extract<FsmState, { status: 'completed' }>;
-      expect(completedState.phases['n1'].status).toBe('done');
-    });
-
-    it('skipped node unblocks downstream (counts as completed dep)', () => {
-      const g: TaskflowGraph = {
-        name: 'skip-chain',
-        phases: [
-          { id: 'n1', type: 'main' },
-          { id: 'n2', type: 'main', dependsOn: ['n1'] },
-        ],
-      };
-      const startResult = transition({ status: 'idle' }, startEvent(), g);
-
-      // skip n1
-      const afterSkip = transition(
-        startResult.nextState,
-        { type: 'COMPLETE', phaseId: 'n1', durationMs: 10, skip: true },
-        g,
-      );
-      const phases = narrowRunning(afterSkip.nextState).phases;
-      expect(phases['n1'].status).toBe('skipped');
-      // n2 should be active (unblocked by n1 skipped)
-      expect(phases['n2'].status).toBe('active');
-    });
-  });
-
-  describe('Cascade-skip for OR-join', () => {
-    it('OR-join node auto-skipped when all upstream skipped', () => {
-      const g: TaskflowGraph = {
-        name: 'or-join-cascade',
-        phases: [
-          { id: 'a', type: 'main' },
-          { id: 'b', type: 'main' },
-          { id: 'c', type: 'main', dependsOn: ['a', 'b'], join: 'any' },
-        ],
-      };
+  describe('COMPLETE with branchTo — approval branch-route activation', () => {
+    it('branchTo activates a route whose member topology would not reach', () => {
+      const g = branchForwardGraph();
       let state: FsmState = { status: 'idle' };
       state = transition(state, startEvent(), g).nextState;
 
-      // skip both upstream
-      state = transition(state, { type: 'COMPLETE', phaseId: 'a', durationMs: 10, skip: true }, g).nextState;
-      // b is still active, c should not be skipped yet (b is still pending → wait for b)
+      // a active; b on inactive route t1 — pending; x on inactive route other — pending
+      expect(narrowRunning(state).phases['a'].status).toBe('active');
+      expect(narrowRunning(state).phases['b'].status).toBe('pending');
+      expect(narrowRunning(state).phases['x'].status).toBe('pending');
+
+      // complete a → accept active
+      state = transition(state, completeEvent('a'), g).nextState;
+      expect(narrowRunning(state).phases['accept'].status).toBe('active');
+      // b still not ready: its route is inactive
+      expect(narrowRunning(state).phases['b'].status).toBe('pending');
+
+      // accept decides branchTo=t1 → the route activates, b activates via it
+      state = transition(state, completeEvent('accept', 10, 't1'), g).nextState;
+      expect(narrowRunning(state).phases['b'].status).toBe('active');
+
+      // b → done → the run drains to completed even though x never finishes
+      state = transition(state, completeEvent('b'), g).nextState;
+      expect(state.status).toBe('completed');
+    });
+
+    it('branchTo without a branch leaves the route inactive — the node never activates', () => {
+      const g = branchForwardGraph();
+      let state: FsmState = { status: 'idle' };
+      state = transition(state, startEvent(), g).nextState;
+      state = transition(state, completeEvent('a'), g).nextState;
+
+      // No branchTo — the branch node stays pending (no skip, no activation);
+      // nothing eligible remains → the run drains
+      state = transition(state, completeEvent('accept', 10), g).nextState;
+      expect(state.status).toBe('completed');
+      const completedPhases = narrowCompleted(state).phases;
+      expect(completedPhases['b'].status).toBe('pending');
+      expect(completedPhases['x'].status).toBe('pending');
+    });
+
+    it('branchTo targeting a non-existent phase throws', () => {
+      const g = branchForwardGraph();
+      let state: FsmState = { status: 'idle' };
+      state = transition(state, startEvent(), g).nextState;
+      state = transition(state, completeEvent('a'), g).nextState;
+
+      expect(() => transition(state, completeEvent('accept', 10, 'ghost'), g)).toThrow(InvalidStateTransitionError);
+    });
+
+    it('branchTo targeting an active node throws — pending or route id only', () => {
+      const g = branchForwardGraph();
+      let state: FsmState = { status: 'idle' };
+      state = transition(state, startEvent(), g).nextState;
+      state = transition(state, completeEvent('a'), g).nextState;
+
+      // a is active — an invalid branch target state
+      expect(() => transition(state, completeEvent('accept', 10, 'a'), g)).toThrow(InvalidStateTransitionError);
+    });
+  });
+
+  describe('COMPLETE with branchTo — gate jump reset on terminal target', () => {
+    it('branchTo to a done upstream node resets target + closure with retryCount increment', () => {
+      const g = branchJumpGraph();
+      let state: FsmState = { status: 'idle' };
+      state = transition(state, startEvent(), g).nextState;
+
+      // writer → review → gate
+      state = transition(state, completeEvent('writer'), g).nextState;
+      expect(narrowRunning(state).phases['review'].status).toBe('active');
+      state = transition(state, completeEvent('review'), g).nextState;
+      expect(narrowRunning(state).phases['gate'].status).toBe('active');
+
+      // gate jump → writer (done) → JUMP reset
+      state = transition(state, completeEvent('gate', 10, 'writer'), g).nextState;
       const phases = narrowRunning(state).phases;
+      expect(phases['writer'].status).toBe('active');
+      expect(phases['writer'].retryCount).toBe(1);
+      expect(phases['review'].status).toBe('pending');
+      expect(phases['review'].retryCount).toBe(1);
+      expect(phases['gate'].status).toBe('pending');
+      expect(phases['gate'].retryCount).toBe(1);
+    });
+
+    it('branchTo to an aborted node also triggers JUMP reset', () => {
+      const g = branchJumpGraph();
+      // Reconstructed running state — writer aborted (FORCE_END residue), gate active
+      const runningState: FsmState = {
+        status: 'running',
+        runId: 'r1',
+        graphName: g.name,
+        startedAt: '2026-08-01T00:00:00.000Z',
+        phases: {
+          writer: { status: 'aborted', retryCount: 0 },
+          review: { status: 'done', retryCount: 0 },
+          gate: { status: 'active', retryCount: 0 },
+        },
+        routes: {},
+      };
+
+      const result = transition(runningState, completeEvent('gate', 10, 'writer'), g);
+      expect(result.nextState.status).toBe('running');
+      const phases = narrowRunning(result.nextState).phases;
+      // Terminal (aborted) target → JUMP reset; writer re-activated with retryCount 1
+      expect(phases['writer'].status).toBe('active');
+      expect(phases['writer'].retryCount).toBe(1);
+    });
+
+    it('branchTo to a pending target throws — gate jumps are backward-only (terminal targets)', () => {
+      const g = branchJumpGraph();
+      // Reconstructed running state — gate active, writer pending (impossible in
+      // a healthy run, but the FSM must assert terminal targets mechanically)
+      const runningState: FsmState = {
+        status: 'running',
+        runId: 'r1',
+        graphName: g.name,
+        startedAt: '2026-08-01T00:00:00.000Z',
+        phases: {
+          writer: { status: 'pending', retryCount: 0 },
+          review: { status: 'done', retryCount: 0 },
+          gate: { status: 'active', retryCount: 0 },
+        },
+        routes: {},
+      };
+
+      expect(() => transition(runningState, completeEvent('gate', 10, 'writer'), g)).toThrow(
+        InvalidStateTransitionError,
+      );
+    });
+
+    it('branchTo retry accumulates retryCount across repeated resets', () => {
+      const g = branchJumpGraph();
+      let state: FsmState = { status: 'idle' };
+      state = transition(state, startEvent(), g).nextState;
+
+      // Round 1: writer → review → gate → branchTo writer (retryCount 1)
+      state = transition(state, completeEvent('writer'), g).nextState;
+      state = transition(state, completeEvent('review'), g).nextState;
+      state = transition(state, completeEvent('gate', 10, 'writer'), g).nextState;
+      expect(narrowRunning(state).phases['writer'].retryCount).toBe(1);
+
+      // Round 2: writer → review → gate → branchTo writer (retryCount 2)
+      state = transition(state, completeEvent('writer'), g).nextState;
+      state = transition(state, completeEvent('review'), g).nextState;
+      state = transition(state, completeEvent('gate', 10, 'writer'), g).nextState;
+      expect(narrowRunning(state).phases['writer'].retryCount).toBe(2);
+    });
+
+    it('gate jump clears route activations made by reset nodes — single persist carries the cleared map', () => {
+      const g = routeClearGraph();
+      let state: FsmState = { status: 'idle' };
+      state = transition(state, startEvent(), g).nextState;
+      state = transition(state, completeEvent('a'), g).nextState;
+
+      // accept activates route t1 — exactly ONE persist effect, with { t1: accept }
+      const branch = transition(state, completeEvent('accept', 10, 't1'), g);
+      state = branch.nextState;
+      const branchPersists = branch.effects.filter((e) => e.type === 'persist_run_state');
+      expect(branchPersists).toHaveLength(1);
+      expect((branchPersists[0] as { routes: Record<string, string> }).routes).toEqual({ t1: 'accept' });
+      expect(narrowRunning(state).phases['b'].status).toBe('active');
+      expect(narrowRunning(state).phases['c'].status).toBe('pending');
+
+      // b done → gate active → gate jumps back to the activator (accept, done terminal)
+      state = transition(state, completeEvent('b'), g).nextState;
+      const jump = transition(state, completeEvent('gate', 10, 'accept'), g);
+      state = jump.nextState;
+      // Closure reset includes the activator — its route activation clears
+      // in memory AND in the persist effect (the stateless server rebuilds
+      // state from the DB; an unpersisted clearing dies across dispatches).
+      expect(narrowRunning(state).routes).toEqual({});
+      const jumpPersists = jump.effects.filter((e) => e.type === 'persist_run_state');
+      expect(jumpPersists).toHaveLength(1);
+      expect((jumpPersists[0] as { routes: Record<string, string> }).routes).toEqual({});
+      // Rebuilt eligibility: with the cleared map, neither track member is
+      // ready; only the reset activator re-runs and re-decides.
+      const phases = narrowRunning(state).phases;
+      expect(phases['accept'].status).toBe('active');
+      expect(phases['b'].status).toBe('pending');
       expect(phases['c'].status).toBe('pending');
-
-      state = transition(state, { type: 'COMPLETE', phaseId: 'b', durationMs: 10, skip: true }, g).nextState;
-      // both upstream skipped → c cascade-skipped → all terminal → completed
-      expect(state.status).toBe('completed');
-      const completedState = state as Extract<FsmState, { status: 'completed' }>;
-      expect(completedState.phases['c'].status).toBe('skipped');
-    });
-
-    it('OR-join node NOT skipped when one upstream done', () => {
-      const g: TaskflowGraph = {
-        name: 'or-join-partial',
-        phases: [
-          { id: 'a', type: 'main' },
-          { id: 'b', type: 'main' },
-          { id: 'c', type: 'main', dependsOn: ['a', 'b'], join: 'any' },
-        ],
-      };
-      let state: FsmState = { status: 'idle' };
-      state = transition(state, startEvent(), g).nextState;
-
-      // a done normally, b skipped
-      state = transition(state, { type: 'COMPLETE', phaseId: 'a', durationMs: 10 }, g).nextState;
-      state = transition(state, { type: 'COMPLETE', phaseId: 'b', durationMs: 10, skip: true }, g).nextState;
-      const phases = narrowRunning(state).phases;
-      // c should be active (unblocked by a done + OR-join)
-      expect(phases['c'].status).toBe('active');
     });
   });
 
-  describe('Cascade-skip for same-source when (all-join)', () => {
-    const FLOW_GUARD = 'run only when upstream approves';
-
-    it('all-join chain with identical when cascade-skips in one event', () => {
-      const g: TaskflowGraph = {
-        name: 'same-when-cascade',
-        phases: [
-          { id: 'a', type: 'main', when: FLOW_GUARD },
-          { id: 'b', type: 'main', dependsOn: ['a'], when: FLOW_GUARD },
-          { id: 'c', type: 'main', dependsOn: ['b'], when: FLOW_GUARD },
-        ],
-      };
+  describe('COMPLETE with branchTo — route activation recording', () => {
+    it('approval branchTo a route id records route activation', () => {
+      const g = endCompletionGraph();
       let state: FsmState = { status: 'idle' };
       state = transition(state, startEvent(), g).nextState;
+      state = transition(state, completeEvent('a'), g).nextState;
 
-      // skip a on its guard — b and c share the guard text → cascade in the same event
-      state = transition(state, { type: 'COMPLETE', phaseId: 'a', durationMs: 10, skip: true }, g).nextState;
-      expect(state.status).toBe('completed');
-      const completedState = state as Extract<FsmState, { status: 'completed' }>;
-      expect(completedState.phases['a'].status).toBe('skipped');
-      expect(completedState.phases['b'].status).toBe('skipped');
-      expect(completedState.phases['c'].status).toBe('skipped');
+      state = transition(state, completeEvent('accept', 10, 't1'), g).nextState;
+      const rs = narrowRunning(state);
+      expect(rs.routes).toEqual({ t1: 'accept' });
     });
 
-    it('all-join node with different or absent when activates normally (no cascade)', () => {
-      const g: TaskflowGraph = {
-        name: 'different-when-no-cascade',
-        phases: [
-          { id: 'a', type: 'main', when: FLOW_GUARD },
-          { id: 'b', type: 'main', dependsOn: ['a'], when: 'run only when something-else' },
-          { id: 'c', type: 'main', dependsOn: ['b'] },
-        ],
-      };
+    it('approval branchTo a route activates its members; unselected route stays pending', () => {
+      const g = endCompletionGraph();
+      let state: FsmState = { status: 'idle' };
+      state = transition(state, startEvent(), g).nextState;
+      state = transition(state, completeEvent('a'), g).nextState;
+
+      state = transition(state, completeEvent('accept', 10, 't1'), g).nextState;
+      const rs = narrowRunning(state);
+      expect(rs.phases['t1'].status).toBe('active');
+      expect(rs.phases['t2'].status).toBe('pending');
+    });
+
+    it('branchTo on a non-approval/non-gate phase is ignored (no route recording)', () => {
+      const g = endCompletionGraph();
       let state: FsmState = { status: 'idle' };
       state = transition(state, startEvent(), g).nextState;
 
-      state = transition(state, { type: 'COMPLETE', phaseId: 'a', durationMs: 10, skip: true }, g).nextState;
-      const phases = narrowRunning(state).phases;
-      // b: skipped counts as terminal dep → activates (agent evaluates its own guard later)
-      expect(phases['b'].status).toBe('active');
+      state = transition(state, completeEvent('a', 10, 't1'), g).nextState;
+      // branchTo on a main phase is ignored
+      expect(narrowRunning(state).routes).toEqual({});
+    });
+
+    it('JUMP clears route activations made by nodes inside the reset closure', () => {
+      const g = endCompletionGraph();
+      let state: FsmState = { status: 'idle' };
+      state = transition(state, startEvent(), g).nextState;
+      state = transition(state, completeEvent('a'), g).nextState;
+
+      // accept activates route t1
+      state = transition(state, completeEvent('accept', 10, 't1'), g).nextState;
+      expect(narrowRunning(state).routes).toEqual({ t1: 'accept' });
+
+      // Explicit JUMP back to accept resets it — the stale route activation is dropped
+      state = transition(state, jumpEvent('accept'), g).nextState;
+      expect(narrowRunning(state).routes).toEqual({});
+    });
+  });
+
+  // ── Completion by natural drain (route-first redesign) ────────────────────────────────
+
+  describe('Natural-drain completion', () => {
+    it('run drains when no active and no eligible remain — unselected route members stay pending', () => {
+      const g = endCompletionGraph();
+      let state: FsmState = { status: 'idle' };
+      state = transition(state, startEvent(), g).nextState;
+
+      // a → accept
+      state = transition(state, completeEvent('a'), g).nextState;
+      expect(narrowRunning(state).phases['accept'].status).toBe('active');
+
+      // accept activates route t1 — the activation is recorded
+      state = transition(state, completeEvent('accept', 10, 't1'), g).nextState;
+      const afterAccept = narrowRunning(state);
+      expect(afterAccept.phases['t1'].status).toBe('active');
+      expect(afterAccept.routes).toEqual({ t1: 'accept' });
+      // unselected route member stays pending forever
+      expect(afterAccept.phases['t2'].status).toBe('pending');
+
+      // t1 → done → the run drains to completed; t2 still pending does NOT block
+      const final = transition(state, completeEvent('t1'), g);
+      expect(final.nextState.status).toBe('completed');
+      const completedPhases = narrowCompleted(final.nextState).phases;
+      expect(completedPhases['t2'].status).toBe('pending');
+    });
+
+    it('a graph drains to completed when its last node completes (no end node needed)', () => {
+      const g = entryOnlyGraph();
+      let state: FsmState = { status: 'idle' };
+      state = transition(state, startEvent(), g).nextState;
+
+      const result = transition(state, completeEvent('n1'), g);
+      expect(result.nextState.status).toBe('completed');
+    });
+
+    it('approval endRun completes the run immediately regardless of pending nodes', () => {
+      const g = endCompletionGraph();
+      let state: FsmState = { status: 'idle' };
+      state = transition(state, startEvent(), g).nextState;
+      state = transition(state, completeEvent('a'), g).nextState;
+
+      // accept completes with endRun — run completes; pending nodes stay pending
+      const event: FsmEvent = { type: 'COMPLETE', phaseId: 'accept', durationMs: 10, endRun: true };
+      const result = transition(state, event, g);
+      expect(result.nextState.status).toBe('completed');
+      const completedPhases = narrowCompleted(result.nextState).phases;
+      expect(completedPhases['t1'].status).toBe('pending');
+      expect(completedPhases['t2'].status).toBe('pending');
     });
   });
 });
@@ -689,7 +924,7 @@ describe('InvalidStateTransitionError', () => {
 
   it('thrown by dispatch() on illegal transition', () => {
     try {
-      dispatchState(idleState(), completeEvent('n1'), singleAgentGraph());
+      dispatchState(idleState(), completeEvent('n1'), entryOnlyGraph());
       expect.fail('should have thrown');
     } catch (e) {
       expect(e).toBeInstanceOf(InvalidStateTransitionError);
@@ -702,7 +937,7 @@ describe('InvalidStateTransitionError', () => {
 
   it('thrown by transition() on illegal state', () => {
     try {
-      transition({ status: 'idle' }, completeEvent('n1'), singleAgentGraph());
+      transition({ status: 'idle' }, completeEvent('n1'), entryOnlyGraph());
       expect.fail('should have thrown');
     } catch (e) {
       expect(e).toBeInstanceOf(InvalidStateTransitionError);
@@ -773,14 +1008,14 @@ describe('FsmEvent discriminated union', () => {
       }
     });
 
-    it('COMPLETE has optional skip flag', () => {
-      const evSkip: FsmEvent = { type: 'COMPLETE', phaseId: 'n1', durationMs: 42, skip: true };
-      if (evSkip.type === 'COMPLETE') {
-        expect(evSkip.skip).toBe(true);
+    it('COMPLETE has optional branchTo (branch-routing redesign — skip removed)', () => {
+      const evBranch: FsmEvent = { type: 'COMPLETE', phaseId: 'n1', durationMs: 42, branchTo: 'target' };
+      if (evBranch.type === 'COMPLETE') {
+        expect(evBranch.branchTo).toBe('target');
       }
-      const evNoSkip: FsmEvent = { type: 'COMPLETE', phaseId: 'n2', durationMs: 99 };
-      if (evNoSkip.type === 'COMPLETE') {
-        expect(evNoSkip.skip).toBeUndefined();
+      const evNoBranch: FsmEvent = { type: 'COMPLETE', phaseId: 'n2', durationMs: 99 };
+      if (evNoBranch.type === 'COMPLETE') {
+        expect(evNoBranch.branchTo).toBeUndefined();
       }
     });
 
@@ -860,13 +1095,13 @@ describe('FsmEffect discriminated union', () => {
       expect(ns.durationMs).toBe(5000);
     });
 
-    it('skipped state', () => {
+    it('aborted state (branch-routing redesign — skipped removed)', () => {
       const ns: FsmNodeState = {
-        status: 'skipped',
+        status: 'aborted',
         retryCount: 0,
         completedAt: '2024-01-01T00:00:01Z',
       };
-      expect(ns.status).toBe('skipped');
+      expect(ns.status).toBe('aborted');
       expect(ns.completedAt).toBe('2024-01-01T00:00:01Z');
     });
   });

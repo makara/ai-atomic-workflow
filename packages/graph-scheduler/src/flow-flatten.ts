@@ -38,7 +38,7 @@ function clonePhase(phase: Taskflow['phases'][number]): Taskflow['phases'][numbe
     ...phase,
     dependsOn: phase.dependsOn ? [...phase.dependsOn] : undefined,
     routing: phase.routing ? { ...phase.routing, actions: phase.routing.actions?.map((a) => ({ ...a })) } : undefined,
-    eval: phase.eval?.map((e) => ({ ...e })),
+    jumps: phase.jumps?.map((j) => ({ ...j })),
     channels: phase.channels ? [...phase.channels] : undefined,
   };
 }
@@ -118,6 +118,9 @@ export function flattenFlowPhases(
 
     // Prefix child phase IDs
     const prefix = `${phase.id}/`;
+    const childIds = new Set(flatChild.phases.map((p) => p.id));
+    const entryPhaseId = flatChild.phases.find((p) => !p.dependsOn || p.dependsOn.length === 0)?.id;
+    const entryNodeId = `${prefix}${entryPhaseId ?? flatChild.phases[0]?.id ?? ''}`;
     const prefixedPhases: Taskflow['phases'] = flatChild.phases.map((cp) => {
       const prefixedId = `${prefix}${cp.id}`;
 
@@ -139,31 +142,44 @@ export function flattenFlowPhases(
       const childInternal = cp.dependsOn ? cp.dependsOn.map((dep) => `${prefix}${dep}`) : [];
       const rewiredDependsOn = [...flowDependsOn, ...childInternal];
 
-      // Prefix routing and eval targets to match expanded child IDs.
-      // Without this, retry/jump targets in sub-graph YAML won't resolve after expansion.
+      // Prefix routing targets to match expanded child IDs. Branch-route
+      // continue targets naming a FLOW stay as route refs (route-first —
+      // routes are first-class; the flow id IS the route id); retry/jump
+      // targets remap flow → flattened entry (re-run the flow from start).
+      // Child-internal node targets get the flow prefix; parent-level targets
+      // (cross-level refs — e.g. loop-gate routing to loop-entry) stay
+      // unprefixed. Gate jump targets prefix the same way.
+      const childRef = (ref: string): string => (childIds.has(ref) ? `${prefix}${ref}` : ref);
+      const prefixedJumps = cp.jumps?.map((j) => ({ ...j, to: childRef(j.to) }));
       const prefixedRouting = cp.routing
         ? {
             ...cp.routing,
             actions: cp.routing.actions?.map((a) => ({
               ...a,
-              target: a.target ? `${prefix}${a.target}` : a.target,
+              target:
+                a.target === phase.id && a.action !== 'continue'
+                  ? entryNodeId
+                  : a.target
+                    ? childRef(a.target)
+                    : a.target,
             })),
           }
         : undefined;
-      const prefixedEval = cp.eval?.map((e) => ({
-        ...e,
-        target: e.target ? `${prefix}${e.target}` : e.target,
-      }));
+
+      // Route propagation — a flow declared as a route (`route: <id>` on the
+      // flow phase) propagates it to children; children without a route stay
+      // on the implicit default route (plain composition flows always run).
+      // Branch-route flows MUST declare `route:` — routes are explicit, never
+      // inferred from composition.
+      const childRoute = cp.route ?? phase.route;
 
       return {
         ...cp,
         id: prefixedId,
+        route: childRoute,
         dependsOn: rewiredDependsOn,
-        task: cp.task,
-        // Propagate flow parent when to child nodes missing own when guard.
-        // Child with own when keeps it (stronger condition).
-        // Child without when inherits flow parent when — prevents execution when flow phase skipped.
-        when: cp.when ?? phase.when,
+        // when propagation removed (branch-routing redesign) — flow entry guards express
+        // as preceding gate branches in the parent graph.
         // Prefix child channels: node: targets pointing at child-sibling nodes
         // get prefixed; parent-level targets stay unprefixed (cross-level ref).
         // Flow input interface — flow-phase channels are the flow's
@@ -184,9 +200,8 @@ export function flattenFlowPhases(
           }
           return childChannels.length > 0 ? childChannels : undefined;
         })(),
-        preText: cp.preText,
         routing: prefixedRouting,
-        eval: prefixedEval,
+        jumps: prefixedJumps,
       };
     });
 
@@ -200,21 +215,19 @@ export function flattenFlowPhases(
     }
     const childTerminals = [...childPhaseIds].filter((id) => !hasDownstream.has(id));
 
-    // Remap parent routing/eval targets naming this flow phase → flattened
-    // entry node id. JUMP resets target + upstream closure; the entry node's
-    // upstream is the flow phase's own dependsOn — "re-run the flow from start".
-    // Without this, a parent approval targeting a flow id silently no-ops
-    // (findUpstream returns [] for ids absent from the flattened graph).
-    const entryPhaseId = flatChild.phases.find((p) => !p.dependsOn || p.dependsOn.length === 0)?.id;
-    const entryNodeId = `${prefix}${entryPhaseId ?? prefixedPhases[0].id}`;
+    // Remap parent routing/jump targets naming this flow phase:
+    // - continue branch-route targets keep the flow id — it IS the route id
+    //   (route-first: activating a route, not re-running a node)
+    // - retry/jump targets remap to the flattened entry node — "re-run the
+    //   flow from start" (JUMP resets target + downstream)
     const rewireTargets = (target: Taskflow['phases'][number]): void => {
       if (target.routing?.actions) {
         target.routing.actions = target.routing.actions.map((a) =>
-          a.target === phase.id ? { ...a, target: entryNodeId } : a,
+          a.target === phase.id && a.action !== 'continue' ? { ...a, target: entryNodeId } : a,
         );
       }
-      if (target.eval) {
-        target.eval = target.eval.map((e) => (e.target === phase.id ? { ...e, target: entryNodeId } : e));
+      if (target.jumps) {
+        target.jumps = target.jumps.map((j) => (j.to === phase.id ? { ...j, to: entryNodeId } : j));
       }
     };
 

@@ -112,7 +112,7 @@ describe('resolveArgs — {args.X} interpolation', () => {
   });
 
   it('returns text unchanged when args absent', () => {
-    expect(resolveArgs('plain text', undefined)).toBe('plain text');
+    expect(resolveArgs('plain text', null)).toBe('plain text');
     expect(resolveArgs(undefined, { a: 'b' })).toBeUndefined();
   });
 

@@ -4,17 +4,26 @@
  * Layer 1 — highest-depth module in the FSM core. Four event paths, each with
  * independent state transition logic. Zero Effect dependency, zero I/O.
  *
+ * Judgment model (route-first redesign): all judgment lives
+ * agent-side; the FSM only executes decisions mechanically. Gate jump
+ * decisions arrive via COMPLETE.branchTo — a backward rework (target +
+ * downstream reset, upstream kept). Approval branch-route decisions arrive
+ * via COMPLETE.branchTo too — route activation (node or route id). Approval
+ * `end` arrives via COMPLETE.endRun — immediate run completion. No end node
+ * exists; no skip state exists; unselected routes never activate, and run
+ * completion is natural drain (no active and no eligible) or an end action.
+ *
  * Dependencies:
  * - Layer 1: fsm/events (FsmEvent), fsm/effects (FsmEffect)
- * - Layer 3: topology (resolveReady, findUpstream)
+ * - Layer 3: topology (resolveReady, findDownstream)
  *
  * @module
  */
 
 import { randomUUID } from 'node:crypto';
 import type { Phase } from '../schemas/index.js';
-import { findDownstream, findUpstream, resolveReady } from '../topology.js';
-import type { FsmEffect, FsmNodeState, FsmRunStatus } from './effects.js';
+import { findDownstream, resolveReady, routeActive, routeOf, type RouteMap } from '../topology.js';
+import type { FsmEffect, FsmNodeState } from './effects.js';
 import type { FsmEvent } from './events.js';
 
 /** Graph definition — name + phases, enough for topology and state init. */
@@ -39,7 +48,7 @@ export type FsmStatus = 'idle' | 'running' | 'completed' | 'terminated';
  *
  * - idle: no run exists (initial state)
  * - running: run active, at least one node active or pending
- * - completed: all nodes done (terminal)
+ * - completed: natural drain (no active, no eligible) or approval end action
  * - terminated: run force-ended (terminal)
  */
 export type FsmState =
@@ -49,6 +58,8 @@ export type FsmState =
       readonly runId: string;
       readonly graphName: string;
       readonly phases: Record<string, FsmNodeState>;
+      /** route activation map — routeId → activating node id (route-first); absent = inactive */
+      readonly routes: RouteMap;
       readonly startedAt: string;
     }
   | {
@@ -56,6 +67,7 @@ export type FsmState =
       readonly runId: string;
       readonly graphName: string;
       readonly phases: Record<string, FsmNodeState>;
+      readonly routes: RouteMap;
       readonly startedAt: string;
     }
   | {
@@ -63,6 +75,7 @@ export type FsmState =
       readonly runId: string;
       readonly graphName: string;
       readonly phases: Record<string, FsmNodeState>;
+      readonly routes: RouteMap;
       readonly startedAt: string;
     };
 
@@ -81,7 +94,7 @@ function initPhases(phases: readonly Phase[], startedAt: string): Record<string,
   for (const p of phases) {
     map[p.id] = { status: 'pending', retryCount: 0 };
   }
-  const ready = resolveReady(phases, new Set());
+  const ready = resolveReady(phases, new Set(), map, {});
   for (const p of ready) {
     map[p.id] = { ...map[p.id], status: 'active', startedAt };
   }
@@ -100,14 +113,102 @@ function clonePhases(phases: Record<string, FsmNodeState>): Record<string, FsmNo
 function terminalIds(phases: Record<string, FsmNodeState>): Set<string> {
   return new Set(
     Object.entries(phases)
-      .filter(([, ns]) => ns.status === 'done' || ns.status === 'skipped')
+      .filter(([, ns]) => ns.status === 'done' || ns.status === 'aborted')
       .map(([id]) => id),
   );
 }
 
-/** Check if all phases are in a terminal node state (done or skipped). */
-function allTerminal(phases: Record<string, FsmNodeState>): boolean {
-  return Object.values(phases).every((ns) => ns.status === 'done' || ns.status === 'skipped');
+/**
+ * Activate all currently-ready phases (mutates phases, pushes effects).
+ * Route-aware — resolveReady consults the route activation map.
+ */
+function activateReady(
+  phases: Record<string, FsmNodeState>,
+  graph: TaskflowGraph,
+  now: string,
+  effects: FsmEffect[],
+  runId: string,
+  routes: RouteMap,
+): void {
+  const doneSet = terminalIds(phases);
+  const ready = resolveReady(graph.phases, doneSet, phases, routes);
+  for (const p of ready) {
+    // Pending guard — a node already activated (branch target, JUMP reset
+    // re-activation) must not be re-activated with a duplicate effect.
+    if (phases[p.id]?.status !== 'pending') continue;
+    phases[p.id] = {
+      ...phases[p.id],
+      status: 'active',
+      startedAt: now,
+    };
+    effects.push({
+      type: 'persist_node_state',
+      runId,
+      nodeId: p.id,
+      state: phases[p.id],
+    });
+  }
+}
+
+/**
+ * Natural-drain completion check — no active node AND no eligible pending
+ * node (route-active with satisfied deps). Unselected-route members stay
+ * pending forever and never block completion.
+ */
+function isDrained(phases: Record<string, FsmNodeState>, graph: TaskflowGraph, routes: RouteMap): boolean {
+  for (const ns of Object.values(phases)) {
+    if (ns.status === 'active') return false;
+  }
+  const doneSet = terminalIds(phases);
+  return resolveReady(graph.phases, doneSet, phases, routes).length === 0;
+}
+
+/**
+ * JUMP reset — target + downstream terminal nodes back to pending,
+ * retryCount incremented (never zeroed — bounds reference the counter),
+ * upstream KEPT (inputs already produced stay), route activations made by
+ * nodes inside the reset closure cleared (they re-run and re-decide), then
+ * re-activate ready nodes. Shared by the JUMP event and gate jump decisions
+ * (route-first redesign).
+ */
+function applyJumpReset(
+  phases: Record<string, FsmNodeState>,
+  graph: TaskflowGraph,
+  targetPhaseId: string,
+  now: string,
+  effects: FsmEffect[],
+  runId: string,
+  routes: RouteMap,
+): RouteMap {
+  const resetSet = new Set<string>([targetPhaseId]);
+  for (const id of findDownstream(targetPhaseId, graph.phases)) {
+    const ns = phases[id];
+    if (ns && (ns.status === 'done' || ns.status === 'active' || ns.status === 'aborted')) {
+      resetSet.add(id);
+    }
+  }
+
+  for (const id of resetSet) {
+    const ns = phases[id];
+    if (ns) {
+      phases[id] = { status: 'pending', retryCount: ns.retryCount + 1 };
+      effects.push({
+        type: 'persist_node_state',
+        runId,
+        nodeId: id,
+        state: phases[id],
+      });
+    }
+  }
+
+  // Clear route activations made by reset nodes — they re-run and re-decide.
+  const nextRoutes: Record<string, string> = {};
+  for (const [routeId, activator] of Object.entries(routes)) {
+    if (!resetSet.has(activator)) nextRoutes[routeId] = activator;
+  }
+
+  activateReady(phases, graph, now, effects, runId, nextRoutes);
+  return nextRoutes;
 }
 
 /**
@@ -116,9 +217,10 @@ function allTerminal(phases: Record<string, FsmNodeState>): boolean {
  *
  * Four event paths, each independent:
  * 1. START      — init run: all nodes pending, first ready batch active
- * 2. COMPLETE   — mark phase done, advance to next ready
- * 3. JUMP       — reset target + upstream to pending, re-activate ready
- * 4. FORCE_END  — all pending/active → skipped, run terminated
+ * 2. COMPLETE   — mark phase done; apply routing decision (gate jump /
+ *                 approval branch-route) or endRun; drain → completed
+ * 3. JUMP       — reset target + downstream to pending, re-activate ready
+ * 4. FORCE_END  — all pending/active → aborted, run terminated
  *
  * @param state  current FSM state
  * @param event  dispatch event from api/ layer
@@ -138,10 +240,11 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
         runId,
         graphName: graph.name,
         phases,
+        routes: {},
         startedAt,
       };
 
-      const effects: FsmEffect[] = [{ type: 'persist_run_state', runId, status: 'running' }];
+      const effects: FsmEffect[] = [{ type: 'persist_run_state', runId, status: 'running', routes: {} }];
       for (const [nodeId, ns] of Object.entries(phases)) {
         effects.push({ type: 'persist_node_state', runId, nodeId, state: ns });
       }
@@ -172,114 +275,106 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
 
       const now = new Date().toISOString();
       const phases = clonePhases(state.phases);
+      const effects: FsmEffect[] = [];
+      let routes = state.routes;
 
-      const isSkipped = event.skip === true;
       phases[event.phaseId] = {
         ...nodeState,
-        status: isSkipped ? 'skipped' : 'done',
+        status: 'done',
         completedAt: now,
         durationMs: event.durationMs,
       };
+      effects.push({
+        type: 'persist_node_state',
+        runId: state.runId,
+        nodeId: event.phaseId,
+        state: phases[event.phaseId],
+      });
 
-      const effects: FsmEffect[] = [
-        {
-          type: 'persist_node_state',
-          runId: state.runId,
-          nodeId: event.phaseId,
-          state: phases[event.phaseId],
-        },
-      ];
-
-      // Cascade-skip: a skipped node may force its downstream nodes to skip too.
-      // Two classes (ADR 0036 D4 + ADR 0079):
-      //  - `any`-join nodes whose deps are all terminal with none done (dead OR-join)
-      //  - all-join nodes whose `when` text is identical to the skipped node's guard
-      //    (flow-propagated guard — the whole flow short-circuits atomically)
-      if (isSkipped) {
-        const skippedPhase = graph.phases.find((p) => p.id === event.phaseId);
-        const skippedWhen = skippedPhase?.when;
-        const downstreamIds = findDownstream(event.phaseId, graph.phases);
-        // Sort by dependency count (topological depth) — shallower nodes cascade first
-        const sortedIds = [...downstreamIds].sort((a, b) => {
-          const aDeps = graph.phases.find((p) => p.id === a)?.dependsOn?.length ?? 0;
-          const bDeps = graph.phases.find((p) => p.id === b)?.dependsOn?.length ?? 0;
-          return aDeps - bDeps;
-        });
-        for (const dsId of sortedIds) {
-          const ds = phases[dsId];
-          if (!ds || ds.status !== 'pending') continue;
-          const dsPhase = graph.phases.find((p) => p.id === dsId);
-          if (!dsPhase) continue;
-          const dsDeps = dsPhase.dependsOn ?? [];
-          // Check: all deps terminal AND none done → cascade-skip
-          const allTerminalDeps = dsDeps.every((d) => {
-            const dep = phases[d];
-            return dep && (dep.status === 'done' || dep.status === 'skipped');
-          });
-          const anyDone = dsDeps.some((d) => phases[d]?.status === 'done');
-          if (!allTerminalDeps || anyDone) continue;
-          const sameSourceWhen =
-            dsPhase.join !== 'any' && typeof skippedWhen === 'string' && dsPhase.when === skippedWhen;
-          if (dsPhase.join !== 'any' && !sameSourceWhen) continue;
-          phases[dsId] = {
-            ...ds,
-            status: 'skipped',
-            completedAt: now,
-            durationMs: 0,
-          };
-          effects.push({
-            type: 'persist_node_state',
-            runId: state.runId,
-            nodeId: dsId,
-            state: phases[dsId],
-          });
-        }
+      // Approval `end` action — explicit run completion, no end node.
+      if (event.endRun === true) {
+        const nextState: FsmState = { ...state, status: 'completed', phases, routes };
+        effects.push({ type: 'persist_run_state', runId: state.runId, status: 'completed', routes });
+        return { nextState, effects };
       }
 
-      // Find next ready nodes
-      const doneSet = terminalIds(phases);
-      const ready = resolveReady(graph.phases, doneSet, phases);
-
-      if (ready.length === 0) {
-        // No more ready nodes — check if all are terminal
-        if (allTerminal(phases)) {
-          const nextState: FsmState = {
-            ...state,
-            status: 'completed',
-            phases,
-          };
-          effects.push({
-            type: 'persist_run_state',
-            runId: state.runId,
-            status: 'completed',
-          });
-          return { nextState, effects };
+      // Routing decision — mechanical application of the agent's decision.
+      // Gate: branchTo = backward jump target (rework). Approval: branchTo =
+      // branch-route target (node or route id — activates the route).
+      const completedPhase = graph.phases.find((p) => p.id === event.phaseId);
+      if (event.branchTo !== undefined) {
+        if (completedPhase?.type === 'gate') {
+          const target = phases[event.branchTo];
+          if (!target) {
+            throw new InvalidStateTransitionError(
+              state.status,
+              'COMPLETE',
+              `Gate jump target ${event.branchTo} not found in run ${state.runId}`,
+            );
+          }
+          if (target.status !== 'done' && target.status !== 'aborted') {
+            throw new InvalidStateTransitionError(
+              state.status,
+              'COMPLETE',
+              `Gate jump target ${event.branchTo} is ${target.status}, expected terminal (upstream rework target)`,
+            );
+          }
+          routes = applyJumpReset(phases, graph, event.branchTo, now, effects, state.runId, routes);
+        } else if (completedPhase?.type === 'approval') {
+          // Branch-route decision — target is a route id or a node id.
+          const routeIds = new Set(graph.phases.map((p) => p.route).filter((r): r is string => r !== undefined));
+          if (routeIds.has(event.branchTo)) {
+            routes = { ...routes, [event.branchTo]: event.phaseId };
+          } else {
+            const target = phases[event.branchTo];
+            if (!target) {
+              throw new InvalidStateTransitionError(
+                state.status,
+                'COMPLETE',
+                `Approval branch target ${event.branchTo} not found in run ${state.runId}`,
+              );
+            }
+            if (target.status !== 'pending') {
+              throw new InvalidStateTransitionError(
+                state.status,
+                'COMPLETE',
+                `Approval branch target ${event.branchTo} is ${target.status}, expected pending`,
+              );
+            }
+            phases[event.branchTo] = { ...target, status: 'active', startedAt: now };
+            effects.push({
+              type: 'persist_node_state',
+              runId: state.runId,
+              nodeId: event.branchTo,
+              state: phases[event.branchTo],
+            });
+            const targetPhase = graph.phases.find((p) => p.id === event.branchTo);
+            if (targetPhase && targetPhase.route !== undefined) {
+              routes = { ...routes, [targetPhase.route]: event.phaseId };
+            }
+          }
         }
-        // Ready is empty but not all terminal — waiting on active nodes
-        // (e.g., parallel branches still running). Stay in running.
-        return {
-          nextState: { ...state, phases },
-          effects,
-        };
+        // Single persist point for route changes — the stateless server
+        // rebuilds state from the DB every dispatch, so a route change that
+        // never reaches the DB (asymmetric per-branch persists let gate-jump
+        // clearings die in memory) leaves stale activations alive across
+        // rounds. Persist once here, never per branch.
+        effects.push({ type: 'persist_run_state', runId: state.runId, status: 'running', routes });
       }
 
       // Activate next ready nodes
-      for (const p of ready) {
-        phases[p.id] = {
-          ...phases[p.id],
-          status: 'active',
-          startedAt: now,
-        };
-        effects.push({
-          type: 'persist_node_state',
-          runId: state.runId,
-          nodeId: p.id,
-          state: phases[p.id],
-        });
+      activateReady(phases, graph, now, effects, state.runId, routes);
+
+      // Completion — natural drain (no active, no eligible). Unchosen-route
+      // nodes stay pending forever and never block completion.
+      if (isDrained(phases, graph, routes)) {
+        const nextState: FsmState = { ...state, status: 'completed', phases, routes };
+        effects.push({ type: 'persist_run_state', runId: state.runId, status: 'completed', routes });
+        return { nextState, effects };
       }
 
       return {
-        nextState: { ...state, phases },
+        nextState: { ...state, phases, routes },
         effects,
       };
     }
@@ -291,86 +386,28 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
 
       const phases = clonePhases(state.phases);
       const now = new Date().toISOString();
-
-      // Find target phase and its upstream closure
-      const upstreamIds = findUpstream(event.targetPhaseId, graph.phases);
-      const resetSet = new Set([event.targetPhaseId, ...upstreamIds]);
-
-      // Reset target + upstream to pending — retryCount increments per jump
-      // re-execution (never zeroed): eval conditions bound auto-rework loops by
-      // referencing retryAttempt, so zeroing would defeat the bound (see
-      // atom-graph-spec §Auto-Rework (gate) Rules).
-      for (const id of resetSet) {
-        const ns = phases[id];
-        if (ns) {
-          phases[id] = { status: 'pending', retryCount: ns.retryCount + 1 };
-        }
-      }
-
-      // Reset downstream nodes (transitively depend on target) to pending
-      // so the FSM state snapshot is correct immediately, not just DB via effects.
-      const downstreamIds = findDownstream(event.targetPhaseId, graph.phases);
-      for (const id of downstreamIds) {
-        if (!resetSet.has(id)) {
-          const ns = phases[id];
-          if (ns && (ns.status === 'done' || ns.status === 'active' || ns.status === 'skipped')) {
-            phases[id] = { status: 'pending', retryCount: ns.retryCount + 1 };
-          }
-        }
-      }
-
-      // Activate ready nodes among the reset set
-      const doneSet = terminalIds(phases);
-      const ready = resolveReady(graph.phases, doneSet, phases);
-
-      // Persist every reset node (target + upstream + downstream) with the
-      // in-memory pending state — retryCount INCREMENTED, never zeroed.
-      // The target itself is not covered by findUpstream/findDownstream
-      // (both exclude the node they start from), so it must be persisted
-      // explicitly or it stays `done` in the DB after a mid-chain jump.
       const effects: FsmEffect[] = [];
-      const resetNodes = new Set([event.targetPhaseId, ...resetSet, ...downstreamIds]);
-      for (const id of resetNodes) {
-        const ns = phases[id];
-        if (ns && ns.status === 'pending') {
-          effects.push({
-            type: 'persist_node_state',
-            runId: state.runId,
-            nodeId: id,
-            state: ns,
-          });
-        }
-      }
 
-      for (const p of ready) {
-        phases[p.id] = {
-          ...phases[p.id],
-          status: 'active',
-          startedAt: now,
-        };
-        effects.push({
-          type: 'persist_node_state',
-          runId: state.runId,
-          nodeId: p.id,
-          state: phases[p.id],
-        });
-      }
-
-      const nextState: FsmState = {
-        status: 'running',
-        runId: state.runId,
-        graphName: state.graphName,
-        phases,
-        startedAt: state.startedAt,
-      };
+      const routes = applyJumpReset(phases, graph, event.targetPhaseId, now, effects, state.runId, state.routes);
 
       effects.push({
         type: 'persist_run_state',
         runId: state.runId,
         status: 'running',
+        routes,
       });
 
-      return { nextState, effects };
+      return {
+        nextState: {
+          status: 'running',
+          runId: state.runId,
+          graphName: state.graphName,
+          phases,
+          routes,
+          startedAt: state.startedAt,
+        },
+        effects,
+      };
     }
 
     case 'FORCE_END': {
@@ -382,12 +419,12 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
       const now = new Date().toISOString();
       const effects: FsmEffect[] = [];
 
-      // Skip all nodes that are not in a terminal state
+      // Abort all nodes that are not in a terminal state.
       for (const [nodeId, ns] of Object.entries(phases)) {
         if (ns.status === 'pending' || ns.status === 'active') {
           phases[nodeId] = {
             ...ns,
-            status: 'skipped',
+            status: 'aborted',
             completedAt: now,
           };
           effects.push({
@@ -404,6 +441,7 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
         runId: state.runId,
         graphName: state.graphName,
         phases,
+        routes: state.routes,
         startedAt: state.startedAt,
       };
 
@@ -411,6 +449,7 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
         type: 'persist_run_state',
         runId: state.runId,
         status: 'terminated',
+        routes: state.routes,
       });
 
       return { nextState, effects };

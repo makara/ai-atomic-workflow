@@ -8,7 +8,7 @@ phases:
     channels:
       - ./CONTEXT.md
     task: |
-      Execute scope interview per skill://atom-scope-interview.
+      Execute scope interview per atom-scope-interview.
 
       Topics: idea/goal (raw, unfogged), doc-trace intent (glossary terms + ADR offers expected),
       interview output record path.
@@ -46,20 +46,17 @@ phases:
         - adr_created: true | false
         - adr_path: <path when created>
 
-  # Stage 3: Accept — human approval gate
+  # Stage 3: Accept — decision confirmation (route-first, no written actions):
+  # recommendation follows the grilling consensus; free input overrides. Dynamic
+  # options include re-grill (re-run grilling with prior context) and restart
+  # (re-run from the scope interview).
   - id: grill-accept
     type: approval
     dependsOn: [grilling]
-    routing:
-      actions:
-        - action: continue
-          label: 'Idea sharpened — to spec'
-          description: 'Consensus reached — proceed to openspec-create'
-        - action: retry
-          target: grilling
-          label: 'Re-grill'
-          description: 'Conversation incomplete — re-run grilling with prior context'
-        - action: jump
-          target: grill-scope
-          label: 'Restart scope'
-          description: 'Topic shifted — restart from scope confirmation'
+    task: |
+      Grilling consensus accepted?
+
+      Grilling consensus reached. Continue → proceed to openspec-create.
+      Recommendation follows the grilling consensus; free input overrides;
+      dynamic options include re-grill (re-run grilling with prior context)
+      and restart (re-run from scope confirmation).

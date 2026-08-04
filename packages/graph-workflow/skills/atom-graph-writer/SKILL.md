@@ -6,7 +6,7 @@ version: 1.1.0
 last_updated: '2026-07-30'
 ---
 
-> **Runtime constraints** — graph dispatch: atom-graph-spec arrives via `skill:` channel (handler-injected). Standalone use: load `skill://atom-graph-spec` for format rules and field definitions.
+> **Runtime constraints** — graph dispatch: atom-graph-spec arrives via `skill:` channel (handler-injected). Standalone use: load `atom-graph-spec` for format rules and field definitions.
 
 # Atom-Graph-Writer
 

@@ -18,6 +18,7 @@ import { UnknownPhaseTypeError } from '../phase-handler/errors.js';
 import { resolvePhaseHandler } from '../phase-handler/index.js';
 import type { IBaseNodeDetail, IFsmNodeState, INodeDetail } from '../phase-handler/types.js';
 import type { Phase } from '../schemas/index.js';
+
 import { DispatchConfigError, type NodeDetailInput } from '../types.js';
 
 /** Constant handler skill — dispatch types main/approval share it. */
@@ -31,6 +32,12 @@ export interface ISnapshotNode {
   readonly startedAt: string | null;
   readonly completedAt: string | null;
   readonly durationMs: number | null;
+  /**
+   * Display-level annotation (branch-routing redesign): true when the node is
+   * a pending node in a branch a decided gate routed away from — it will never
+   * activate. Cosmetic — no FSM state change.
+   */
+  readonly unactivated?: boolean;
 }
 
 export interface IGraphSnapshot {
@@ -69,7 +76,7 @@ export function aggregateNodeMetrics(
   for (const n of nodes) {
     switch (n.status) {
       case 'done':
-      case 'skipped':
+      case 'aborted':
         completedCount++;
         break;
       case 'active':
@@ -100,7 +107,7 @@ export function findActiveNode(
  * Build a NodeDetail from a phase + its FSM state.
  *
  * Handler resolution is static by type (main/approval); handlerSkill is the
- * constant 'atom-phase-handler'. No registry in context.
+ * constant atom-phase-handler, loaded by plain name per the skill-resolution convention.
  * runMode is auto-supplied from the run record. Node-scope gate:
  * `node:` channel targets outside the run's flattened node set are stripped
  * at dispatch (shared predicate — stale-file protection).
@@ -126,7 +133,6 @@ export function buildNodeDetail(input: NodeDetailInput): Effect.Effect<INodeDeta
         dependsOn: phase.dependsOn,
         handlerSkill: HANDLER_SKILL,
         skill: phase.skill,
-        when: phase.when,
         constraints: input.constraints,
         runMode: input.runMode,
         retryAttempt: input.nodeState.retryCount,
@@ -162,12 +168,23 @@ export function buildNodeDetail(input: NodeDetailInput): Effect.Effect<INodeDeta
 }
 
 /** Build a GraphSnapshot from an FsmState. */
-export function buildSnapshot(state: FsmState): IGraphSnapshot {
+export function buildSnapshot(state: FsmState, graph?: TaskflowGraph): IGraphSnapshot {
   if (state.status === 'idle') {
     return assembleSnapshot(
       { runId: '', graphName: '', fsmState: 'idle', createdAt: '', updatedAt: new Date().toISOString() },
       [],
     );
+  }
+
+  // Display-level annotation: pending nodes on inactive routes will never
+  // activate (route-first — route membership is declared, no inference).
+  const unactivated = new Set<string>();
+  if (graph) {
+    for (const p of graph.phases) {
+      if (p.route !== undefined && state.phases[p.id]?.status === 'pending' && !(p.route in state.routes)) {
+        unactivated.add(p.id);
+      }
+    }
   }
 
   const nodes: ISnapshotNode[] = Object.entries(state.phases).map(([id, ns]) => ({
@@ -177,6 +194,7 @@ export function buildSnapshot(state: FsmState): IGraphSnapshot {
     startedAt: ns.startedAt ?? null,
     completedAt: ns.completedAt ?? null,
     durationMs: ns.durationMs ?? null,
+    unactivated: unactivated.has(id) || undefined,
   }));
 
   return assembleSnapshot(

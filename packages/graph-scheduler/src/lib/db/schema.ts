@@ -46,8 +46,15 @@ export const CREATE_NODE_STATES_TOPO_INDEX = `
 /** All DDL statements for the current schema version, in dependency order. */
 export const V1_DDL = [CREATE_GRAPH_RUNS, CREATE_NODE_STATES, CREATE_NODE_STATES_TOPO_INDEX] as const;
 
-/** v2 delta — run-level mode column (Run Mode as run field). */
-export const V2_DDL = [`ALTER TABLE graph_runs ADD COLUMN mode TEXT NOT NULL DEFAULT 'manual'`] as const;
+/** v2 delta — final shape delivered: mode (Run Mode as run field) + routes (route activation map) + constraints (project constraint snapshot — run context) + unused-field cleanup (topo_order / topo index / applied_at dropped). */
+export const V2_DDL = [
+  `ALTER TABLE graph_runs ADD COLUMN mode TEXT NOT NULL DEFAULT 'manual'`,
+  `ALTER TABLE graph_runs ADD COLUMN routes TEXT NOT NULL DEFAULT '{}'`,
+  `ALTER TABLE graph_runs ADD COLUMN constraints TEXT NOT NULL DEFAULT '[]'`,
+  `DROP INDEX IF EXISTS idx_node_states_topo`,
+  `ALTER TABLE node_states DROP COLUMN topo_order`,
+  `ALTER TABLE schema_version DROP COLUMN applied_at`,
+] as const;
 
 /** All versioned DDL ladders, in application order. */
 export const VERSIONED_DDL: ReadonlyArray<readonly string[]> = [V1_DDL, V2_DDL];

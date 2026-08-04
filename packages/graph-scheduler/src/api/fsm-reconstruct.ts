@@ -18,7 +18,7 @@ import type { PersistenceError } from '../types.js';
 /**
  * Valid FsmNodeState status values — runtime guard. Single authority:
  * derived from NodeStateSchema.status, which mirrors FSM production points
- * (pending/active/done/skipped). 'blocked' was never FSM-produced (run-level
+ * (pending/active/done/aborted). 'blocked' was never FSM-produced (run-level
  * legacy only, normalized to running below).
  */
 const VALID_NODE_STATUSES: ReadonlySet<string> = new Set(NodeStateSchema.shape.status.options);
@@ -53,6 +53,7 @@ export function reconstructFsmState(
           runId: run.runId,
           graphName: run.graphName,
           phases,
+          routes: run.routes,
           startedAt: run.createdAt,
         };
       case 'blocked':
@@ -62,6 +63,7 @@ export function reconstructFsmState(
           runId: run.runId,
           graphName: run.graphName,
           phases,
+          routes: run.routes,
           startedAt: run.createdAt,
         };
       case 'terminated':
@@ -70,6 +72,7 @@ export function reconstructFsmState(
           runId: run.runId,
           graphName: run.graphName,
           phases,
+          routes: run.routes,
           startedAt: run.createdAt,
         };
       default:
@@ -107,7 +110,7 @@ export function executeEffects(
           break;
         }
         case 'persist_run_state': {
-          yield* repo.updateRunStatus(effect.runId, effect.status);
+          yield* repo.updateRunStatus(effect.runId, effect.status, effect.routes);
           break;
         }
       }

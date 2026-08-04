@@ -7,7 +7,7 @@ version: 1.3.0
 last_updated: '2026-07-30'
 ---
 
-> **Runtime constraints** — load `skill://writing-great-skills` before use.
+> **Runtime constraints** — load skill writing-great-skills before use.
 
 # Atom-Skill-Spec
 
@@ -23,7 +23,7 @@ Reference specification for SKILL.md format — frontmatter rules, body content 
 
 |Field|Why|
 |-|-|
-|`name`|Platform resolves `skill://<name>` by frontmatter name match. Missing → skill unloadable|
+|`name`|Skill directory name. Resolution rule: `<name>` → `<skillsDir>/<name>/SKILL.md` (candidate order: config `skillsDir` → `packages/graph-workflow/skills` → `~/.agents/skills`). Missing → skill unloadable|
 |`description`|Trigger phrases listing branches that invoke skill. Search index key|
 
 ## Recommended
@@ -53,7 +53,7 @@ Default model-invoked. Pick user-invoked only when agent should never auto-load.
 `Runtime constraints` block — first content after frontmatter. Lines prefixed with `>`. Multi-line OK — load dependencies, declare constraints, state preconditions. Format:
 
 ```
-> **Runtime constraints** — load `skill://<name>` before use.
+> **Runtime constraints** — load skill <name> before use.
 > Additional constraint line.
 ```
 
@@ -70,7 +70,7 @@ Entry skills declare runtime context needs via `## Context Requirements` section
 1. Contract is the single source of truth for graph channel declarations — the load-time pass cross-checks every dispatching graph's `channels` against it (missing reference/file → error, phantom channel → warning).
 2. **Placeholder entries forbidden** — `<configurable …>` style entries fail contract parsing with an error. Every entry MUST be a concrete node ID, skill name, or file glob.
 3. **No hardcoded output paths in skill body** — skills MUST NOT reference `.taskflow/outputs/<id>.output.txt` directly; upstream content arrives via injected context (dependsOn implicit + `node:` channels).
-4. **No self-load duplication** — content reachable via declared channels is handler-injected; the skill body MUST NOT re-load `skill://<reference>` or re-read declared files as its primary mechanism (standalone-use wording allowed with "graph dispatch: handler-injected" annotation).
+4. **No self-load duplication** — content reachable via declared channels is handler-injected; the skill body MUST NOT re-load reference skills or re-read declared files as its primary mechanism (standalone-use wording allowed with "graph dispatch: handler-injected" annotation).
 5. `atom-kernel` excluded from Reference skills — platform primitive, always injected via the auxiliary-skills constant, never a channel.
 
 ### Mandatory
@@ -102,7 +102,7 @@ Organize by `writing-great-skills` information hierarchy. Body mixes steps and r
 
 All natural language — skill body, code comments, sibling files — MUST:
 
-1. **Caveman full level** (load `skill://caveman` for full rules):
+1. **Caveman full level** (load skill caveman for full rules):
    - Drop articles, filler, pleasantries, hedging
    - Fragments OK. Short synonyms. Technical terms exact. Code unchanged
    - Standard acronyms OK (API, URI, JSON). No invented abbreviations
@@ -116,11 +116,22 @@ All natural language — skill body, code comments, sibling files — MUST:
 
 ## Allowed
 
-- Sibling files deployed with skill — `skill://<name>/<path>`
-- Skills referenced via `skill://` protocol
+- Sibling files deployed with skill — `<name>/<path>` relative to the skill's SKILL.md
+- Skills referenced by plain name — `load skill <name>`
+
+## Resolution Rule
+
+Skill name → SKILL.md path: `<name>` → `<skillsDir>/<name>/SKILL.md`. SkillsDir candidate order (first match wins):
+
+1. Config `skillsDir` (project `.graph-scheduler/config.json`)
+2. `packages/graph-workflow/skills` (monorepo source — scheduler's `resolveSkillsDir` probe order: config → repo layout → package-sibling)
+3. `~/.agents/skills` (global deployment — cross-platform shared path)
+
+Sibling files: `<name>/<path>` resolves relative to the skill's SKILL.md. Lookup requires file tools only — no platform URI resolver.
 
 ## Prohibited
 
+- `skill://` URI form — no URI scheme in references; plain names only
 - External docs (`docs/`, `README.md`, `CONTEXT.md`) — absent when skill deployed elsewhere
 - External URLs — uncontrollable, may 404 or change
 - Files outside plugin boundaries

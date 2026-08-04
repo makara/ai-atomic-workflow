@@ -6,7 +6,7 @@ version: 2.0.0
 last_updated: '2026-08-01'
 ---
 
-> **Runtime constraints** — graph dispatch: atom-skill-spec arrives via `skill:` channel (handler-injected). Standalone use: load `skill://atom-skill-spec` before use.
+> **Runtime constraints** — graph dispatch: atom-skill-spec arrives via `skill:` channel (handler-injected). Standalone use: load `atom-skill-spec` before use.
 
 # Atom-Skill-Writer
 
@@ -53,7 +53,7 @@ Read scope-confirm output. Extract:
 - `scope` — problem skill solves
 - `inputs` — files/types skill consumes
 - `outputs` — what skill produces
-- `dependencies` — skills loaded via `skill://`
+- `dependencies` — skills loaded by plain name
 - `save_location` — filesystem path for SKILL.md
 
 #### Step C2: Draft Frontmatter
@@ -78,7 +78,7 @@ Generate YAML frontmatter per atom-skill-spec §Frontmatter Format:
 
 Generate body per atom-skill-spec §Body Content Rules:
 
-1. **Runtime constraints block** — first content after frontmatter. `>` lines. Declare `skill://` dependencies.
+1. **Runtime constraints block** — first content after frontmatter. `>` lines. Declare skill dependencies by plain name.
 2. **Body sections** — per `writing-great-skills` information hierarchy. Steps first, reference after.
 3. **Entry skill rules** — if graph-callable:
    - `## Context Requirements` — From upstream + Reference skills + Files
@@ -125,7 +125,7 @@ Read edit-scope-confirm output (also from upstream). Extract:
 
 - `frontmatter_changes` — fields to add, update, remove
 - `section_changes` — sections to add, update, remove
-- `dependency_changes` — `skill://` refs to add/remove
+- `dependency_changes` — skill refs to add/remove
 - `trigger_phrase_changes` — description trigger phrase updates
 
 #### Step E3: Perform In-place Edits
@@ -155,7 +155,7 @@ Apply changes to original SKILL.md:
 
 #### Step E4: Validate Modified Skill
 
-Validate modified SKILL.md against every atom-skill-spec rule class (frontmatter format, Runtime constraints block, body content, language constraints, reference constraints) plus edit-specific integrity: no orphan `skill://` references, section structure intact after edit.
+Validate modified SKILL.md against every atom-skill-spec rule class (frontmatter format, Runtime constraints block, body content, language constraints, reference constraints) plus edit-specific integrity: no orphan skill references, section structure intact after edit.
 
 Record each failure: rule, location, detail, suggested fix.
 

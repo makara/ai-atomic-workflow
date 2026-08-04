@@ -70,6 +70,28 @@ describe('IApprovalAction', () => {
     // TypeScript should reject: act.action = 'retry'
     expect(act.action).toBe('continue');
   });
+
+  it('value — stable machine identifier for downstream gate conditions (branch-routing redesign)', () => {
+    const act: IApprovalAction = {
+      action: 'continue',
+      value: 'accept',
+      label: 'Accept',
+      description: 'Approve and advance',
+    };
+    expect(act.value).toBe('accept');
+  });
+
+  it('IApprovalAction carries no default field — recommendation is AI-side (route-first)', () => {
+    const act: IApprovalAction = {
+      action: 'continue',
+      value: 'accept',
+      label: 'Accept',
+      description: 'Approve and advance',
+    };
+    // 'default' was removed from the action contract (no written default — the
+    // AI recommendation is the default); manual mode presents the full card
+    expect(act).not.toHaveProperty('default');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -125,35 +147,73 @@ describe('IApprovalDecision', () => {
 });
 
 // ---------------------------------------------------------------------------
-// DEFAULT_APPROVAL_ACTIONS — builtin constant
+// Approval routingActions — branch-route scenario only (route-first)
 // ---------------------------------------------------------------------------
 
-describe('DEFAULT_APPROVAL_ACTIONS', () => {
-  // Inlined type guard — avoids import of not-yet-existing export
-  const actions: IApprovalAction[] = [
-    { action: 'continue', label: 'Continue', description: 'Accept output, advance to next phase' },
-    { action: 'retry', label: 'Retry', description: 'Re-execute the upstream phase with feedback' },
-  ];
-
-  it('contains exactly continue and retry — no jump, no TODO', () => {
-    expect(actions).toHaveLength(2);
-    expect(actions[0].action).toBe('continue');
-    expect(actions[1].action).toBe('retry');
+describe('approval routingActions', () => {
+  it('undeclared approval carries NO written actions — card = Accept + free input + AI options', async () => {
+    const { approvalPhaseHandler } = await import('../../src/phase-handler/approval-handler.js');
+    const phase = { id: 'p1', type: 'approval' as const, dependsOn: ['up'] };
+    const nd = approvalPhaseHandler.extendNodeDetail(
+      {
+        nodeId: 'p1',
+        type: 'approval',
+        handlerSkill: 'atom-phase-handler',
+        constraints: [],
+        runMode: 'manual',
+        retryAttempt: 0,
+      },
+      phase,
+      { status: 'active', retryCount: 0 },
+    );
+    expect(nd.routingActions).toBeUndefined();
   });
 
-  it('has no TODO action', () => {
-    const hasTodo = actions.some((a) => a.label === 'TODO' || (a as Record<string, unknown>).action === 'todo');
-    expect(hasTodo).toBe(false);
-  });
-
-  it('has no jump action in defaults', () => {
-    const hasJump = actions.some((a) => a.action === 'jump');
-    expect(hasJump).toBe(false);
+  it('declared branch-route actions pass through verbatim', async () => {
+    const { approvalPhaseHandler } = await import('../../src/phase-handler/approval-handler.js');
+    const phase = {
+      id: 'p1',
+      type: 'approval' as const,
+      dependsOn: ['up'],
+      routing: {
+        actions: [
+          {
+            action: 'continue' as const,
+            target: 'minimal-track',
+            value: 'minimal',
+            label: 'Minimal',
+            description: 'd',
+          },
+          {
+            action: 'continue' as const,
+            target: 'detailed-track',
+            value: 'detailed',
+            label: 'Detailed',
+            description: 'd',
+          },
+        ],
+      },
+    };
+    const nd = approvalPhaseHandler.extendNodeDetail(
+      {
+        nodeId: 'p1',
+        type: 'approval',
+        handlerSkill: 'atom-phase-handler',
+        constraints: [],
+        runMode: 'manual',
+        retryAttempt: 0,
+      },
+      phase,
+      { status: 'active', retryCount: 0 },
+    );
+    expect(nd.routingActions).toHaveLength(2);
+    expect(nd.routingActions?.[0].action).toBe('continue');
+    expect(nd.routingActions?.[0].target).toBe('minimal-track');
   });
 });
 
 // ---------------------------------------------------------------------------
-// extendNodeDetail — preText fallback chain + field surface (DEBT #1)
+// extendNodeDetail — topic from task first line + field surface
 // ---------------------------------------------------------------------------
 
 describe('approvalPhaseHandler.extendNodeDetail', () => {
@@ -163,75 +223,123 @@ describe('approvalPhaseHandler.extendNodeDetail', () => {
     handlerSkill: 'atom-phase-handler',
     skill: 'atom-phase-handler',
     constraints: [],
+    runMode: 'manual' as const,
     retryAttempt: 0,
   };
-  const nodeState = { status: 'active', retryCount: 0, startedAt: null, completedAt: null, durationMs: null };
+  const nodeState = {
+    status: 'active',
+    retryCount: 0,
+    startedAt: undefined,
+    completedAt: undefined,
+    durationMs: undefined,
+  };
 
-  it('surfaces explicit preText when declared', async () => {
-    const phase = { id: 'a', type: 'approval', task: 'Decide', preText: 'custom pre-call text' } as Phase;
+  it('derives topic from the task first line', async () => {
+    const phase = { id: 'a', type: 'approval', task: 'Decide now\nCard body follows.' } as Phase;
     const result = (await import('../../src/phase-handler/approval-handler.js')).approvalPhaseHandler.extendNodeDetail(
       base,
       phase,
       nodeState,
     );
-    expect(result.preText).toBe('custom pre-call text');
+    expect(result.topic).toBe('Decide now');
   });
 
-  it('falls back to default pre-call text when neither declared', async () => {
+  it('falls back to Decision Required when task absent', async () => {
+    const phase = { id: 'a', type: 'approval' } as Phase;
+    const result = (await import('../../src/phase-handler/approval-handler.js')).approvalPhaseHandler.extendNodeDetail(
+      base,
+      phase,
+      nodeState,
+    );
+    expect(result.topic).toBe('Decision Required');
+  });
+
+  it('passes node: channels through — judgment context', async () => {
+    const phase = { id: 'a', type: 'approval', task: 'Decide', channels: ['node:review/arch-review'] } as Phase;
+    const result = (await import('../../src/phase-handler/approval-handler.js')).approvalPhaseHandler.extendNodeDetail(
+      base,
+      phase,
+      nodeState,
+    );
+    expect(result.channels).toEqual(['node:review/arch-review']);
+  });
+
+  it('never emits preText on NodeDetail — removed field', async () => {
     const phase = { id: 'a', type: 'approval', task: 'Decide' } as Phase;
     const result = (await import('../../src/phase-handler/approval-handler.js')).approvalPhaseHandler.extendNodeDetail(
       base,
       phase,
       nodeState,
     );
-    expect(result.preText).toBe('Phase: a. Output is ready for review.');
-  });
-
-  it('never falls back to a legacy routing.context array — preText is the single declaration site', async () => {
-    const phase = { id: 'a', type: 'approval', task: 'Decide' } as Phase;
-    const result = (await import('../../src/phase-handler/approval-handler.js')).approvalPhaseHandler.extendNodeDetail(
-      base,
-      phase,
-      nodeState,
-    );
-    expect(result.preText).toBe('Phase: a. Output is ready for review.'); // default, never routing.context
-  });
-
-  it('never emits legacy context field on NodeDetail', async () => {
-    const phase = { id: 'a', type: 'approval', task: 'Decide', preText: 'x' } as Phase;
-    const result = (await import('../../src/phase-handler/approval-handler.js')).approvalPhaseHandler.extendNodeDetail(
-      base,
-      phase,
-      nodeState,
-    );
-    expect(result).not.toHaveProperty('context');
+    expect(result).not.toHaveProperty('preText');
   });
 });
 
 describe('field-type contract — mis-typed fields rejected at parse time', () => {
-  it('rejects approval phase declaring channels — schema parse error naming the field', () => {
+  it('accepts approval phase with node: channels — judgment context', () => {
     const phase = { id: 'a', type: 'approval', task: 'Decide', channels: ['node:some-node'] };
     const result = PhaseSchema.safeParse(phase);
-    expect(result.success).toBe(false);
-    const messages = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('\n');
-    expect(messages).toContain('approval');
-    expect(messages).toContain('channels');
+    expect(result.success).toBe(true);
   });
 
-  it('rejects main phase declaring preText — schema parse error naming the field', () => {
+  it('rejects approval phase with non-node channel entry', () => {
+    const phase = { id: 'a', type: 'approval', task: 'Decide', channels: ['some-node'] };
+    const result = PhaseSchema.safeParse(phase);
+    expect(result.success).toBe(false);
+    const messages = result.error!.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('\n');
+    expect(messages).toContain('approval');
+    expect(messages).toContain("must be 'node:<id>'");
+  });
+
+  it('rejects any phase declaring preText — removed field (schema field convergence)', () => {
     const phase = { id: 'a', type: 'main', task: 'do it', preText: 'custom pre-call text' };
     const result = PhaseSchema.safeParse(phase);
     expect(result.success).toBe(false);
-    const messages = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('\n');
-    expect(messages).toContain('main');
-    expect(messages).toContain('preText');
+    const messages = result.error!.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('\n');
+    expect(messages).toContain("'preText' is removed");
   });
 
-  it('accepts approval with preText and main with channels — one field per type', () => {
-    expect(PhaseSchema.safeParse({ id: 'a', type: 'approval', task: 'Decide', preText: 'x' }).success).toBe(true);
+  it('accepts approval with node: channels and main with channels — one mechanism per type', () => {
+    expect(PhaseSchema.safeParse({ id: 'a', type: 'approval', task: 'Decide', channels: ['node:x'] }).success).toBe(
+      true,
+    );
     expect(
       PhaseSchema.safeParse({ id: 'a', type: 'main', task: 'do it', channels: ['skill:atom-graph-spec'] }).success,
     ).toBe(true);
+  });
+
+  it('tolerates default: true markers on multiple actions — at-most-one-default rule removed (route-first)', () => {
+    const phase = {
+      id: 'a',
+      type: 'approval',
+      task: 'Decide',
+      routing: {
+        actions: [
+          { action: 'continue', default: true, label: 'Accept', description: 'Go' },
+          { action: 'retry', default: true, target: 'w', label: 'Retry', description: 'Fix' },
+        ],
+      },
+    };
+    // 'default' was removed from the routing-action contract (route-first:
+    // no written default — the AI recommendation is the default). The field
+    // is stripped by the schema, never an error.
+    const result = PhaseSchema.safeParse(phase);
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts approval with exactly one default: true action', () => {
+    const phase = {
+      id: 'a',
+      type: 'approval',
+      task: 'Decide',
+      routing: {
+        actions: [
+          { action: 'continue', value: 'accept', default: true, label: 'Accept', description: 'Go' },
+          { action: 'retry', value: 'revise', target: 'w', label: 'Retry', description: 'Fix' },
+        ],
+      },
+    };
+    expect(PhaseSchema.safeParse(phase).success).toBe(true);
   });
 });
 

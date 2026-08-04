@@ -48,16 +48,10 @@ describe('built-in assets', () => {
     expect(graph.phases[0].type).toBe('main');
     const approval = graph.phases[1];
     expect(approval.type).toBe('approval');
-    // Complete approval pattern — task-as-topic + routing with explicit targets
+    // route-first redesign — run completes by natural drain after the approval;
+    // no end node, no written routing actions (default card = Accept + free input + AI options)
     expect(approval.task).toBeTruthy();
-    expect(approval.routing).toBeDefined();
-    expect(Array.isArray(approval.routing.actions)).toBe(true);
-    expect(approval.routing.actions.length).toBeGreaterThanOrEqual(1);
-    for (const action of approval.routing.actions) {
-      if (action.action !== 'continue') {
-        expect(action.target).toBeTruthy();
-      }
-    }
+    expect(approval.routing).toBeUndefined();
   });
 
   it('built-in skill-delete.taskflow.yaml is valid YAML with 7 phases', () => {
@@ -69,7 +63,7 @@ describe('built-in assets', () => {
     const graph = parseYaml(raw);
     expect(graph.name).toBe('skill-delete');
     expect(graph.phases).toHaveLength(7);
-    // Verify all 7 phase IDs
+    // Verify all 7 phase IDs (route-first redesign: impact-gate + execute-gate + end marker removed)
     const phaseIds = graph.phases.map((p: { id: string }) => p.id);
     expect(phaseIds).toContain('skill-select');
     expect(phaseIds).toContain('impact-analysis');
@@ -91,21 +85,23 @@ describe('built-in assets', () => {
     // Verify dependsOn chain — entry node has empty dependsOn
     const entryPhase = graph.phases.find((p: { id: string }) => p.id === 'skill-select');
     expect(entryPhase.dependsOn).toEqual([]);
-    // Verify gate has bounded auto-rework eval (no DEBT condition)
+    // Verify gate carries jumps (route-first: no branches/default) + bounded rework
     const gatePhase = graph.phases.find((p: { id: string }) => p.id === 'delete-gate');
-    expect(gatePhase.eval).toBeDefined();
-    expect(Array.isArray(gatePhase.eval)).toBe(true);
-    expect(gatePhase.eval.length).toBeGreaterThanOrEqual(1);
-    const evalText = gatePhase.eval.map((e: { when: string }) => e.when).join(' ');
-    expect(evalText).toContain('overall: fail');
-    expect(evalText).toContain('retryAttempt < 2');
-    expect(evalText).not.toContain('DEBT');
-    // Verify accept is pure human card — no eval, 3-route routing
+    expect(gatePhase.eval, 'delete-gate eval').toBeUndefined();
+    expect(Array.isArray(gatePhase.jumps), 'delete-gate jumps').toBe(true);
+    expect(gatePhase.jumps.length).toBeGreaterThanOrEqual(1);
+    expect(gatePhase.default, 'delete-gate default').toBeUndefined();
+    // Bounded auto-rework jump (no DEBT condition) on the FAIL gate
+    const jumpText = gatePhase.jumps.map((j: { when: string }) => j.when).join(' ');
+    expect(jumpText).toContain('overall: fail');
+    expect(jumpText).toContain('retryCount < 2');
+    expect(jumpText).not.toContain('DEBT');
+    // Verify accept is pure human card — no branches, no written routing (route-first)
     const approvalPhase = graph.phases.find((p: { id: string }) => p.id === 'delete-accept');
+    expect(approvalPhase.branches).toBeUndefined();
     expect(approvalPhase.eval).toBeUndefined();
     expect(approvalPhase.dependsOn).toEqual(['delete-gate']);
-    expect(approvalPhase.routing).toBeDefined();
-    expect(approvalPhase.routing.actions).toHaveLength(3);
+    expect(approvalPhase.routing).toBeUndefined();
   });
 
   it('built-in skill-delete.taskflow.yaml passes TaskflowSchema validation', () => {
@@ -160,7 +156,7 @@ describe('ConfigFileSchema', () => {
       agentRegistry: [{ type: 'main', skill: 'atom-phase-handler' }],
     });
     expect(result.success).toBe(false);
-    const messages = result.error.issues.map((i) => i.message).join('\n');
+    const messages = result.error!.issues.map((i) => i.message).join('\n');
     expect(messages).toContain('agentRegistry');
     expect(messages).toContain('removed');
   });

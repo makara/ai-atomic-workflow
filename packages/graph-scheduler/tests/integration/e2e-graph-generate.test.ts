@@ -70,15 +70,17 @@ describe('graph-generate — schema compliance', () => {
     }
   });
 
-  it('has expected 6 phases for the graph-generate workflow', () => {
+  it('has expected 7 phases for the graph-generate workflow (route-first redesign: gate jump + no end node)', () => {
     const graph = loadGraphGenerateGraph();
     const phaseIds = graph.phases.map((p) => p.id);
     expect(phaseIds).toContain('scope-confirm');
     expect(phaseIds).toContain('graph-design');
     expect(phaseIds).toContain('graph-write');
     expect(phaseIds).toContain('graph-review');
+    expect(phaseIds).toContain('graph-gate');
     expect(phaseIds).toContain('graph-accept');
     expect(phaseIds).toContain('output-examples');
+    expect(phaseIds).not.toContain('graph-done');
   });
 
   it('main phases with skill reference use kebab-case skill names', () => {
@@ -90,31 +92,26 @@ describe('graph-generate — schema compliance', () => {
     }
   });
 
-  it('routing actions have valid action enum values', () => {
+  it('approval phases declare no written routing (route-first default card)', () => {
     const graph = loadGraphGenerateGraph();
-    const approvalPhases = graph.phases.filter((p) => p.type === 'approval' && p.routing);
+    const approvalPhases = graph.phases.filter((p) => p.type === 'approval');
+    expect(approvalPhases.length).toBeGreaterThanOrEqual(1);
     for (const phase of approvalPhases) {
-      for (const action of phase.routing!.actions) {
-        expect(['continue', 'retry', 'jump']).toContain(action.action);
-        expect(typeof action.label).toBe('string');
-        expect(action.label.length).toBeGreaterThan(0);
-        expect(typeof action.description).toBe('string');
-        expect(action.description.length).toBeGreaterThan(0);
-      }
+      expect(phase.routing).toBeUndefined();
     }
   });
 
-  it('jump routing actions — if target is present, it must be non-empty', () => {
+  it('gate jumps have non-empty when conditions and resolvable upstream targets', () => {
     const graph = loadGraphGenerateGraph();
-    const approvalPhases = graph.phases.filter((p) => p.type === 'approval' && p.routing);
-    for (const phase of approvalPhases) {
-      const jumpActions = phase.routing!.actions.filter((a) => a.action === 'jump');
-      for (const action of jumpActions) {
-        // target is optional in schema; if present, must be non-empty string
-        if (action.target !== undefined) {
-          expect(typeof action.target).toBe('string');
-          expect(action.target.length).toBeGreaterThan(0);
-        }
+    const gatePhases = graph.phases.filter((p) => p.type === 'gate');
+    const phaseIds = new Set(graph.phases.map((p) => p.id));
+    for (const phase of gatePhases) {
+      expect(phase.jumps).toBeDefined();
+      for (const jump of phase.jumps!) {
+        expect(typeof jump.when).toBe('string');
+        expect(jump.when.length).toBeGreaterThan(0);
+        expect(typeof jump.to).toBe('string');
+        expect(phaseIds.has(jump.to), `jump target ${jump.to} resolves`).toBe(true);
       }
     }
   });
@@ -249,63 +246,66 @@ describe('graph-generate — topology validity', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Eval condition presence
+// Gate branch presence (branch-routing redesign — eval removed)
 // ---------------------------------------------------------------------------
 
-describe('graph-generate — eval condition presence', () => {
-  it('every approval phase has no eval (pure human card)', () => {
+describe('graph-generate — gate branch presence', () => {
+  it('every approval phase has no branches/eval (pure human card)', () => {
     const graph = loadGraphGenerateGraph();
     const approvalPhases = graph.phases.filter((p) => p.type === 'approval');
     expect(approvalPhases.length).toBeGreaterThanOrEqual(1);
     for (const phase of approvalPhases) {
       expect(phase.eval).toBeUndefined();
+      expect(phase.branches).toBeUndefined();
     }
   });
 
-  it('every gate phase has a bounded eval', () => {
+  it('every gate phase has jumps + a bounded backward target (route-first)', () => {
     const graph = loadGraphGenerateGraph();
     const gatePhases = graph.phases.filter((p) => p.type === 'gate');
     expect(gatePhases.length).toBeGreaterThanOrEqual(1);
     for (const phase of gatePhases) {
-      expect(phase.eval).toBeDefined();
-      expect(Array.isArray(phase.eval)).toBe(true);
-      expect(phase.eval!.length).toBeGreaterThanOrEqual(1);
+      expect(phase.jumps).toBeDefined();
+      expect(phase.jumps!.length).toBeGreaterThanOrEqual(1);
+      expect(phase.branches).toBeUndefined();
+      expect(phase.default).toBeUndefined();
     }
   });
 
-  it('eval conditions have valid action enum values', () => {
+  it('jump conditions are non-empty natural-language strings with resolvable targets', () => {
     const graph = loadGraphGenerateGraph();
     const gatePhases = graph.phases.filter((p) => p.type === 'gate');
+    const phaseIds = new Set(graph.phases.map((p) => p.id));
     for (const phase of gatePhases) {
-      for (const cond of phase.eval!) {
-        expect(['retry', 'jump']).toContain(cond.action);
-        expect(typeof cond.when).toBe('string');
-        expect(cond.when.length).toBeGreaterThan(0);
+      for (const jump of phase.jumps!) {
+        expect(typeof jump.when).toBe('string');
+        expect(jump.when.length).toBeGreaterThan(0);
+        expect(typeof jump.to).toBe('string');
+        expect(phaseIds.has(jump.to), `jump target ${jump.to} resolves`).toBe(true);
       }
     }
   });
 
-  it('graph-gate eval is bounded FAIL retry on contract field (no DEBT)', () => {
+  it('graph-gate jump is bounded FAIL retry on contract field (no DEBT)', () => {
     const graph = loadGraphGenerateGraph();
     const gatePhase = graph.phases.find((p) => p.id === 'graph-gate');
     expect(gatePhase).toBeDefined();
-    expect(gatePhase!.eval).toBeDefined();
+    expect(gatePhase!.jumps).toBeDefined();
 
-    const conditions = gatePhase!.eval!.map((c) => c.when).join(' ');
+    const conditions = gatePhase!.jumps!.map((c) => c.when).join(' ');
     expect(conditions).toContain('overall: fail');
-    expect(conditions).toContain('retryAttempt < 2');
+    expect(conditions).toContain('retryCount < 2');
     expect(conditions).not.toContain('DEBT');
     expect(conditions).not.toContain('FAIL verdict');
   });
+});
 
-  it('graph-accept has all three routing actions (continue/retry/jump)', () => {
+describe('graph-generate — approval routing', () => {
+  it('graph-accept has no written routing — default card only (route-first)', () => {
     const graph = loadGraphGenerateGraph();
     const acceptPhase = graph.phases.find((p) => p.id === 'graph-accept');
     expect(acceptPhase).toBeDefined();
-    expect(acceptPhase!.routing).toBeDefined();
-    const actionTypes = acceptPhase!.routing!.actions.map((a) => a.action);
-    expect(actionTypes).toContain('continue');
-    expect(actionTypes).toContain('retry');
-    expect(actionTypes).toContain('jump');
+    expect(acceptPhase!.type).toBe('approval');
+    expect(acceptPhase!.routing).toBeUndefined();
   });
 });

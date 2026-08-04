@@ -5,7 +5,7 @@ version: 1.2.1
 last_updated: '2026-08-01'
 ---
 
-> **Runtime constraints** — requires openspec CLI installed. Load skill://atom-kernel before use.
+> **Runtime constraints** — requires openspec CLI installed. Load atom-kernel before use.
 
 # Atom-OpenSpec-Archive
 

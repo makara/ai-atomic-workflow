@@ -1,13 +1,14 @@
 /**
- * Flatten smoke — openspec-pipeline v2 when-guard carrier resolution.
+ * Flatten smoke — openspec-pipeline v3 route-first branch-route resolution.
  *
- * Verifies design D1: after merge-at-load flattening, the track when guards
- * (which reference `spec-generate output`) resolve against a real flattened
- * node (`create/spec-generate`) — not a ghost id. Guards read
- * `.taskflow/outputs/create/spec-generate.output.txt` at runtime; a carrier
- * that fails to materialize under flattening would silently double-skip both
- * tracks (blocked-looking completion). This is the user-selected smoke layer
- * on top of the existing contract-test surface.
+ * Verifies that after merge-at-load flattening:
+ * - the branch-route approval's continue targets (flow ids = route ids)
+ *   survive as route references (never remapped to ghost nodes)
+ * - the track flows' terminals feed the terminal join (unchosen-route nodes
+ *   stay pending — route-aware readiness, no skip state)
+ * - pipeline-accept judgment context auto-injects from the flattened carrier
+ *   (create/spec-generate) — reads removed (schema field convergence)
+ * - no end markers materialize (route-first: completion is natural drain)
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -36,16 +37,22 @@ const loader = (name: string): Taskflow | null => {
   }
 };
 
-describe('openspec-pipeline v2 flatten smoke — when-guard carrier', () => {
+describe('openspec-pipeline v3 flatten smoke — route-first branch-route carrier', () => {
   const pipeline = loadGraph('openspec-pipeline.taskflow.yaml');
   const flat = flattenFlowPhases(pipeline, loader, 1, 5);
   const phaseOf = (id: string): Taskflow['phases'][number] | undefined => flat.phases.find((p) => p.id === id);
 
-  it('create flow materializes spec-generate terminal under flattening', () => {
+  it('create flow materializes spec-scope/spec-gate/spec-generate — no end marker', () => {
     expect(phaseOf('create/spec-generate')).toBeDefined();
     expect(phaseOf('create/spec-scope')).toBeDefined();
-    // create entry inherits the flow's grill dependency
+    expect(phaseOf('create/spec-gate')).toBeDefined();
+    // spec-done (end marker) deleted — route-first has no end type
+    expect(phaseOf('create/spec-done')).toBeUndefined();
+    // create entry inherits the flow's grill dependency (flattened terminal)
     expect(phaseOf('create/spec-scope')?.dependsOn).toEqual(['grill/grill-accept']);
+    // child gate jump target prefixed to the flattened entry
+    const gate = phaseOf('create/spec-gate');
+    expect(gate?.jumps?.[0].to).toBe('create/spec-scope');
   });
 
   it('pipeline-accept depends on the create flow terminal — not the flow id', () => {
@@ -53,26 +60,34 @@ describe('openspec-pipeline v2 flatten smoke — when-guard carrier', () => {
     expect(accept?.dependsOn).toEqual(['create/spec-generate']);
   });
 
-  it('track when guards reference the flattened carrier node', () => {
-    const minimal = phaseOf('minimal-track/apply-change');
-    const detailed = phaseOf('detailed-track/to-spec');
-    // when guard text (prose) references the carrier; flattened graph must
-    // contain exactly one spec-generate node so the reference is unambiguous
+  it('pipeline-accept carries no reads/channels — judgment context auto-injects from the carrier', () => {
+    const accept = phaseOf('pipeline-accept');
+    // reads removed (schema field convergence) — judgment context = direct
+    // dependsOn outputs (auto-injected) + channels node: entries
+    expect(accept?.reads).toBeUndefined();
+    // no channels — the flow terminal dependency fully covers the former reads
+    // reference; nothing extra to inject
+    expect(accept?.channels).toBeUndefined();
+    // the flattened terminal IS the node the old reads referenced — dependsOn
+    // auto-injects its output into the approval's judgment context
+    expect(accept?.dependsOn).toEqual(['create/spec-generate']);
+    // exactly one spec-generate node — the reference is unambiguous
     const specGenerateNodes = flat.phases.filter((p) => p.id.includes('spec-generate'));
     expect(specGenerateNodes).toHaveLength(1);
     expect(specGenerateNodes[0].id).toBe('create/spec-generate');
-    expect(String(minimal?.when)).toMatch(/create\/spec-generate output shows spec_status: ok AND adr_created: false/);
-    expect(String(detailed?.when)).toMatch(/create\/spec-generate output shows spec_status: ok AND adr_created: true/);
   });
 
-  it('tracks inherit the flow when guard — whole track atomic skip', () => {
+  it('branch-route continue targets stay as flow/route ids — never remapped', () => {
+    const accept = phaseOf('pipeline-accept');
+    const actions = accept?.routing?.actions ?? [];
+    expect(actions.map((a) => a.action)).toEqual(['continue', 'continue']);
+    // continue targets ARE the route ids (flow ids) — route-first keeps them
+    expect(actions.map((a) => a.target)).toEqual(['minimal-track', 'detailed-track']);
+  });
+
+  it('no when fields anywhere — guards removed (route-first)', () => {
     for (const p of flat.phases) {
-      if (p.id.startsWith('minimal-track/')) {
-        expect(String(p.when)).toMatch(/adr_created: false/);
-      }
-      if (p.id.startsWith('detailed-track/')) {
-        expect(String(p.when)).toMatch(/adr_created: true/);
-      }
+      expect(p.when, p.id).toBeUndefined();
     }
   });
 
@@ -96,20 +111,29 @@ describe('openspec-pipeline v2 flatten smoke — when-guard carrier', () => {
     expect(specScope?.channels).toEqual(expect.arrayContaining(['node:grill/grilling', './CONTEXT.md']));
   });
 
-  it('pipeline-done joins on both flow terminals', () => {
+  it('pipeline-done joins on both track flow terminals (routes)', () => {
     const done = phaseOf('pipeline-done');
+    // openspec-apply terminal = archive; openspec-engineer terminal = openspec-archive
     expect(done?.dependsOn).toEqual(
       expect.arrayContaining(['minimal-track/archive', 'detailed-track/openspec-archive']),
     );
   });
 
-  it('grill entry cascade — idea restart targets resolve to flattened entry', () => {
-    // pipeline-accept jump target: grill → flattened entry node
+  it('no root end marker — completion is natural drain', () => {
+    expect(phaseOf('pipeline-end')).toBeUndefined();
+    // 'end' is not a Phase type (route-first) — string set check keeps the
+    // assertion meaningful without a nonexistent type literal
+    const phaseTypes = new Set(flat.phases.map((p) => p.type as string));
+    expect(phaseTypes.has('end')).toBe(false);
+  });
+
+  it('grill entry cascade — tracks keep route membership; no written jump/retry actions', () => {
     const accept = phaseOf('pipeline-accept');
-    const jumpAction = (accept?.routing?.actions ?? []).find((a) => a.action === 'jump');
-    expect(jumpAction?.target).toBe('grill/grill-scope');
-    // retry target: create → flattened entry node
-    const retryAction = (accept?.routing?.actions ?? []).find((a) => a.action === 'retry');
-    expect(retryAction?.target).toBe('create/spec-scope');
+    const actions = accept?.routing?.actions ?? [];
+    // retry/jump are AI-generated dynamic options — not written actions
+    expect(actions.some((a) => a.action === 'jump' || a.action === 'retry')).toBe(false);
+    // track flows carry their declared branch routes into the flattened graph
+    expect(phaseOf('minimal-track/apply-change')?.route).toBe('minimal-track');
+    expect(phaseOf('detailed-track/to-spec')?.route).toBe('detailed-track');
   });
 });

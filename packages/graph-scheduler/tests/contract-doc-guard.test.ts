@@ -82,7 +82,6 @@ function baseNodeDetailKeys(): Set<string> {
     'handlerSkill',
     'skill',
     'agent',
-    'when',
     'constraints',
     'runMode',
     'retryAttempt',
@@ -101,11 +100,10 @@ function nodeDetailKeys(): Set<string> {
     'topic',
     'routingActions',
     'channels',
-    'preText',
-    'when',
+    'jumps',
+    'route',
     'constraints',
     'runMode',
-    'eval',
     'retryAttempt',
   ]);
 }
@@ -124,11 +122,10 @@ function assertKeysCovered(keys: Set<string>): void {
     topic: true,
     routingActions: true,
     channels: true,
-    preText: true,
-    when: true,
+    jumps: true,
+    route: true,
     constraints: true,
     runMode: true,
-    eval: true,
     retryAttempt: true,
   };
   const baseRecord: Record<keyof IBaseNodeDetail, true> = {
@@ -137,7 +134,6 @@ function assertKeysCovered(keys: Set<string>): void {
     dependsOn: true,
     handlerSkill: true,
     skill: true,
-    when: true,
     constraints: true,
     runMode: true,
     retryAttempt: true,
@@ -153,8 +149,8 @@ function assertKeysCovered(keys: Set<string>): void {
       k !== 'topic' &&
       k !== 'routingActions' &&
       k !== 'channels' &&
-      k !== 'preText' &&
-      k !== 'eval'
+      k !== 'jumps' &&
+      k !== 'route'
     ) {
       throw new Error(`contract-doc-guard: "${k}" is not an IBaseNodeDetail field`);
     }
@@ -178,11 +174,13 @@ describe('contract doc guard — atom-phase-handler SKILL.md', () => {
   it('NodeDetail base field table matches IBaseNodeDetail', () => {
     const baseTable = findTable(md, 'Field');
     expect(baseTable, 'NodeDetail base table not found').toBeDefined();
-    // Header row: [Field, Type, Required, Purpose] — body rows start after
+    // Header row: [Field, Type, Required, Purpose] — body rows start after.
+    // Continuation rows render as `||`field`|…` (empty first cell, field in
+    // column 2) — read the field from either column.
     const docFields = new Set(
       baseTable!.rows
         .slice(1)
-        .map((r) => r[0])
+        .map((r) => (r[0] !== '' ? r[0] : (r[1] ?? '')))
         .filter((f) => f !== ''),
     );
     const missingInDoc = [...tsBase].filter((f) => !docFields.has(f));
@@ -276,7 +274,11 @@ describe('contract doc guard — atom-phase-handler SKILL.md', () => {
     expect(rawNodesRow, 'snapshot nodes row not found').toBeDefined();
     const afterLabel = rawNodesRow!.slice(rawNodesRow!.indexOf('Node status values:'));
     const docValues = new Set(
-      [...afterLabel.matchAll(/`([a-z]+)`/g)].map((m) => m[1]).filter((s) => s !== 'completed'),
+      [...afterLabel.matchAll(/`([a-z]+)`/g)]
+        .map((m) => m[1])
+        .filter((s) => s !== 'completed')
+        // Negated mentions ("No `skipped` status exists") are prose, not status values
+        .filter((s) => !new RegExp(`No \\\`${s}\\\``).test(afterLabel)),
     );
     expect([...docValues].sort(), 'snapshot doc status values differ from NodeStateSchema.status').toEqual(
       [...schemaSet].sort(),

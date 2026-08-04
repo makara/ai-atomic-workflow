@@ -7,7 +7,7 @@ version: 1.0.0
 last_updated: '2026-07-31'
 ---
 
-> **Runtime constraints** — load `skill://caveman` for full level language rules.
+> **Runtime constraints** — load `caveman` for full level language rules.
 
 # Atom-Doc-Spec
 
@@ -67,7 +67,7 @@ Optional fields: `Status`, `Decision`, `Audit`.
 |Link type|Format|Example|
 |-|-|-|
 |Relative file|`[text](path/to/file.md)`|`[ADR](docs/adr/0001-example.md)`|
-|Skill reference|`[text](skill://name)`|`[atom-kernel](skill://atom-kernel)`|
+|Skill reference|`[text](name)`|`[atom-kernel](atom-kernel)`|
 |Internal anchor|`[text](#section-name)`|`[see below](#rules)`|
 
 ## Prohibited
@@ -159,10 +159,10 @@ End with:
 
 # Language Constraints
 
-Specified once in `atom-skill-spec` §Language Constraints (caveman full level via `skill://caveman`; pure English; no self-repetition). Applies to all document content unchanged — load that spec for the rules.
+Specified once in `atom-skill-spec` §Language Constraints (caveman full level via `caveman`; pure English; no self-repetition). Applies to all document content unchanged — load that spec for the rules.
 
 ---
 
 # Reference Constraints
 
-Specified once in `atom-skill-spec` §Reference Constraints (allowed: sibling files, `skill://` refs; prohibited: external URLs, absolute paths, files outside project root). Project documents additionally may reference relative paths under the repo root (`docs/adr/`, `openspec/changes/`).
+Specified once in `atom-skill-spec` §Reference Constraints (allowed: sibling files, plain skill names; prohibited: external URLs, absolute paths, files outside project root). Project documents additionally may reference relative paths under the repo root (`docs/adr/`, `openspec/changes/`).

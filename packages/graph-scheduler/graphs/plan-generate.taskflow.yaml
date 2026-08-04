@@ -8,7 +8,7 @@ phases:
     channels:
       - ./CONTEXT.md
     task: |
-      Execute scope interview per skill://atom-scope-interview.
+      Execute scope interview per atom-scope-interview.
 
       Topics: plan goal/problem; constraints (what must NOT change, limits); affected areas (domains, modules, artifacts).
 
@@ -16,47 +16,49 @@ phases:
 
       Output: prd_path (derived from to-spec native output), scope_complete: true, ticket_split_needed (complex >=4 distinct operations or cross-domain -> true), change_summary.
 
-  # Phase 2: Scope gate — machine completeness check (bounded auto-rework)
+  # Phase 2: Scope gate — machine completeness check (bounded auto-rework).
+  # Both rework conditions share ONE bound: scope-confirm retryCount < 2 (JUMP
+  # counter, never zeroed — route-first redesign). No match → pass through to
+  # the human card at scope-accept (no forward routing).
   - id: scope-gate
     type: gate
     dependsOn: [scope-confirm]
-    eval:
-      - when: 'scope-confirm output shows scope_complete: false or missing AND retryAttempt < 2'
-        action: retry
-        target: scope-confirm
-        note: 'auto: plan scope incomplete — re-run scope-confirm interview() solve mode'
-      - when: 'scope-confirm output shows prd_path missing or PRD file absent or empty AND retryAttempt < 2'
-        action: retry
-        target: scope-confirm
-        note: 'auto: PRD not produced or empty — re-run scope-confirm to-spec synthesis'
+    jumps:
+      - when: 'scope-confirm output shows scope_complete: false or missing AND scope-confirm retryCount < 2'
+        to: scope-confirm
+      - when: 'scope-confirm output shows prd_path missing or PRD file absent or empty AND scope-confirm retryCount < 2'
+        to: scope-confirm
 
-  # Phase 3: PRD acceptance — human card (gate no-match falls here)
+  # Phase 3: PRD acceptance — decision confirmation (route-first: no written
+  # actions; revise/re-plan options are AI-generated dynamic options).
   - id: scope-accept
     type: approval
     dependsOn: [scope-gate]
-    routing:
-      actions:
-        - action: continue
-          label: 'Accept plan'
-          description: 'PRD complete — proceed to execution'
-        - action: retry
-          target: scope-confirm
-          label: 'Revise scope'
-          description: 'Scope needs changes — re-run scope-confirm interview'
-        - action: jump
-          target: scope-confirm
-          label: 'Re-plan from start'
-          description: 'Fundamental plan issues — re-plan from scope-confirm'
-
-  # Phase 4: Ticket split — when-guarded for complex plans
-  - id: ticket-split
-    type: main
-    dependsOn: [scope-accept]
-    when: 'scope-confirm output shows ticket_split_needed: true'
     channels:
       - node:scope-confirm
     task: |
-      Run to-tickets on the PRD. Accept its native output.
+      Accept the PRD plan?
+
+      PRD synthesized (path confirmed at scope-confirm). Recommendation follows
+      the scope-confirm output (scope_complete, prd_path, ticket_split_needed);
+      free input overrides. Dynamic options include revise (re-run
+      scope-confirm) and re-plan from start (jump back to scope-confirm).
+
+  # Phase 4: Ticket split — case-5 self-judgment (was gated by ticket-gate's
+  # forward branch on ticket_split_needed; the gate is deleted — this node now
+  # runs unconditionally and self-judges).
+  - id: ticket-split
+    type: main
+    dependsOn: [scope-accept]
+    channels:
+      - node:scope-confirm
+    task: |
+      Case-5 self-judgment: if scope-confirm output does not show
+      ticket_split_needed: true (ticket split not required), this node has NO
+      WORK — output ticket_count: 0, ticket_paths: [] and finish; this is
+      normal execution, not a skip.
+
+      Otherwise run to-tickets on the PRD. Accept its native output.
 
       1. Read PRD from scope-confirm output prd_path (injected via dependsOn implicit context).
       2. Run to-tickets — interview user to confirm split granularity, priority, blocking edges.

@@ -14,47 +14,54 @@ phases:
     channels:
       - node:grill/grilling
 
-  # Stage 3: Human quality gate — spec generated, before the expensive track
+  # Stage 3: Track decision — the ONLY branch-route scenario (route-first):
+  # the approval declares the two tracks; the AI recommends the one matching
+  # the ADR judgment (adr_created), auto mode executes it. Revise/restart are
+  # AI-generated dynamic options, not written.
   - id: pipeline-accept
     type: approval
     dependsOn: [create]
-    task: 'Spec quality gate'
-    preText: |
-      openspec-create generated the delta spec. Continue → run the track selected by the
-      ADR judgment (spec-generate echoes adr_created). Revise → re-run openspec-create
-      (scope interview re-asked). Restart → re-grill from the raw idea.
+    task: |
+      Spec quality gate
+
+      openspec-create generated the delta spec. Track recommendation follows
+      the ADR judgment: no ADR → minimal track (apply directly); ADR created →
+      detailed track (engineer). Accept executes the recommendation; free input
+      overrides; dynamic options include revise (re-run create) and restart
+      (re-grill from the idea).
     routing:
       actions:
         - action: continue
-          label: 'Proceed to implementation'
-          description: 'Spec confirmed — run the track selected by the ADR judgment'
-        - action: retry
-          target: create
-          label: 'Revise spec'
-          description: 'Spec needs changes — re-run openspec-create'
-        - action: jump
-          target: grill
-          label: 'Restart from idea'
-          description: 'Idea fundamentally reshaped — re-grill from the start'
+          target: minimal-track
+          value: minimal-track
+          label: 'Minimal track — apply directly'
+          description: 'No ADR created — implement the change without engineering ceremony'
+        - action: continue
+          target: detailed-track
+          value: detailed-track
+          label: 'Detailed track — engineer'
+          description: 'ADR created — full spec-to-tickets engineering pipeline'
 
-  # Stage 4: Tracks — complementary when guards on the ADR judgment echoed by spec-generate
-  # (flattened carrier node: create/spec-generate; guards read its output file)
+  # Branch routes — declared on the flows (route-first: routes are explicit).
   - id: minimal-track
     type: flow
     use: openspec-apply
+    route: minimal-track
     dependsOn: [pipeline-accept]
-    when: 'create/spec-generate output shows spec_status: ok AND adr_created: false'
 
   - id: detailed-track
     type: flow
     use: openspec-engineer
+    route: detailed-track
     dependsOn: [pipeline-accept]
-    when: 'create/spec-generate output shows spec_status: ok AND adr_created: true'
 
-  # Stage 5: Terminal — runs after whichever track executed (other cascades as skipped)
+  # Stage 4: Terminal — any-join over the two tracks: the chosen track's
+  # terminal satisfies the join; the unselected track never completes and
+  # never blocks (route-first — no vacuous satisfaction).
   - id: pipeline-done
     type: main
     dependsOn: [minimal-track, detailed-track]
+    join: any
     channels:
       - node:grill/grilling
       - node:create/spec-generate
@@ -62,6 +69,6 @@ phases:
       Pipeline complete. Track: see upstream flow status. ADR: see create output (injected).
       Output: track (minimal | detailed | none), adr_created, change_name,
       candidates (echo from spec-generate when blocked), decisions (echo from grill).
-      Incomplete judgment check: when spec_status is ok but adr_created is missing from
+      Incomplete judgment check: if spec_status is ok but adr_created is missing from
       spec-generate output (create gate bound exhausted) — output judgment_incomplete: true
       and suggest graph_jump back to create; never present the run as a completed implementation.

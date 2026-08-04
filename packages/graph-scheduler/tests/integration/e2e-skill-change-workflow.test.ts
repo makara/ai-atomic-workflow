@@ -20,7 +20,7 @@ import type { Phase } from '../../src/types.js';
 // Fixture — load skill-change-workflow graph once per describe
 // ---------------------------------------------------------------------------
 
-const VALID_PHASE_TYPES: Record<string, true> = { main: true, agent: true, approval: true, flow: true };
+const VALID_PHASE_TYPES: Record<string, true> = { main: true, approval: true, gate: true, flow: true };
 
 function loadSkillChangeWorkflowGraph(): Taskflow {
   const pkgRoot = join(__dirname, '..', '..');
@@ -76,7 +76,7 @@ describe('skill-change-workflow — schema compliance', () => {
     }
   });
 
-  it('has expected 8 phases for the skill-change-workflow orchestration', () => {
+  it('has expected 9 phases for the skill-change-workflow orchestration (route-first redesign: no branch-gate, no end)', () => {
     const graph = loadSkillChangeWorkflowGraph();
     const phaseIds = graph.phases.map((p) => p.id);
     expect(phaseIds).toContain('plan');
@@ -84,9 +84,12 @@ describe('skill-change-workflow — schema compliance', () => {
     expect(phaseIds).toContain('skill-author-foo');
     expect(phaseIds).toContain('skill-delete-foo');
     expect(phaseIds).toContain('doc-update');
+    expect(phaseIds).toContain('openspec-create-foo');
     expect(phaseIds).toContain('cross-review');
     expect(phaseIds).toContain('change-accept');
     expect(phaseIds).toContain('archive');
+    expect(phaseIds).not.toContain('branch-gate');
+    expect(phaseIds).not.toContain('skill-change-done');
   });
 
   it('archive phase wires atom-openspec-archive with change-accept (NEVER ask resolution)', () => {
@@ -325,23 +328,27 @@ describe('skill-change-workflow — flow-flatten correctness', () => {
 
   it('sub-graph entry phases read plan-parse output (sole source)', () => {
     const graph = loadSkillChangeWorkflowGraph();
-    // skill-delete entry: plan-parse priority path declared in task text
+    // writer flows activated through plan-parse (branch-gate removed — route-first)
     const skillDelete = graph.phases.find((p) => p.id === 'skill-delete-foo');
     expect(skillDelete!.dependsOn).toContain('plan-parse');
-    // doc-update entry: same upstream wiring
     const docUpdate = graph.phases.find((p) => p.id === 'doc-update');
     expect(docUpdate!.dependsOn).toContain('plan-parse');
   });
 
-  it('flow phases (excl plan) have when guards referencing plan-parse output', () => {
+  it('writer flows carry case-5 self-judgment task text referencing plan-parse flags (no branch-gate)', () => {
     const graph = loadSkillChangeWorkflowGraph();
-    const flowPhases = graph.phases.filter((p) => p.type === 'flow' && p.id !== 'plan');
-
-    for (const phase of flowPhases) {
-      expect(phase.when).toBeDefined();
-      expect(typeof phase.when).toBe('string');
-      expect(phase.when!.length).toBeGreaterThan(0);
-      expect(phase.when).toContain('plan-parse');
+    expect(graph.phases.find((p) => p.id === 'branch-gate')).toBeUndefined();
+    const flowTasks: Record<string, string> = {};
+    for (const phase of graph.phases.filter((p) => p.type === 'flow' && p.id !== 'plan')) {
+      flowTasks[phase.id] = String(phase.task ?? '');
+    }
+    expect(flowTasks['skill-delete-foo']).toContain('skill_delete_needed');
+    expect(flowTasks['skill-author-foo']).toContain('skill_create_needed');
+    expect(flowTasks['doc-update']).toContain('doc_update_needed');
+    expect(flowTasks['openspec-create-foo']).toContain('spec_needed');
+    // no flow phase carries a when guard anymore
+    for (const phase of graph.phases) {
+      expect(phase.when).toBeUndefined();
     }
   });
 
@@ -354,16 +361,18 @@ describe('skill-change-workflow — flow-flatten correctness', () => {
       expect(phase.dependsOn).toContain('plan-parse');
     }
   });
-  it('skill-delete-foo when guard references skill_delete_needed', () => {
+  it('skill-delete-foo flow self-judges on skill_delete_needed (no branch-gate)', () => {
     const graph = loadSkillChangeWorkflowGraph();
-    const phase = graph.phases.find((p) => p.id === 'skill-delete-foo');
-    expect(phase!.when).toContain('skill_delete_needed');
+    const flow = graph.phases.find((p) => p.id === 'skill-delete-foo');
+    expect(flow!.type).toBe('flow');
+    expect(String(flow!.task)).toContain('skill_delete_needed');
   });
 
-  it('doc-update when guard references doc_update_needed', () => {
+  it('doc-update flow self-judges on doc_update_needed (no branch-gate)', () => {
     const graph = loadSkillChangeWorkflowGraph();
-    const phase = graph.phases.find((p) => p.id === 'doc-update');
-    expect(phase!.when).toContain('doc_update_needed');
+    const flow = graph.phases.find((p) => p.id === 'doc-update');
+    expect(flow!.type).toBe('flow');
+    expect(String(flow!.task)).toContain('doc_update_needed');
   });
 
   it('flow phases carry no maxDepth field — constant depth', () => {
@@ -470,45 +479,35 @@ describe('skill-change-workflow — approval eval conditions', () => {
     expect(phase!.dependsOn).toContain('cross-review');
   });
 
-  it('change-accept is human gate — no eval, per-writer retry routing (multi-writer graph)', () => {
+  it('change-accept is human card — no branches/eval, no written routing (multi-writer dynamic retry)', () => {
     const graph = loadSkillChangeWorkflowGraph();
     const phase = graph.phases.find((p) => p.id === 'change-accept');
     expect(phase!.eval).toBeUndefined();
-    const retryTargets = phase!
-      .routing!.actions.filter((a: { action: string }) => a.action === 'retry')
-      .map((a: { target: string }) => a.target);
-    expect(retryTargets).toContain('skill-author-foo');
-    expect(retryTargets).toContain('skill-delete-foo');
-    expect(retryTargets).toContain('doc-update');
+    expect(phase!.branches).toBeUndefined();
+    // route-first: per-writer retry targets are AI-generated dynamic options, not written actions
+    expect(phase!.routing).toBeUndefined();
   });
 
-  it('change-accept routing exposes plan jump for fundamental rework', () => {
+  it('change-accept declares no written routing — plan rework is a dynamic option', () => {
     const graph = loadSkillChangeWorkflowGraph();
     const phase = graph.phases.find((p) => p.id === 'change-accept');
-    const jumpTargets = phase!
-      .routing!.actions.filter((a: { action: string }) => a.action === 'jump')
-      .map((a: { target: string }) => a.target);
-    expect(jumpTargets).toContain('plan');
+    expect(phase!.routing).toBeUndefined();
+    // preText merged into task (schema field convergence) — first line = header
+    expect(String(phase!.task ?? '')).toContain('plan');
   });
 
-  it('change-accept has all three routing actions (continue/retry/jump)', () => {
+  it('change-accept has no written routing — default card only (route-first)', () => {
     const graph = loadSkillChangeWorkflowGraph();
     const phase = graph.phases.find((p) => p.id === 'change-accept');
-    expect(phase!.routing).toBeDefined();
-    const actionTypes = phase!.routing!.actions.map((a) => a.action);
-    expect(actionTypes).toContain('continue');
-    expect(actionTypes).toContain('retry');
-    expect(actionTypes).toContain('jump');
+    expect(phase!.routing).toBeUndefined();
   });
 
-  it('routing actions have non-empty label and description', () => {
+  it('no approval declares written routing actions (route-first)', () => {
     const graph = loadSkillChangeWorkflowGraph();
-    const phase = graph.phases.find((p) => p.id === 'change-accept');
-    for (const action of phase!.routing!.actions) {
-      expect(typeof action.label).toBe('string');
-      expect(action.label.length).toBeGreaterThan(0);
-      expect(typeof action.description).toBe('string');
-      expect(action.description.length).toBeGreaterThan(0);
+    const approvalPhases = graph.phases.filter((p) => p.type === 'approval');
+    expect(approvalPhases.length).toBeGreaterThanOrEqual(1);
+    for (const phase of approvalPhases) {
+      expect(phase.routing).toBeUndefined();
     }
   });
 });

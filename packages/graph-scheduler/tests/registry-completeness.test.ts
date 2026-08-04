@@ -126,11 +126,15 @@ describe('base phase types statically dispatched', () => {
     expect(() => resolvePhaseHandler('flow')).toThrow(/Unknown phase type 'flow'/);
   });
 
-  it('PhaseSchema accepts only main/approval/flow (flow needs use)', () => {
+  it('PhaseSchema accepts main/approval/flow/gate (flow needs use; gate needs jumps)', () => {
     expect(PhaseSchema.safeParse({ id: 'p', type: 'main' }).success).toBe(true);
     expect(PhaseSchema.safeParse({ id: 'p', type: 'approval' }).success).toBe(true);
     expect(PhaseSchema.safeParse({ id: 'p', type: 'flow', use: 'child' }).success).toBe(true);
+    expect(PhaseSchema.safeParse({ id: 'p', type: 'gate', jumps: [{ when: 'x', to: 'w' }] }).success).toBe(true);
+    // route-first redesign — 'end' node type is removed (run completes by natural drain / endRun)
+    expect(PhaseSchema.safeParse({ id: 'p', type: 'end', dependsOn: ['final'] }).success).toBe(false);
     expect(PhaseSchema.safeParse({ id: 'p', type: 'agent' }).success).toBe(false);
     expect(PhaseSchema.safeParse({ id: 'p', type: 'flow' }).success).toBe(false);
+    expect(PhaseSchema.safeParse({ id: 'p', type: 'gate' }).success).toBe(false);
   });
 });

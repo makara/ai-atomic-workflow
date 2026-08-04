@@ -16,7 +16,8 @@ phases:
       4. Otherwise → input_source: tickets|prd ({args.ticket_paths} / {args.prd_path} / upstream output).
 
       Pre-agree implementation seams with tdd discipline (record in work_ref).
-      Input source determines tail behavior — openspec-finalize guard reads this output.
+      Input source determines tail behavior — openspec-finalize's case-5
+      self-judgment reads this output.
 
       Output (main agent collects):
         - input_source: openspec-change | tickets | prd | blocked
@@ -62,55 +63,55 @@ phases:
       Standards: repo-documented coding standards — auto-discovered per code-review §3; atom-graph-spec
       (injected) for graph definitions.
       Spec: input-source contract — openspec-change → every SHALL in delta specs implemented;
-      tickets/prd → PRD/ticket acceptance criteria met. Graph-definition hygiene — eval conditions
-      bounded by retryAttempt, retry targets are writer nodes, when guard references direct upstream
-      observable fields, channels explicit.
+      tickets/prd → PRD/ticket acceptance criteria met. Graph-definition hygiene — gate branch conditions
+      bounded by target retryCount, branch targets are writer nodes, branch conditions reference
+      contract fields / decision values, channels explicit.
 
       Output structured YAML report — overall: pass | fail, per-violation findings. Write report (main agent collects).
 
-  # Stage 4: Gate — bounded auto-rework on FAIL (machine judgment)
+  # Stage 4: Gate — bounded backward rework on FAIL (route-first: pure backward jump)
   - id: implement-gate
     type: gate
     dependsOn: [implement-review]
-    eval:
-      - when: 'implement-review output shows overall: fail AND retryAttempt < 2'
-        action: retry
-        target: implement
-        note: 'auto: review found blocking issues — fix and re-review'
+    jumps:
+      - when: 'implement-review output shows overall: fail AND implement retryCount < 2'
+        to: implement
 
-  # Stage 5: Accept — human approval card (gate no-match falls here)
+  # Stage 5: Accept — decision confirmation (route-first: no written actions).
+  # Recommendation follows the review verdict; revise/redo-input are AI-generated
+  # dynamic options, not written.
   - id: implement-accept
     type: approval
     dependsOn: [implement-gate]
-    routing:
-      actions:
-        - action: continue
-          label: 'Accept implementation'
-          description: 'Implementation complete — proceed (finalize when OpenSpec change input)'
-        - action: retry
-          target: implement
-          label: 'Revise implementation'
-          description: 'Code needs corrections — re-run implement with review feedback'
-        - action: jump
-          target: work-input
-          label: 'Redo from input'
-          description: 'Input source or seams wrong — re-resolve work input'
+    channels:
+      - node:implement-review
+    task: |
+      Accept the implementation?
 
-  # Stage 6: OpenSpec finalize — reverse-validated archive when input was an OpenSpec change
-  # work-input arrives via node: channel, not dependsOn: implement-accept transitively
-  # depends on it (2.2b rejects redundant transitive deps); the guard references the
-  # channel-injected upstream output — plan-generate ticket-split precedent.
+      implement-review reported the dual-axis verdict. Recommendation follows the
+      review verdict and the rework bound: accept when the implementation passes
+      (finalize follows when the input is an OpenSpec change); otherwise revise
+      (re-run implement with review feedback) or redo from input (re-resolve the
+      work input).
+
+  # Stage 6: OpenSpec finalize — reverse-validated archive (case-5 self-judgment
+  # on change input: unconditional run, no-work declared when input is not change-bound)
   - id: openspec-finalize
     type: main
     skill: atom-openspec-archive
     dependsOn: [implement-accept]
-    when: 'work-input output shows input_source: openspec-change — implementation is change-bound; archive maintains openspec content'
     channels:
       - node:work-input
     task: |
+      Case-5 self-judgment: if work-input output (injected channel) does not show
+      input_source: openspec-change, this node has NO WORK — output
+      archive_status: none and finish; this is normal execution, not a skip.
+
       Execute atom-openspec-archive flow (reverse-validated archive).
 
-      Read implement-accept output (injected via dependsOn implicit context).
+      Read implement-accept output (injected via dependsOn implicit context) — the
+      accept decision confirms the implementation passed review; the input source
+      comes from work-input (node:work-input channel, case-5 judgment above).
       Change name: from work-input output change_name field (injected via node:work-input channel) — NEVER ask;
       skill Step 0 `openspec list` fallback only when name absent (this graph has no apply-change upstream).
       Step 0 reverse-validation: task completion × code evidence (grep, contextFiles + implementation output);
@@ -119,7 +120,7 @@ phases:
       Step 1-3: `openspec archive <change> --yes --json` (CLI inlines delta specs → main specs sync).
 
       Write output (main agent collects):
-        - archive_status: success | failed | blocked
+        - archive_status: success | failed | blocked | none
         - change_name: <name>
         - validation_result: pass | fail | warn
         - message: <summary>

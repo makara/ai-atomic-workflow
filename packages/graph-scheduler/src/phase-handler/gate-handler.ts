@@ -1,10 +1,16 @@
 /**
  * Gate phase handler — validate, extendNodeDetail for "gate" type.
  *
- * Gate phases:
- * - Machine-judgment node — eval conditions drive auto retry/jump; no decision card.
- * - Requires: eval (non-empty — schema enforces presence; validate enforces non-empty)
- * - NodeDetail extends: eval only — no task/topic/routingActions/preText (closed field surface)
+ * Gate phases (route-first redesign):
+ * - Pure rework node — the agent evaluates `jumps` (when conditions) against
+ *   the judgment context (direct dependsOn outputs + node: channels +
+ *   snapshot + run mode); a hit reports a backward jump to the target
+ *   (target + downstream reset, upstream kept); no hit passes through.
+ * - No forward routing, no decision card.
+ * - Requires: jumps (non-empty — schema enforces presence; validate enforces
+ *   non-empty)
+ * - NodeDetail extends: jumps, channels — no task/topic/routingActions
+ *   (closed field surface)
  *
  * @module
  */
@@ -17,9 +23,9 @@ export const gatePhaseHandler: IPhaseHandler = {
   phaseType: 'gate',
 
   validate(phase: Phase): Phase {
-    if (!phase.eval || phase.eval.length === 0) {
+    if (!phase.jumps || phase.jumps.length === 0) {
       throw new PhaseHandlerError(
-        `Gate phase '${phase.id}': eval is required and must be non-empty (a gate without conditions is a silent pass-through)`,
+        `Gate phase '${phase.id}': jumps is required and must be non-empty (a gate without rework jumps is a silent pass-through — delete the gate)`,
         phase.type,
       );
     }
@@ -28,7 +34,8 @@ export const gatePhaseHandler: IPhaseHandler = {
 
   extendNodeDetail(base: IBaseNodeDetail, phase: Phase, _nodeState: IFsmNodeState): Partial<INodeDetail> {
     return {
-      eval: phase.eval,
+      jumps: phase.jumps,
+      channels: phase.channels,
     };
   },
 };

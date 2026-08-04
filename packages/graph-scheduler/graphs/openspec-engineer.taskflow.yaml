@@ -76,45 +76,36 @@ phases:
       Standards: repo-documented coding standards — auto-discovered per code-review §3;
       atom-graph-spec (injected) for graph definitions.
       Spec: ticket acceptance criteria met per ticket; spec commitments honored;
-      ADR decision honored. Graph-definition hygiene — eval conditions bounded by
-      retryAttempt, retry targets are writer nodes, when guard references direct upstream
-      observable fields, channels explicit.
+      ADR decision honored. Graph-definition hygiene — gate branch conditions bounded by
+      target retryCount, branch targets are writer nodes, branch conditions reference
+      contract fields / decision values, channels explicit.
       Output structured YAML report — overall: pass | fail, per-violation findings.
       Write report (main agent collects).
 
-  # Stage 5: Gate — bounded auto-rework on FAIL (machine judgment)
+  # Stage 5: Gate — bounded backward rework on FAIL (route-first: pure backward jump)
   - id: implement-gate
     type: gate
     dependsOn: [implement-review]
-    eval:
-      - when: 'implement-review output shows overall: fail AND retryAttempt < 2'
-        action: retry
-        target: implement
-        note: 'auto: review found blocking issues — fix and re-review'
+    jumps:
+      - when: 'implement-review output shows overall: fail AND implement retryCount < 2'
+        to: implement
 
-  # Stage 6: Accept — human approval card (gate no-match falls here)
+  # Stage 6: Accept — decision confirmation (route-first: no written actions).
+  # Recommendation follows the review verdict; revise/redo-spec are AI-generated
+  # dynamic options, not written.
   - id: implement-accept
     type: approval
     dependsOn: [implement-gate]
-    task: 'Implementation approval'
-    preText: |
-      implement-review reported the dual-axis verdict. Continue → reverse-validated
-      archive. Revise → re-run to-spec + to-tickets (seam confirmation and granularity
-      quiz re-asked) then implement, with prior review feedback injected via
-      node:implement-review. Redo → re-synthesize spec and tickets from the ADR decision.
-    routing:
-      actions:
-        - action: continue
-          label: 'Accept and archive'
-          description: 'Implementation complete — archive the change'
-        - action: retry
-          target: implement
-          label: 'Revise implementation'
-          description: 'Code needs corrections — re-run implement with review feedback'
-        - action: jump
-          target: to-spec
-          label: 'Redo spec and tickets'
-          description: 'Spec or tickets fundamentally wrong — re-synthesize'
+    channels:
+      - node:implement-review
+    task: |
+      Implementation approval
+
+      implement-review reported the dual-axis verdict. Recommendation follows the
+      review verdict and the rework bound: accept when the implementation passes
+      (reverse-validated archive follows); otherwise revise (re-run implement with
+      review feedback injected via node:implement-review) or redo the spec and
+      tickets (re-synthesize from the ADR decision).
 
   # Stage 7: Archive — reverse-validated change archival (atom-openspec-archive)
   - id: openspec-archive

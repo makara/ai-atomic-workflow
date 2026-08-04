@@ -46,7 +46,7 @@ describe('doc-update.taskflow.yaml — schema validation', () => {
     expect(graph.phases.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('has exactly 5 phases', () => {
+  it('has exactly 5 phases — route-first redesign (no end node)', () => {
     const raw = readFileSync(GRAPH_PATH, 'utf-8');
     const graph = parseYaml(raw);
     expect(graph.phases).toHaveLength(5);
@@ -115,33 +115,36 @@ describe('doc-update.taskflow.yaml — phase structure', () => {
     expect(review.agent).toEqual(['reviewer', 'task']);
   });
 
-  it('doc-gate is gate with bounded eval', () => {
+  it('doc-gate is gate with bounded jumps (route-first redesign)', () => {
     const gate = phases[3];
     expect(gate.id).toBe('doc-gate');
     expect(gate.type).toBe('gate');
-    expect(gate.eval).toBeDefined();
-    expect(gate.eval!.length).toBeGreaterThanOrEqual(1);
+    expect(gate.eval).toBeUndefined();
+    expect(gate.branches).toBeUndefined();
+    expect(gate.default).toBeUndefined();
+    expect(gate.jumps).toBeDefined();
+    expect(gate.jumps!.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('doc-gate eval is bounded FAIL → retry rule (contract field, no DEBT)', () => {
+  it('doc-gate jump is bounded FAIL → retry rule (contract field, no DEBT)', () => {
     const gate = phases[3];
-    const evalText = gate.eval!.map((r) => r.when).join(' ');
-    expect(evalText).toContain('overall: fail');
-    expect(evalText).toContain('retryAttempt < 2');
-    expect(evalText).not.toContain('DEBT');
-    const retryRules = gate.eval!.filter((r) => r.action === 'retry');
-    expect(retryRules.length).toBe(1);
-    expect(retryRules[0]!.target).toBe('doc-write');
+    const jumpText = gate.jumps!.map((j) => j.when).join(' ');
+    expect(jumpText).toContain('overall: fail');
+    expect(jumpText).toContain('retryCount < 2');
+    expect(jumpText).not.toContain('DEBT');
+    const retryJumps = gate.jumps!.filter((j) => j.to === 'doc-write');
+    expect(retryJumps.length).toBe(1);
   });
 
-  it('doc-accept is approval with 3-route routing and no eval', () => {
+  it('doc-accept is approval with no written routing and no branches/eval', () => {
     const accept = phases[4];
     expect(accept.id).toBe('doc-accept');
     expect(accept.type).toBe('approval');
     expect(accept.dependsOn).toEqual(['doc-gate']);
-    expect(accept.routing).toBeDefined();
-    expect(accept.routing!.actions).toHaveLength(3);
+    // route-first: default card = Accept + free input + AI-generated options
+    expect(accept.routing).toBeUndefined();
     expect(accept.eval).toBeUndefined();
+    expect(accept.branches).toBeUndefined();
   });
 });
 
@@ -193,10 +196,11 @@ describe('doc-update.taskflow.yaml — topology', () => {
     expect(deps.get('doc-accept')).toEqual(['doc-gate']);
   });
 
-  it('doc-accept jump action has explicit target', () => {
-    const accept = phases[4];
-    const jump = accept.routing!.actions.find((a) => a.action === 'jump');
-    expect(jump).toBeDefined();
-    expect(jump!.target).toBe('doc-scope');
+  it('doc-gate jump targets doc-write (bounded backward rework)', () => {
+    const gate = phases[3];
+    const jumps = gate.jumps!;
+    expect(jumps.length).toBe(1);
+    expect(jumps[0].to).toBe('doc-write');
+    expect(jumps[0].when).toContain('retryCount');
   });
 });

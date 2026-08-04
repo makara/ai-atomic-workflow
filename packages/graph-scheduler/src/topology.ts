@@ -1,18 +1,11 @@
 /**
- * Topology pure functions — Kahn sort, dependency resolution, upstream tracing.
+ * Topology pure functions — Kahn sort, dependency resolution, route-aware
+ * readiness, upstream/downstream tracing (JUMP + validation only).
  *
- * ## Design Decision: Custom `topoLayers` implementation
- *
- * We use a custom topological sort implementation for three reasons:
- *
- * 1. **Phase type-aligned** — Our `Phase` type carries `agent`, `task`, `retry`
- *    fields used by graph-scheduling algorithms.
- *
- * 2. **Simpler** — Kahn's algorithm with adjacency + indegree is ~60 lines.
- *    No adapter layer, no external dependency just for a topological sort.
- *
- * 3. **No adapter needed** — `resolveReady()` and `findUpstream()` operate
- *    directly on `Phase[]`, which is the canonical domain type for scheduling.
+ * Route-first redesign: readiness is route-aware — a node
+ * activates iff its route is active and every dependency is terminal or on an
+ * inactive route. Zero closure inference — route membership is declared
+ * (phase `route`, flow-as-route propagation); the backend only looks up.
  *
  * @module
  */
@@ -124,30 +117,62 @@ export function topoLayers(phases: readonly Phase[]): Phase[][] {
 }
 
 /**
- * Return phases NOT yet in `completed` whose dependencies are all satisfied.
+ * Route activation map — routeId → activating node id. Presence = active;
+ * absence = inactive. The implicit default route (phase with no route) is
+ * always active and never stored.
+ */
+export type RouteMap = Readonly<Record<string, string>>;
+
+/**
+ * Effective route of a phase — its declared `route`, or the implicit default
+ * route marker when absent (flow propagation materializes flow ids on
+ * children at flatten time).
+ */
+export const DEFAULT_ROUTE = '__default__';
+
+/** Route id of a phase — declared route or the implicit default. */
+export function routeOf(phase: Phase): string {
+  return phase.route ?? DEFAULT_ROUTE;
+}
+
+/** Is the phase's route active? Default route is always active. */
+export function routeActive(phase: Phase, routes: RouteMap | undefined): boolean {
+  const r = routeOf(phase);
+  if (r === DEFAULT_ROUTE) return true;
+  return routes !== undefined && r in routes;
+}
+
+/**
+ * Return phases NOT yet terminal whose dependencies are all satisfied AND
+ * whose route is active (route-first readiness — O(1) lookups, zero inference).
  *
- * Resolution strategy controlled by phase.join field:
- * - `all` (default): every dependsOn must be terminal (done or skipped).
- * - `any`: at least one dependsOn must be done (not just skipped).
+ * - Route rule: a node activates only when its route is active (branch-route
+ *   decisions activate routes; unselected routes stay dormant forever).
+ * - Dependency rule: every dep must be terminal (no join — default all), or
+ *   at least one dep done (join: any — used for track joins: the chosen
+ *   route's terminal satisfies; unselected routes never complete and never
+ *   block). No vacuous satisfaction — a dep on an unselected route means the
+ *   graph author must sequence via the decision node or an any-join.
  *
  * @param phases     all phases in the graph
- * @param terminal   set of phase ids that have finished execution (done or skipped)
- * @param phaseMap   phase id → node state for distinguishing done vs skipped (needed for OR-join)
+ * @param terminal   set of phase ids that have finished execution (done or aborted)
+ * @param phaseMap   phase id → node state (distinguishes done vs aborted for OR-join)
+ * @param routes     route activation map — routeId → activating node id
  */
 export function resolveReady(
   phases: readonly Phase[],
   terminal: ReadonlySet<string>,
   phaseMap?: Readonly<Record<string, { status: string }>>,
+  routes?: RouteMap,
 ): Phase[] {
   return phases.filter((p) => {
-    // skip already-completed phases
     if (terminal.has(p.id)) return false;
+    // Route rule — unselected routes never activate (unchosen branch-route
+    // nodes stay pending forever: never ready, never dispatched).
+    if (!routeActive(p, routes)) return false;
     const deps = p.dependsOn;
     if (!deps || deps.length === 0) return true;
-    const join = p.join ?? 'all';
-    if (join === 'any') {
-      // At least one dep must be DONE (not just skipped).
-      // phaseMap is required for correct OR-join resolution — initPhases passes empty terminal.
+    if (p.join === 'any') {
       if (!phaseMap) return false;
       return deps.some((d) => phaseMap[d]?.status === 'done');
     }
@@ -155,86 +180,37 @@ export function resolveReady(
   });
 }
 
-/**
- * Find all upstream phases reachable from fromPhaseId via dependsOn edges (BFS).
- * Returns the transitive closure of phases that fromPhaseId depends on,
- * EXCLUDING fromPhaseId itself.
- *
- * @param fromPhaseId  the phase whose upstream closure is needed
- * @param phases  all phases in the graph
- * @returns sorted array of upstream phase ids
- */
+/** Find all upstream phases reachable from fromPhaseId via dependsOn edges (BFS). */
 export function findUpstream(fromPhaseId: string, phases: readonly Phase[]): string[] {
-  const byId = new Map(phases.map((p) => [p.id, p]));
-  const visited = new Set<string>();
-  const queue: string[] = [fromPhaseId];
-  visited.add(fromPhaseId);
-
-  // Build reverse adjacency: phase → its dependsOn
-  const depsOf = new Map(phases.map((p) => [p.id, p.dependsOn ?? []]));
-
-  let head = 0;
-  while (head < queue.length) {
-    const current = queue[head++];
-    const upstream = depsOf.get(current) ?? [];
-    for (const u of upstream) {
-      if (!visited.has(u)) {
-        visited.add(u);
-        queue.push(u);
+  const byIdLocal = new Map(phases.map((p) => [p.id, p]));
+  const seen = new Set<string>();
+  const queue = [fromPhaseId];
+  while (queue.length > 0) {
+    const cur = queue.pop()!;
+    const deps = byIdLocal.get(cur)?.dependsOn ?? [];
+    for (const d of deps) {
+      if (!seen.has(d)) {
+        seen.add(d);
+        queue.push(d);
       }
     }
   }
-
-  // remove fromPhaseId itself, sort for determinism
-  visited.delete(fromPhaseId);
-  return [...visited].sort();
+  return [...seen];
 }
 
-/**
- * Find all downstream phases reachable from nodeId via reverse dependency edges (BFS).
- *
- * "Downstream" = phases that depend on nodeId (nodeId → downstream).
- * Returns the transitive closure, excluding nodeId itself.
- *
- * @param nodeId    starting phase id
- * @param phases    all phases in the graph
- * @returns sorted array of downstream phase ids
- */
+/** Find all downstream phases reachable from nodeId via reverse dependency edges (BFS). */
 export function findDownstream(nodeId: string, phases: readonly Phase[]): string[] {
-  // Build reverse adjacency: phase → phases that depend on it
-  const dependents = new Map<string, Set<string>>();
-  for (const p of phases) {
-    const deps = p.dependsOn ?? [];
-    for (const dep of deps) {
-      let set = dependents.get(dep);
-      if (!set) {
-        set = new Set();
-        dependents.set(dep, set);
-      }
-      set.add(p.id);
-    }
-  }
-
-  // BFS from nodeId through dependents
-  const visited = new Set<string>();
+  const byIdLocal = new Map(phases.map((p) => [p.id, p]));
+  const seen = new Set<string>();
   const queue = [nodeId];
-  visited.add(nodeId);
-
-  let head = 0;
-  while (head < queue.length) {
-    const current = queue[head++];
-    const deps = dependents.get(current);
-    if (deps) {
-      for (const d of deps) {
-        if (!visited.has(d)) {
-          visited.add(d);
-          queue.push(d);
-        }
+  while (queue.length > 0) {
+    const cur = queue.pop()!;
+    for (const [pid, ph] of byIdLocal) {
+      if ((ph.dependsOn ?? []).includes(cur) && !seen.has(pid)) {
+        seen.add(pid);
+        queue.push(pid);
       }
     }
   }
-
-  // Exclude the starting node itself
-  visited.delete(nodeId);
-  return [...visited].sort();
+  return [...seen];
 }

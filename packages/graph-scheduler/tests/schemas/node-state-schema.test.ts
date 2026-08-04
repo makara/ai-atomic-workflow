@@ -61,13 +61,19 @@ describe('NodeStateSchema — happy path', () => {
     expect(result.success).toBe(false);
   });
 
-  it('parses skipped status', () => {
-    const raw = { runId: 'run-1', status: 'skipped', retryCount: 0 };
+  it('parses aborted status — FORCE_END termination state (branch-routing redesign, skipped removed)', () => {
+    const raw = { runId: 'run-1', status: 'aborted', retryCount: 0 };
     const result = NodeStateSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.status).toBe('skipped');
+      expect(result.data.status).toBe('aborted');
     }
+  });
+
+  it('rejects skipped status — no skip state exists (branch-routing redesign)', () => {
+    const raw = { runId: 'run-1', status: 'skipped', retryCount: 0 };
+    const result = NodeStateSchema.safeParse(raw);
+    expect(result.success).toBe(false);
   });
 });
 

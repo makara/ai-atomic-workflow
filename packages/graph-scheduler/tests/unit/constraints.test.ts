@@ -142,6 +142,34 @@ describe('runtime constraints loading', () => {
     const adv = await rt.graphAdvance(first.runId, 'a', 10);
     expect(adv.node?.constraints).toEqual(['first rule']);
   });
+
+  it('keeps the run-record snapshot across a server restart — file edits never leak mid-run', async () => {
+    const dbPath = join(projectRoot, 'restart.db');
+    const graph = JSON.stringify({
+      name: 'constraint-graph',
+      version: 1,
+      phases: [
+        { id: 'a', type: 'main', skill: 'test-skill', task: 'do a' },
+        { id: 'b', type: 'main', skill: 'test-skill', task: 'do b', dependsOn: ['a'] },
+      ],
+    });
+    writeFileSync(join(projectRoot, 'constraint-graph.taskflow.yaml'), graph);
+    writeFileSync(join(projectRoot, '.graph-scheduler', 'constraints.md'), '## Rules\n- snapshot rule\n');
+
+    // "Server" 1 — creates the run and snapshots constraints
+    const rt1 = await Effect.runPromise(createRuntime({ dbPath, taskflowDir: projectRoot }));
+    const started = await rt1.graphStart('constraint-graph');
+    expect(started.node?.constraints).toEqual(['snapshot rule']);
+    const runId = started.runId;
+    await rt1.dispose();
+
+    // Mid-run file edit + server restart — new process, same DB, no process cache
+    writeFileSync(join(projectRoot, '.graph-scheduler', 'constraints.md'), '## Rules\n- changed rule\n');
+    const rt2 = await Effect.runPromise(createRuntime({ dbPath, taskflowDir: projectRoot }));
+    const adv = await rt2.graphAdvance(runId, 'a', 10);
+    expect(adv.node?.constraints).toEqual(['snapshot rule']);
+    await rt2.dispose();
+  });
 });
 
 // ---------------------------------------------------------------------------

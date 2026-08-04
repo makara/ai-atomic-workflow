@@ -127,7 +127,7 @@ export function parseContextContract(content: string): IContextContract {
 export interface IResolveResult {
   /** upstream node IDs to read `.taskflow/outputs/<id>.output.txt` for */
   readonly upstream: string[];
-  /** reference skill names to load via `skill://<name>` */
+  /** reference skill names to load per the resolution convention (plain name → <skillsDir>/<name>/SKILL.md) */
   readonly references: string[];
   /** file globs to expand via the glob tool */
   readonly files: string[];

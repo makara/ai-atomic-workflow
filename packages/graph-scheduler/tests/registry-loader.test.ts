@@ -24,7 +24,7 @@ function mockFsLayer(files: Record<string, string>): Layer.Layer<FileSystem, nev
 }
 
 /** Run an Effect and return the success value. */
-async function runSuccess<A>(program: Effect.Effect<A, unknown, FileSystem>): Promise<A> {
+async function runSuccess<A>(program: Effect.Effect<A, unknown, never>): Promise<A> {
   return Effect.runPromise(program);
 }
 

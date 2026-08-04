@@ -1,29 +1,35 @@
 name: arch-review
 phases:
-  # Detect review scope and confirm with user via consensus interview.
-  # Composability: when composed into arch-review-loop, the loop entry (loop-entry)
-  # pre-confirms the scope — this node skips (its output becomes a skip marker) and
-  # the review node falls back to the loop-entry output (injected channel).
-  - id: scope-detect
+  # Scope interview — entry node (route-first: no forward gate). Case-5
+  # self-judgment: when composed into arch-review-loop, the loop entry
+  # pre-confirms the scope (loop-entry output shows scope_complete: true) —
+  # this node discovers no work and completes with an empty output (execution,
+  # not a skip). Standalone (no loop-entry output) → the interview runs.
+  - id: scope-detect-interview
     type: main
     dependsOn: []
     skill: atom-scope-interview
     channels:
       - ./CONTEXT.md
-    when: 'skip when loop-entry output shows scope_complete: true (loop composition — scope pre-confirmed at the loop entry); run otherwise (standalone)'
     task: |
-      Execute scope interview per skill://atom-scope-interview.
+      Execute scope interview per atom-scope-interview.
 
+      Case-5 self-judgment: if loop-entry output (injected channel) shows
+      scope_complete: true (loop composition — scope pre-confirmed at the loop
+      entry), this node has NO WORK — output scope_complete: true (echo) and
+      finish; the interview itself is skipped by the workflow state, not by a
+      skip mechanism.
+      Otherwise conduct the interview:
       Topics: architecture review domain/feature/problem; focus dimensions (depth/coupling/testability/naming/duplication); output path — MUST be explicitly confirmed by user.
       Recommend default output path: docs/reports/<YYYY-MM-DD>-arch-review-<topic>.md (date prefix — new convention); user MUST explicitly confirm, may override.
 
-      Output: scope, focus, output.
+      Output: scope, focus, output, scope_complete.
 
-  # Execute architecture review with confirmed scope — from scope-detect (standalone)
-  # or from the composing loop entry (loop composition — scope pre-confirmed).
+  # Execute architecture review with confirmed scope — from scope-detect-interview
+  # (standalone interview) or with the loop pre-confirmed scope (loop composition).
   - id: arch-review
     type: main
-    dependsOn: [scope-detect]
+    dependsOn: [scope-detect-interview]
     skill: improve-codebase-architecture
     agent: [scout, task]
     channels:
@@ -34,8 +40,9 @@ phases:
     task: |
       Execute architecture review per improve-codebase-architecture (use ## Agent hints for the Explore sub-agent).
 
-      Scope: read scope-detect output (injected); when scope-detect shows a skip marker
-      (loop composition — scope pre-confirmed at the loop entry), use the loop-entry output (injected).
+      Scope: read scope-detect-interview output (injected) — scope, focus, confirmed output path.
+      Loop composition (scope pre-confirmed at the loop entry — loop-entry output shows scope_complete: true):
+      the scope comes from the loop-entry output (injected channel).
       Report input (from loop-entry output — injected channel):
       - report_input: fresh → current behavior: markdown (NOT HTML) written to the confirmed output path.
       - report_input: fresh AND the report file at report_path already exists (round ≥ 2 — a

@@ -21,6 +21,8 @@ interface GraphRunRow {
   fsm_state: string;
   args: string | null;
   mode: string;
+  routes: string | null;
+  constraints: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -31,7 +33,6 @@ interface NodeStateRow {
   node_id: string;
   status: string;
   retry_count: number;
-  topo_order: number;
   started_at: string | null;
   completed_at: string | null;
 }
@@ -44,6 +45,10 @@ export interface GraphRun {
   readonly args: Record<string, unknown> | null;
   /** Run Mode — decided at run creation (graph_start mode param), stable for run lifetime. */
   readonly mode: RunMode;
+  /** route activation map — routeId → activating node id (route-first redesign); absent route = inactive */
+  readonly routes: Record<string, string>;
+  /** project constraints snapshot — frozen at run creation (graph_start), stable for run lifetime */
+  readonly constraints: readonly string[];
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -53,7 +58,6 @@ export interface NodeStateEntry {
   readonly nodeId: string;
   readonly status: string;
   readonly retryCount: number;
-  readonly topoOrder: number;
   readonly startedAt: string | null;
   readonly completedAt: string | null;
 }
@@ -84,12 +88,13 @@ export interface RunSummaryItem {
 export class GraphRepository extends Context.Tag('GraphRepository')<
   GraphRepository,
   {
-    /** Insert a new run row. */
+    /** Insert a new run row — constraints snapshotted at run creation. */
     readonly createRun: (
       runId: string,
       graphName: string,
       args?: Record<string, unknown>,
       mode?: RunMode,
+      constraints?: readonly string[],
     ) => Effect.Effect<void, PersistenceError>;
 
     /** Update a single node state row (partial). */
@@ -102,7 +107,7 @@ export class GraphRepository extends Context.Tag('GraphRepository')<
     /** Fetch a single run by id. */
     readonly getRun: (runId: string) => Effect.Effect<GraphRun, PersistenceError | NotFoundError>;
 
-    /** Fetch all node states for a run, ordered by topo_order. */
+    /** Fetch all node states for a run, ordered by insertion (rowid). */
     readonly getNodeStates: (runId: string) => Effect.Effect<ReadonlyArray<NodeStateEntry>, PersistenceError>;
 
     /** List all runs, newest first. */
@@ -111,13 +116,17 @@ export class GraphRepository extends Context.Tag('GraphRepository')<
     /** Delete a run and cascade its node_states rows. */
     readonly deleteRun: (runId: string) => Effect.Effect<void, PersistenceError>;
 
-    /** Update the run-level fsm_state and updated_at timestamp. */
-    readonly updateRunStatus: (runId: string, fsmState: string) => Effect.Effect<void, PersistenceError>;
+    /** Update the run-level fsm_state (and route activation map) + updated_at timestamp. */
+    readonly updateRunStatus: (
+      runId: string,
+      fsmState: string,
+      routes?: Record<string, string>,
+    ) => Effect.Effect<void, PersistenceError>;
 
     /** Batch-insert node state rows for a run (used at START). */
     readonly createNodeStates: (
       runId: string,
-      nodes: ReadonlyArray<{ readonly nodeId: string; readonly topoOrder: number }>,
+      nodes: ReadonlyArray<{ readonly nodeId: string }>,
     ) => Effect.Effect<void, PersistenceError>;
 
     /** Delete completed runs, optionally filtered by updated_at cutoff. Returns deleted run ids. */
@@ -136,6 +145,8 @@ function rowToGraphRun(row: GraphRunRow): GraphRun {
     fsmState: row.fsm_state,
     args: row.args ? (JSON.parse(row.args) as Record<string, unknown>) : null,
     mode: row.mode === 'auto' ? 'auto' : 'manual',
+    routes: row.routes ? (JSON.parse(row.routes) as Record<string, string>) : {},
+    constraints: row.constraints ? (JSON.parse(row.constraints) as string[]) : [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -148,7 +159,6 @@ function rowToNodeStateEntry(row: NodeStateRow): NodeStateEntry {
     nodeId: row.node_id,
     status: row.status,
     retryCount: row.retry_count,
-    topoOrder: row.topo_order,
     startedAt: row.started_at,
     completedAt: row.completed_at,
   };
@@ -167,14 +177,15 @@ export function buildService(db: ReturnType<typeof Database>): GraphRepository['
       graphName: string,
       args?: Record<string, unknown>,
       mode: RunMode = 'manual',
+      constraints: readonly string[] = [],
     ): Effect.Effect<void, PersistenceError> =>
       tryDb('createRun', () => {
         const nowISO = new Date().toISOString();
         debugLog('runtime', { event: 'run_created', runId, graphName, mode });
         db.prepare(
-          `INSERT INTO graph_runs (run_id, graph_name, fsm_state, args, mode, created_at, updated_at)
-           VALUES (?, ?, 'idle', ?, ?, ?, ?)`,
-        ).run(runId, graphName, args ? JSON.stringify(args) : null, mode, nowISO, nowISO);
+          `INSERT INTO graph_runs (run_id, graph_name, fsm_state, args, mode, routes, constraints, created_at, updated_at)
+           VALUES (?, ?, 'idle', ?, ?, '{}', ?, ?, ?)`,
+        ).run(runId, graphName, args ? JSON.stringify(args) : null, mode, JSON.stringify(constraints), nowISO, nowISO);
       }),
 
     updateNodeState: (runId: string, nodeId: string, update: NodeStateUpdate): Effect.Effect<void, PersistenceError> =>
@@ -223,7 +234,7 @@ export function buildService(db: ReturnType<typeof Database>): GraphRepository['
     getNodeStates: (runId: string): Effect.Effect<ReadonlyArray<NodeStateEntry>, PersistenceError> =>
       tryDb('getNodeStates', () => {
         const rows = db
-          .prepare('SELECT * FROM node_states WHERE run_id = ? ORDER BY topo_order')
+          .prepare('SELECT * FROM node_states WHERE run_id = ? ORDER BY rowid')
           .all(runId) as NodeStateRow[];
         return rows.map(rowToNodeStateEntry);
       }),
@@ -259,26 +270,43 @@ export function buildService(db: ReturnType<typeof Database>): GraphRepository['
         })();
       }),
 
-    updateRunStatus: (runId: string, fsmState: string): Effect.Effect<void, PersistenceError> =>
+    updateRunStatus: (
+      runId: string,
+      fsmState: string,
+      routes?: Record<string, string>,
+    ): Effect.Effect<void, PersistenceError> =>
       tryDb('updateRunStatus', () => {
         const nowISO = new Date().toISOString();
         debugLog('runtime', { event: 'run_status_update', runId, fsmState });
-        db.prepare(`UPDATE graph_runs SET fsm_state = ?, updated_at = ? WHERE run_id = ?`).run(fsmState, nowISO, runId);
+        if (routes !== undefined) {
+          db.prepare(`UPDATE graph_runs SET fsm_state = ?, routes = ?, updated_at = ? WHERE run_id = ?`).run(
+            fsmState,
+            JSON.stringify(routes),
+            nowISO,
+            runId,
+          );
+        } else {
+          db.prepare(`UPDATE graph_runs SET fsm_state = ?, updated_at = ? WHERE run_id = ?`).run(
+            fsmState,
+            nowISO,
+            runId,
+          );
+        }
       }),
 
     createNodeStates: (
       runId: string,
-      nodes: ReadonlyArray<{ readonly nodeId: string; readonly topoOrder: number }>,
+      nodes: ReadonlyArray<{ readonly nodeId: string }>,
     ): Effect.Effect<void, PersistenceError> =>
       tryDb('createNodeStates', () => {
         debugLog('runtime', { event: 'node_states_created', runId, count: nodes.length });
         db.transaction(() => {
           const stmt = db.prepare(
-            `INSERT INTO node_states (run_id, node_id, status, topo_order)
-             VALUES (?, ?, 'pending', ?)`,
+            `INSERT INTO node_states (run_id, node_id, status)
+             VALUES (?, ?, 'pending')`,
           );
           for (const n of nodes) {
-            stmt.run(runId, n.nodeId, n.topoOrder);
+            stmt.run(runId, n.nodeId);
           }
         })();
       }),

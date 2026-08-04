@@ -3,7 +3,6 @@ phases:
   # Stage 1: Loop entry — scope interview. Run Mode is a run attribute decided
   # at run creation (graph_start mode param), never a graph topic.
   # Report input: existing report path (true closed loop) OR fresh review.
-  # Declared FIRST — findActiveNode dispatches the entry before review/implement.
   - id: loop-entry
     type: main
     dependsOn: []
@@ -11,7 +10,7 @@ phases:
     channels:
       - ./CONTEXT.md
     task: |
-      Execute scope interview per skill://atom-scope-interview.
+      Execute scope interview per atom-scope-interview.
 
       Mandatory per-round scope confirmation — this interview SHALL run on EVERY
       round (loop jump-back targets this node): regardless of prior report input or
@@ -33,37 +32,34 @@ phases:
   # Stage 2: Review — the loop's round worker, ALWAYS runs (fresh or existing).
   # Round origin = loop-entry (dependsOn [loop-entry]): a loop jump-back to
   # loop-entry resets this whole segment (scope re-confirmed at entry each round).
-  # loop-entry output arrives via the dependsOn edge (upstream block) — no channel.
   - id: review
     type: flow
     use: arch-review
     dependsOn: [loop-entry]
 
-  # Stage 3: Implement gate — fresh mode: human decides; existing mode: report
-  # pre-accepted at entry (skip). Revise removed — re-scope = new run.
+  # Stage 3: Review accept — decision confirmation (no written actions): the AI
+  # recommends implement (Top Rec remains → continue; the implement flow is
+  # plain composition — default route, activates mechanically once this node
+  # completes) or end (no Top Rec → end action; auto mode ends automatically).
+  # Existing-report mode = same card semantics — the recommendation follows
+  # the report state, never a skipped card.
   - id: review-accept
     type: approval
     dependsOn: [review]
-    when: 'skip when loop-entry output shows report_input: existing (report pre-accepted at entry)'
-    task: 'Implement review Top Recommendation?'
-    preText: |
-      Review report saved (path confirmed at loop entry — docs/reports, date prefix).
-      Implement → openspec-pipeline runs. Stop → report only (re-scope = a new run).
-    routing:
-      actions:
-        - action: continue
-          label: 'Implement Top Recommendation'
-          description: 'Run openspec-pipeline to implement the review Top Recommendation'
-        - action: continue
-          label: 'Stop — report only'
-          description: 'Keep the report; no implementation'
+    channels:
+      - node:loop-entry
+    task: |
+      Implement review Top Recommendation?
 
-  # Stage 4: Implementation — dependsOn [review-accept]: the jump closure from a
-  # loop-entry retry resets this segment via review-accept (each round re-runs the
-  # pipeline only when the accept decision says Implement; Stop/existing flow
-  # guards decide skip). node:loop-entry channel delivers report_path — the
-  # pipeline reads the CURRENT report each round. Nested approvals obey Run Mode
-  # via the run field — no per-node declarations.
+      Review report updated (path confirmed at loop entry — docs/reports, date prefix).
+      Recommendation: implement when the review reports a remaining Top
+      Recommendation (continue — implementation proceeds); otherwise end the
+      loop (end action — auto mode ends automatically).
+
+  # Stage 4: Implementation — plain composition flow (no route): sequencing by
+  # dependsOn [review-accept], end path by the approval's endRun action. A
+  # single-path route here would add an activation dependency on the agent
+  # emitting branchTo — a missed target silently drains the run.
   - id: implement
     type: flow
     use: openspec-pipeline
@@ -71,51 +67,37 @@ phases:
     channels:
       - node:review/arch-review
       - node:loop-entry
-    when: 'run only when review/arch-review output shows top_rec_remaining: true AND (review-accept output shows decision label Implement Top Recommendation OR loop-entry output shows report_input: existing); skip when review-accept shows Stop — report only'
 
-  # Stage 5: Auto loop router — machine retry branch (auto mode + accepted report +
-  # Top Rec remains → retry LOOP-ENTRY: the whole round re-runs from the entry
-  # scope interview). No-match falls through to loop-accept.
-  # eval reads the round worker's structured output (review/arch-review — unified
-  # output contract); conditions reference contract fields only (Eval Rule 1).
-  # `round < 8` bounds the gate's retry (hygiene) — it is NOT a termination
-  # mechanism: no Top Rec → loop-accept when-skip ends the loop normally; with a
-  # Top Rec remaining, ending is still a human decision (force-end in auto).
+  # Stage 5: Loop rework gate — pure backward jump (route-first): auto mode +
+  # Top Rec remains + bound not exhausted → jump back to LOOP-ENTRY (whole
+  # round re-runs from the scope interview). No match = pass through.
+  # dependsOn [implement]: the implement flow's terminal is the
+  # round-completion marker; review-accept is transitively included in the
+  # implement flow's flattened dependency set (an explicit dependsOn on both
+  # would be a redundant dependency error).
   - id: loop-gate
     type: gate
-    dependsOn: [review/arch-review, loop-entry, review-accept]
-    eval:
-      - when: 'run mode is auto AND (review-accept output shows decision label Implement Top Recommendation OR loop-entry output shows report_input: existing) AND review/arch-review output shows top_rec_remaining: true AND review/arch-review output shows round < 8'
-        action: retry
-        target: loop-entry
-        note: 'auto mode — re-review from the loop entry while a Top Recommendation remains (entry scope re-confirmed each round)'
+    dependsOn: [implement]
+    channels:
+      - node:review/arch-review
+      - node:loop-entry
+    jumps:
+      - when: 'run mode is auto AND review/arch-review output shows top_rec_remaining: true AND loop-entry retryCount < 8'
+        to: loop-entry
 
-  # Stage 6: Round-end approval — end-of-round decision. Default = Loop again
-  # (manual recommendation + auto execution) → retry LOOP-ENTRY (whole round,
-  # scope re-confirmed). when-skip: no Top Recommendation remains → normal end
-  # (loop-done), NOT force-end. With candidates, termination is still a human
-  # decision: card in manual mode, operator force-end in auto mode.
+  # Stage 6: Round-end approval — decision confirmation (no written actions):
+  # AI recommends loop again (Top Rec remains AND bound not exhausted → retry
+  # loop-entry) or complete (no Top Rec OR bound exhausted → end action — auto
+  # mode ends automatically). Completion = end action or natural drain.
   - id: loop-accept
     type: approval
     dependsOn: [loop-gate]
-    when: 'skip when review/arch-review output shows top_rec_remaining: false (no Top Recommendation remains — normal end)'
-    task: 'End the review loop?'
-    preText: |
-      The report was re-reviewed and updated at the confirmed path (no re-confirmation).
-      Loop again → re-run from the loop entry (scope re-confirmed, report re-reviewed).
-      Complete → the user explicitly ends the loop.
-    routing:
-      actions:
-        - action: retry
-          target: loop-entry
-          label: 'Loop again — re-review the report'
-          description: 'Re-run from the loop entry: scope re-confirmed, same report re-reviewed (default — repeat)'
-        - action: continue
-          label: 'Complete loop'
-          description: 'User-approved end — the loop finishes'
+    channels:
+      - node:review/arch-review
+    task: |
+      End the review loop?
 
-  # Stage 7: Terminal — normal end (no remaining Top Rec or user-approved end)
-  - id: loop-done
-    type: main
-    dependsOn: [loop-accept]
-    task: 'Loop complete — normal end (no remaining Top Recommendation — loop-accept when-skipped, report round marker is the evidence; or user approved ending — loop-accept decision). Report at confirmed path.'
+      Loop again → re-run from the loop entry (scope re-confirmed, report
+      re-reviewed). Complete → the loop finishes. Recommendation follows the
+      report state and the loop bound (loop-entry retryCount < 8); when nothing
+      remains, ending IS the recommendation and auto mode ends automatically.

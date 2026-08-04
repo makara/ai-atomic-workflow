@@ -96,13 +96,14 @@ export interface SchedulerRuntime {
     runId: string,
     nodeId: string,
     durationMs: number,
-    skip?: boolean,
+    branchTo?: string,
+    endRun?: boolean,
   ) => Promise<{
     readonly snapshot: IGraphSnapshot;
     readonly node: NodeDetail | null;
   }>;
 
-  /** Directed jump to target phase — reset target + upstream. */
+  /** Directed jump to target phase — reset target + downstream terminal nodes (upstream kept). */
   readonly graphJump: (
     runId: string,
     targetPhaseId: string,
@@ -111,7 +112,7 @@ export interface SchedulerRuntime {
     readonly node: NodeDetail | null;
   }>;
 
-  /** Force-terminate a run — all unfinished nodes skipped, irreversible. */
+  /** Force-terminate a run — all unfinished nodes aborted, irreversible. */
   readonly graphForceEnd: (runId: string) => Promise<IGraphSnapshot>;
 
   /** Query full run snapshot. */
@@ -354,8 +355,8 @@ export function createRuntime(config?: Partial<SchedulerConfig>): Effect.Effect<
       graphStart: (graphName: string, args?: Record<string, unknown>, mode: RunMode = 'manual') =>
         run(graphStart(graphName, args, mode)),
 
-      graphAdvance: (runId: string, nodeId: string, durationMs: number, skip?: boolean) =>
-        run(graphAdvance(runId, nodeId, durationMs, skip)),
+      graphAdvance: (runId: string, nodeId: string, durationMs: number, branchTo?: string, endRun?: boolean) =>
+        run(graphAdvance(runId, nodeId, durationMs, branchTo, endRun)),
 
       graphJump: (runId: string, targetPhaseId: string) => run(graphJump(runId, targetPhaseId)),
 

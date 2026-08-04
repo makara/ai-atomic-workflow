@@ -6,7 +6,7 @@ version: 1.0.0
 last_updated: '2026-08-01'
 ---
 
-> **Runtime constraints** — graph dispatch: atom-doc-spec arrives via `skill:` channel (handler-injected). Standalone use: load `skill://atom-doc-spec` before use.
+> **Runtime constraints** — graph dispatch: atom-doc-spec arrives via `skill:` channel (handler-injected). Standalone use: load `atom-doc-spec` before use.
 
 # Atom-Doc-Writer
 

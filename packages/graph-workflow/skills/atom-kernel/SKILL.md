@@ -7,7 +7,7 @@ version: 2.5.0
 last_updated: '2026-08-03'
 ---
 
-> **Runtime constraints** — load skill://writing-great-skills before use. **Layer**: atom — runtime primitives.
+> **Runtime constraints** — **Layer**: atom — runtime primitives.
 
 # Atom-Kernel
 
@@ -15,17 +15,30 @@ last_updated: '2026-08-03'
 
 |Primitive|Type|Maps to|
 |-|-|-|
-|`task()`|**Callable**|`task` tool — dispatches sub-agents|
-|`question()`|**Callable**|`ask` tool — single-decision UI|
+|`task()`|**Callable**|platform `task` tool — dispatches sub-agents|
+|`question()`|**Callable**|platform `ask` tool — single-decision UI|
+|`judge()`|**Callable**|platform one-shot LLM judgment — when/eval evaluation|
 |`interview()`|**Behavior Contract**|Agent-implemented — multi-turn consensus conversation, two modes (consensus / solve)|
 
-> **`task()` and `question()`** are tool-mapped callables — agent invokes them directly and gets a result. **`interview()`** is a behavior contract — agent reads rules below and implements manually using `question()` (or `ask`) one turn at a time. Attempting to call `interview({goal, context})` as a function will fail with `ReferenceError: … is not defined`.
+> **`task()`, `question()`, `judge()`** are tool-mapped callables — agent invokes them directly and gets a result. Tool names in the table are OMP spellings; other platforms map their equivalents per §Platform Spellings. **`interview()`** is a behavior contract — agent reads rules below and implements manually using `question()` (or `ask`) one turn at a time. Attempting to call `interview({goal, context})` as a function will fail with `ReferenceError: … is not defined`.
+
+## Platform Spellings
+
+Primitive contracts are platform-neutral. Tool-name mappings vary per platform — single-sourced here, never assumed exact:
+
+|Primitive|Contract|OMP|Other platforms|
+|-|-|-|-|
+|`task()`|Sub-agent dispatch — batch in `tasks[]`, shared `context`, agent-hint selection|`task` tool|platform's sub-agent dispatch tool|
+|`question()`|Single-decision UI — header/options/custom, 8 format rules|`ask` tool|platform's decision-UI tool|
+|`judge()`|One-shot lightweight-model judgment — constrained answer (`'true'`/`'false'`), conservative failure|`completion(…, model="smol")`|platform's one-shot completion primitive|
+
+Skills reference contract names only (`task()`, `question()`, `judge()`) — never platform tool spellings. Add a platform row when mapping a new platform; no skill changes needed.
 
 ---
 
 # Graph-Scheduler Tool Detection
 
-Runtime MCP tool name detection for the graph-scheduler — 9-tool substring matching. Platform tool prefixes vary (e.g. `xd://mcp__graph_scheduler_…`); names resolve by substring, never assumed exact.
+Runtime MCP tool name detection for the graph-scheduler — 9-tool substring matching. Platform tool prefixes and addressing vary (e.g. OMP `xd://mcp__graph_scheduler_…`, native MCP tool mounts on other platforms); names resolve by substring, never assumed exact.
 
 Before any graph operation, scan the available tool list for graph-scheduler MCP tools:
 
@@ -40,6 +53,32 @@ Before any graph operation, scan the available tool list for graph-scheduler MCP
 - Find tool with "graph_clean_all" in name → record exact name
 
 Use detected names for all subsequent calls. Tool parameters and return values unchanged.
+
+---
+
+# judge() — One-Shot Judgment
+
+Single constrained-answer LLM judgment per call. Used for when-guard evaluation and gate eval conditions.
+
+## Signature
+
+```
+judge({ prompt }) → 'true' | 'false'
+```
+
+- `prompt` — evaluation question. MUST demand a constrained answer: `Answer ONLY 'true' or 'false'`.
+- Returns a single token answer; anything else (failure, ambiguity) → conservative default per caller context.
+
+## Conservative Failure Semantics
+
+|Caller|Failure default|Rationale|
+|-|-|-|
+|when-guard|`'true'` — execute|Never skip on uncertainty (conservative — execute node)|
+|gate eval|`'false'` — no-match|Never auto-decide on uncertainty (falls through to downstream)|
+
+## Platform Mapping
+
+See §Platform Spellings — `judge()` maps to the platform's one-shot completion primitive (OMP: `completion(…, model="smol")`). Skills never spell the platform primitive directly.
 
 ---
 
@@ -70,7 +109,7 @@ Applies per dispatch call — a batch may mix types per task when the skill need
 
 ## Launch
 
-`task({ i, context, tasks })` — capture agent ID — result via `agent://<id>`.
+`task({ i, context, tasks })` — capture agent ID — result retrieved via the platform's sub-agent artifact mechanism (OMP: `agent://<id>`).
 
 ## Decision Request
 
@@ -138,7 +177,7 @@ question({ header: "Token refresh strategy", options: [{ label: "Polling", descr
 
 # interview() — Consensus Interview (Behavior Contract — NOT a callable function)
 
-Single conversation contract with two modes — **consensus mode** and **solve mode** — sharing one rule set. Full implementation of the grilling skill behavior contract — every rule below MUST apply on every call, both modes.
+Single conversation contract with two modes — **consensus mode** and **solve mode** — sharing one rule set. Every rule below MUST apply on every call, both modes.
 
 ## Signature
 
@@ -174,7 +213,7 @@ interview({ goal, context?, research?, design? }) → consensus | solution
 
 ## Solve-Mode Additions
 
-9. **Research before think** — when `research: true` (default in solve mode), load `skill://research`. Look up reference specs, existing patterns, constraints. Do not skip — uninformed design wastes interview rounds.
+9. **Research before think** — when `research: true` (default in solve mode), load skill research. Look up reference specs, existing patterns, constraints. Do not skip — uninformed design wastes interview rounds.
 10. **Think exhaustively** — design complete solution. Cover all dimensions: structure, naming, edges, guards, edge cases. Incomplete design → extra interview rounds.
 11. **Re-think on reject** — user rejects any decision → return to think step. Revise design. Re-interview affected decisions only — do not re-ask confirmed points.
 
@@ -183,7 +222,7 @@ interview({ goal, context?, research?, design? }) → consensus | solution
 ```
 interview({ goal, research: true, context })   ← solve mode
   ├── confirm(goal)       ← goal consensus — confirm shared understanding
-  ├── research             ← skill://research — look up specs, patterns, constraints
+  ├── research             ← skill research — look up specs, patterns, constraints
   ├── think                ← agent reasons about solution — design, analyze, decide
   ├── interview(details)   ← question() per-round — confirm each decision point
   └── repeat until done    ← human rejects → back to think/interview; human confirms → return solution
@@ -197,7 +236,7 @@ Loop inside agent — no graph-level retry/jump. Human rejection → agent re-th
 |-|-|-|
 |Goal|Reach consensus on topic|Produce complete solution|
 |Internal steps|interview only|confirm → research → think → interview loop|
-|Research|agent may research ad-hoc|explicit research step via skill://research|
+|Research|agent may research ad-hoc|explicit research step via skill research|
 |Loop|single-pass consensus|multi-pass — reject → re-think → re-interview|
 |Returns|`{ decisions }`|`{ goal, findings?, design, consensus }`|
 |Use case|scope confirm, plan confirm|graph design, skill structure design|
@@ -211,4 +250,4 @@ question() — single decision (primitive)
 interview() — single conversation contract (consensus + solve modes)
 ```
 
-Each level builds on lower: interview() uses question() per turn. `task()` is orthogonal — dispatches sub-agents that may themselves use any primitive. Grilling / grill-with-docs (upstream skills) are the named conversation disciplines — interview() is their formalized contract; grill-with-docs additionally carries inline domain-modeling side effects (ADR/glossary persistence).
+Each level builds on lower: interview() uses question() per turn. `task()` is orthogonal — dispatches sub-agents that may themselves use any primitive.

@@ -7,11 +7,11 @@ phases:
     channels:
       - ./CONTEXT.md
     task: |
-      Execute scope interview per skill://atom-scope-interview.
+      Execute scope interview per atom-scope-interview.
 
       Topics: graph name and purpose; scope (start-to-end phases, user interactions, agent tasks); skill dependencies (entry skills for main phases); dependencies (other graphs or skills to reference); save location.
 
-      Output: confirmed graph name and purpose, full phase topology (ids, types, dependsOn edges, when guards, join modes, channels), skill dependencies, scope_complete: true, save_location.
+      Output: confirmed graph name and purpose, full phase topology (ids, types, dependsOn edges, gate branches, join modes, channels), skill dependencies, scope_complete: true, save_location.
 
   - id: graph-design
     type: main
@@ -22,16 +22,17 @@ phases:
     task: |
       Design graph topology using atom-kernel interview() solve mode — confirm goal → research specs → think topology → interview decisions → repeat until confirmed.
 
-            Read scope-confirm output (injected).
+      Read scope-confirm output (injected).
+
       Execute interview({ goal: "design graph topology for confirmed scope", research: true, context }) per atom-kernel §interview() solve mode:
 
       confirm(goal): Confirm design goal with user via interview(). Confirm graph name, purpose, phase count estimate, flow-type sub-graph calls, save location. Never skip — goal consensus required.
 
-      research: Load atom-graph-spec. Look up PhaseSchema fields, topology constraints (acyclic, minimal deps, single entry), when guard rules (deterministic, observable facts), flow phase constraints (use/def, depth cap), approval routing patterns. Scan existing graphs for patterns.
+      research: Load atom-graph-spec. Look up PhaseSchema fields, topology constraints (acyclic, minimal deps, single entry), gate branch rules (natural-language conditions referencing observable facts), flow phase constraints (use/def, depth cap), approval routing patterns. Scan existing graphs for patterns.
 
-      think: Design complete phase topology — ids (kebab-case), types (main/approval/flow), dependsOn edges (DAG, no cycles), when guards (referencing upstream outputs), join modes (all/any), channels. Validate per atom-graph-spec §Topology Constraints: no cycles, all reachable, guards deterministic, flow phases have use or def.
+      think: Design complete phase topology — ids (kebab-case), types (main/approval/flow), dependsOn edges (DAG, no cycles), gate branches (conditions referencing upstream outputs / decision values), join modes (all/any), channels. Validate per atom-graph-spec §Topology Constraints: no cycles, all reachable, branch conditions observable, flow phases have use or def.
 
-      interview(details): Present design decisions one at a time via question() — graph name, phase count/types, dependsOn edges, when guards, approval routing. Recommendation first. User rejects → return to think, revise, re-interview affected decisions only.
+      interview(details): Present design decisions one at a time via question() — graph name, phase count/types, dependsOn edges, gate branches, approval routing. Recommendation first. User rejects → return to think, revise, re-interview affected decisions only.
 
       Output: When all confirmed, write design (main agent collects) per atom-graph-design output format.
 
@@ -66,8 +67,8 @@ phases:
       Review generated .taskflow.yaml per code-review (use ## Agent hints for axis sub-agents).
 
       Artifact: graph-write output (injected); graph-design + scope-confirm outputs (injected).
-      Standards: atom-graph-spec (injected) — schema compliance, topology safety, when guard determinism, join mode validity.
-      Spec: graph matches design — same topology, same guards, same types.
+      Standards: atom-graph-spec (injected) — schema compliance, topology safety, branch condition observability, join mode validity.
+      Spec: graph matches design — same topology, same branches, same types.
 
       Output structured YAML report with overall: pass | fail. Write report (main agent collects).
     channels:
@@ -75,31 +76,29 @@ phases:
       - node:scope-confirm
       - skill:atom-graph-spec
 
+  # Gate — bounded backward rework on FAIL (route-first: pure backward jump)
   - id: graph-gate
     type: gate
     dependsOn: [graph-review]
-    eval:
-      - when: 'graph-review output shows overall: fail AND retryAttempt < 2'
-        action: retry
-        target: graph-write
-        note: 'auto: review found blocking issues — fix and re-review'
+    jumps:
+      - when: 'graph-review output shows overall: fail AND graph-write retryCount < 2'
+        to: graph-write
 
+  # Accept — decision confirmation (route-first: no written actions).
+  # Recommendation follows the review verdict; revise/redesign are AI-generated
+  # dynamic options, not written.
   - id: graph-accept
     type: approval
     dependsOn: [graph-gate]
-    routing:
-      actions:
-        - action: continue
-          label: 'Accept graph'
-          description: 'Graph definition is ready — proceed to output examples'
-        - action: retry
-          target: graph-write
-          label: 'Revise graph'
-          description: 'Graph needs changes — re-run graph-write with review feedback'
-        - action: jump
-          target: graph-design
-          label: 'Revise design'
-          description: 'Fundamental topology issues — redesign phases'
+    channels:
+      - node:graph-review
+    task: |
+      Accept the graph?
+
+      graph-review reported the graph definition review verdict. Recommendation
+      follows the review verdict and the rework bound: accept when the graph
+      passes (usage examples follow); otherwise revise (re-run graph-write with
+      review feedback) or redesign (re-run graph-design).
 
   - id: output-examples
     type: main

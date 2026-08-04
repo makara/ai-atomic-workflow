@@ -49,7 +49,7 @@ describe('config: valid shapes', () => {
 
     const result = ConfigFileSchema.safeParse(config);
     expect(result.success).toBe(false);
-    const messages = result.error.issues.map((i) => i.message).join('\n');
+    const messages = result.error!.issues.map((i) => i.message).join('\n');
     expect(messages).toContain('agentRegistry');
     expect(messages).toContain('removed');
   });

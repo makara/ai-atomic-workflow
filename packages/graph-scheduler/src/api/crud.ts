@@ -37,7 +37,7 @@ import type {
 
 import { executeEffects, reconstructFsmState } from './fsm-reconstruct.js';
 import { getContractWarnings, loadGraphForRun, loadGraphWithRegistry, toTaskflowGraph } from './graph-loader.js';
-import { dropRunCaches, graphLoadCache, runConstraints } from './run-caches.js';
+import { dropRunCaches, graphLoadCache } from './run-caches.js';
 import { buildNodeDetail, buildSnapshot, findActiveNode, type IGraphSnapshot, type ISnapshotNode } from './snapshot.js';
 
 /** Next node detail — returned alongside snapshot for agent dispatch. */
@@ -99,12 +99,11 @@ function buildNextNode(input: NextNodeInput): Effect.Effect<NodeDetail | null, D
   return Effect.gen(function* () {
     const active = input.state.status === 'running' ? findActiveNode(input.state.phases, input.graph) : null;
     if (!active) return null;
-    const constraints = runConstraints.get(input.runId) ?? loadConstraintsFile();
     return yield* buildNodeDetail({
       phaseId: active.phaseId,
       nodeState: active.nodeState,
       graph: input.graph,
-      constraints,
+      constraints: input.constraints,
       runMode: input.mode,
       args: input.args,
     });
@@ -133,8 +132,9 @@ function invalidState(runId: string, currentStatus: string, attemptedAction: str
  *
  * @param graphName — graph name (resolved via registry or `${graphName}.taskflow.yaml`)
  * @param args      — optional invocation arguments (accessible via {args.X} in templates)
- * @param mode      — Run Mode: 'auto' auto-executes routingActions[0] on every approval
- *                    without a decision card; 'manual' (default) always presents the card.
+ * @param mode      — Run Mode: 'auto' executes the action declaring `default: true`
+ *                    on every approval without a decision card; 'manual' (default)
+ *                    always presents the card.
  */
 export function graphStart(
   graphName: string,
@@ -171,16 +171,15 @@ export function graphStart(
     }
 
     const runId = nextState.runId;
-    // Snapshot project constraints for run lifetime — new run re-reads file
-    runConstraints.set(runId, loadConstraintsFile());
+    // Snapshot project constraints into the run record — frozen for run lifetime
+    const constraints = loadConstraintsFile();
     // Cache graph definition for subsequent advance/jump within this run
     graphLoadCache.set(runId, tf);
 
     // Create run row + node state rows in DB
-    yield* repo.createRun(runId, graphName, args, mode);
-    const nodes = tf.phases.map((p: { id: string }, i: number) => ({
+    yield* repo.createRun(runId, graphName, args, mode, constraints);
+    const nodes = tf.phases.map((p: { id: string }) => ({
       nodeId: p.id,
-      topoOrder: i,
     }));
     yield* repo.createNodeStates(runId, nodes);
 
@@ -188,9 +187,9 @@ export function graphStart(
     yield* executeEffects(result.effects, repo, graph);
 
     // Build next node
-    const node = yield* buildNextNode({ runId, state: nextState, graph, mode, args: args ?? null });
+    const node = yield* buildNextNode({ runId, state: nextState, graph, mode, constraints, args: args ?? null });
     // Contract warnings captured at load — surfaced for decision gates
-    return { runId, node, contractWarnings: getContractWarnings(graphName), snapshot: buildSnapshot(nextState) };
+    return { runId, node, contractWarnings: getContractWarnings(graphName), snapshot: buildSnapshot(nextState, graph) };
   });
 }
 
@@ -206,13 +205,17 @@ export function graphStart(
  * @param runId      — run identifier
  * @param nodeId     — completed phase identifier
  * @param durationMs — execution duration in milliseconds
- * @param skip       — mark node as skipped (when guard false).
+ * @param branchTo   — routing decision target (route-first): gate jump target
+ *                    (backward rework — terminal upstream node) or approval
+ *                    branch-route target (node or route id — activates route)
+ * @param endRun     — approval `end` action: complete the run immediately
  */
 export function graphAdvance(
   runId: string,
   nodeId: string,
   durationMs: number,
-  skip?: boolean,
+  branchTo?: string,
+  endRun?: boolean,
 ): Effect.Effect<
   { snapshot: IGraphSnapshot; node: NodeDetail | null },
   SchedulerError,
@@ -222,7 +225,7 @@ export function graphAdvance(
     const { run, currentState, graph } = yield* loadRunContext(runId);
 
     // Always dispatch COMPLETE event — output stays in agent session
-    const event: FsmEvent = { type: 'COMPLETE', phaseId: nodeId, durationMs, skip };
+    const event: FsmEvent = { type: 'COMPLETE', phaseId: nodeId, durationMs, branchTo, endRun };
     const result = yield* dispatchEvent(runId, currentState, graph, event);
 
     // Execute effects
@@ -231,15 +234,22 @@ export function graphAdvance(
 
     // Build return
     const nextState = result.nextState;
-    const snapshot = buildSnapshot(nextState);
-    const node = yield* buildNextNode({ runId, state: nextState, graph, mode: run.mode, args: run.args });
+    const snapshot = buildSnapshot(nextState, graph);
+    const node = yield* buildNextNode({
+      runId,
+      state: nextState,
+      graph,
+      mode: run.mode,
+      constraints: run.constraints,
+      args: run.args,
+    });
 
     return { snapshot, node };
   });
 }
 
 /**
- * Jump to a target phase — reset target + upstream, re-activate.
+ * Jump to a target phase — reset target + downstream terminal nodes, re-activate (upstream kept).
  * Used after approval REWORK decision. Only valid when run is in running state.
  *
  * @param runId         — run identifier
@@ -268,8 +278,15 @@ export function graphJump(
     yield* executeEffects(result.effects, repo, graph);
 
     const nextState = result.nextState;
-    const snapshot = buildSnapshot(nextState);
-    const node = yield* buildNextNode({ runId, state: nextState, graph, mode: run.mode, args: run.args });
+    const snapshot = buildSnapshot(nextState, graph);
+    const node = yield* buildNextNode({
+      runId,
+      state: nextState,
+      graph,
+      mode: run.mode,
+      constraints: run.constraints,
+      args: run.args,
+    });
 
     return { snapshot, node };
   });
@@ -302,6 +319,6 @@ export function graphForceEnd(
     // Terminal state — drop per-run caches, run will never dispatch again
     dropRunCaches(runId);
 
-    return buildSnapshot(result.nextState);
+    return buildSnapshot(result.nextState, graph);
   });
 }

@@ -37,7 +37,7 @@ function writeFixtureFile(fix: Fixture, filename: string, data: unknown): string
   return filePath;
 }
 
-/** Minimal valid taskflow graph. */
+/** Minimal valid taskflow graph — no end node (route-first: drain completion). */
 function validGraph(overrides?: Record<string, unknown>): Record<string, unknown> {
   return {
     name: 'test-graph',
@@ -143,7 +143,7 @@ describe('Schema validation (valid / invalid taskflow YAML)', () => {
       version: 1,
       phases: [
         { id: 'a1', type: 'main', skill: 'entry-agent-skill', task: 'step 1' },
-        // approval requires exactly one review-convergence dep
+        // approval — decision confirmation after the main step
         { id: 'ap1', type: 'approval', task: 'decide', dependsOn: ['a1'] },
       ],
     });
