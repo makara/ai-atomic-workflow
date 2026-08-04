@@ -1,6 +1,6 @@
 {
   "name": "@ai-atomic-workflow/graph-workflow",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Graph-driven work-order system for AI agents — explicit phases, scoped context, and non-bypassable approval gates.",
   "keywords": [
     "graph",

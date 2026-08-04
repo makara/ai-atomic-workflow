@@ -40,7 +40,7 @@ phases:
     type: main
     dependsOn: [doc-write]
     skill: code-review
-    agent: [reviewer, task]
+    agent: [reviewer, explore, task, general]
     task: |
       Review document changes per code-review (use ## Agent hints for axis sub-agents).
 

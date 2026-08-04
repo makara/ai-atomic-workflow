@@ -62,7 +62,7 @@ phases:
   - id: implement-review
     type: main
     skill: code-review
-    agent: [reviewer, task]
+    agent: [reviewer, explore, task, general]
     dependsOn: [implement]
     channels:
       - skill:atom-graph-spec

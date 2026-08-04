@@ -62,7 +62,7 @@ phases:
     type: main
     dependsOn: [graph-write]
     skill: code-review
-    agent: [reviewer, task]
+    agent: [reviewer, explore, task, general]
     task: |
       Review generated .taskflow.yaml per code-review (use ## Agent hints for axis sub-agents).
 

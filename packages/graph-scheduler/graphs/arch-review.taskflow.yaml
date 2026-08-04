@@ -31,7 +31,7 @@ phases:
     type: main
     dependsOn: [scope-detect-interview]
     skill: improve-codebase-architecture
-    agent: [scout, task]
+    agent: [explore, scout, task, general]
     channels:
       - node:loop-entry
       - ./CONTEXT.md

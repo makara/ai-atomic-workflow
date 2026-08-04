@@ -31,7 +31,7 @@ phases:
   - id: implement
     type: main
     skill: implement
-    agent: [task]
+    agent: [task, general]
     dependsOn: [work-input]
     task: |
       Execute implement graph mode — seam confirmation (question once), tdd red-green slices,
@@ -51,7 +51,7 @@ phases:
   - id: implement-review
     type: main
     skill: code-review
-    agent: [reviewer, task]
+    agent: [reviewer, explore, task, general]
     dependsOn: [implement]
     channels:
       - skill:atom-graph-spec

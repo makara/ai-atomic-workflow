@@ -12,55 +12,81 @@ graph-scheduler is the infrastructure half of Atomic Workflow. It loads `.taskfl
 
 ## Requirements
 
-- [bun](https://bun.sh) ≥ 1.x — runtime (server runs on bun, TS natively)
-- [npm](https://nodejs.org) ≥ 9 — package manager
+Two supported runtimes — pick one; the installer matches the runtime:
+
+|Runtime|Version|Used by|
+|-|-|-|
+|[Node](https://nodejs.org)|≥ 22|npm route — runs the compiled entry `dist/server.js`|
+|[bun](https://bun.sh)|≥ 1|bun route — runs the TypeScript entry `server.ts` natively|
 
 ## Install
 
-Global npm install:
+Two routes — the runtime matches the installer:
+
+**Option A: npm + Node runtime**
 
 ```bash
 npm install -g @ai-atomic-workflow/graph-scheduler
 ```
 
-Verify:
+Resolve the global path (used by the MCP registration below):
+
+```bash
+npm root -g   # → <npm-root>, e.g. /usr/local/lib/node_modules
+```
+
+**Option B: bun**
+
+```bash
+bun add -g @ai-atomic-workflow/graph-scheduler
+```
+
+Resolve the global bin folder:
+
+```bash
+bun pm bin -g   # → <bun-bin>, e.g. ~/.bun/bin
+```
+
+Verify either route:
 
 ```bash
 npm list -g @ai-atomic-workflow/graph-scheduler
-# @ai-atomic-workflow/graph-scheduler@0.1.0
+# @ai-atomic-workflow/graph-scheduler@0.2.0
 ```
 
-This installs the `atom-graph-scheduler` bin (bun shebang) — used by the MCP registration below.
+This installs the `atom-graph-scheduler` bin alongside the package.
 
 ## MCP Registration
 
-graph-scheduler speaks MCP JSON-RPC 2.0 over stdio. Register it in your platform's MCP config:
+graph-scheduler speaks MCP JSON-RPC 2.0 over stdio. Register it in your platform's MCP config — the command invokes your chosen runtime explicitly:
 
-**OMP** (`~/.omp/agent/mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "graph-scheduler": {
-      "command": "atom-graph-scheduler",
-      "args": []
-    }
-  }
-}
-```
-
-**OpenCode** (`opencode.json`):
+**npm + Node** — replace `<npm-root>` with the `npm root -g` output:
 
 ```json
 {
   "mcpServers": {
     "graph-scheduler": {
-      "command": "atom-graph-scheduler",
-      "args": []
+      "command": "node",
+      "args": ["<npm-root>/@ai-atomic-workflow/graph-scheduler/dist/server.js"]
     }
   }
 }
 ```
+
+**bun** — replace `<bun-bin>` with the `bun pm bin -g` output:
+
+```json
+{
+  "mcpServers": {
+    "graph-scheduler": {
+      "command": "bun",
+      "args": ["<bun-bin>/atom-graph-scheduler"]
+    }
+  }
+}
+```
+
+Config file locations: OMP → `~/.omp/agent/mcp.json`, OpenCode → `opencode.json` — same JSON either way.
 
 The platform manages the process lifecycle: discover → spawn → connect → health check → reconnect. A crash doesn't kill the session — the platform reconnects automatically.
 
@@ -72,7 +98,7 @@ The platform manages the process lifecycle: discover → spawn → connect → h
 
 ## Project Setup
 
-Initialize a project with the **setup-atomic-workflow** skill (the retired `graph-config` CLI no longer exists):
+Initialize a project with the **setup-atomic-workflow** skill (the retired `atom-graph-config` CLI no longer exists):
 
 ```
 Use setup-atomic-workflow to initialize this project
@@ -101,35 +127,30 @@ phases:
   - id: approval-review
     type: approval
     dependsOn: [agent-echo]
-    task: 'Approval Review'
-    routing:
-      actions:
-        - action: continue
-          label: 'Accept output'
-          description: 'Output OK — proceed'
-        - action: retry
-          target: agent-echo
-          label: 'Regenerate output'
-          description: 'Output needs changes — re-run agent-echo with feedback'
+    task: |
+      Approval Review
+
+      Agent output produced. Accept → proceed. Recommendation: accept when the
+      output is correct; free input overrides; dynamic option regenerate
+      re-runs agent-echo with feedback.
 ```
 
 ### Phase fields
 
 |Field|Meaning|
 |-|-|
-|`id`|Unique phase id — referenced by `dependsOn` and `routing.target`|
-|`type`|`main` (inline execution), `approval` (decision gate), `flow` (composition — referenced sub-graph via `use`, flattened into the parent at load)|
+|`id`|Unique phase id — referenced by `dependsOn` and jump/route targets|
+|`type`|`main` (inline execution), `approval` (human decision card), `gate` (machine rework judgment), `flow` (composition — referenced sub-graph via `use`, flattened into the parent at load)|
 |`dependsOn`|Declared upstream phases — the graph runs a phase only when all of them completed|
-|`task`|Main: the work order — exact prompt for the agent, `{args.key}` templates interpolated at run time. Approval: decision-card topic|
-|`skill`|Execution skill for this phase (e.g. `code-review`) — how the phase's work gets done|
+|`task`|Main: the work order — exact prompt for the agent, `{args.key}` templates interpolated at run time. Approval: decision-card prompt — first line = card header (≤30 chars), rest = card body|
+|`skill`|Execution skill for this phase (e.g. `atom-scope-interview`) — how the phase's work gets done|
 |`agent`|Priority hints — `string[]` of agent types (e.g. `[reviewer, task]`); advisory, consumed by skills when they dispatch sub-agents (main type only)|
-|`channels`|Main-type context patterns — skill names, file globs, or `node:<id>` refs, resolved against the execution skill's Context Requirements contract|
-|`preText`|Approval-type decision-card pre-call text — displayed before `question()`, never channel-resolved|
-|`join`|Dependency resolution — `all` (default: every dep must complete) or `any` (one dep sufficient)|
-|`when`|Natural-language skip guard — LLM-evaluated before execution; report `skip: true` via `graph_advance` when it evaluates false|
-|`eval`|Approval-type auto-decision rules — agent evaluates before `question()`; first match short-circuits (`continue` / `retry` / `jump`)|
+|`channels`|Context patterns — `skill:<name>` (skill content), file globs, or `node:<id>` (upstream phase output), resolved against the execution skill's Context Requirements contract; approval/gate carry `node:` entries only (judgment context)|
+|`jumps`|Gate-only rework conditions — `[{when, to}]`, agent-evaluated in declaration order; first hit → backward jump to `to` (target + downstream reset, retry count incremented); no hit → pass through|
+|`route`|Branch-route membership — declared route id; flows propagate their id to children; absent = implicit default route (always active). Approval branch options activate a route via `graph_advance` `branchTo`; unselected routes never activate|
+|`routing`|Approval-only branch-route actions — `{ actions: [{ action, target?, value, label, description }] }`, declared only in branch-route scenarios; drives the decision-card options. Rejected on other types|
+|`join`|Dependency resolution — `any` (one dep suffices; the only accepted literal)|
 |`use`|Flow type — referenced graph name to compose in (required when `type: flow`)|
-|`routing`|Approval actions — `continue`, `retry`, `jump`; `retry` / `jump` carry an explicit `target` phase|
 
 ## MCP Tools
 
@@ -138,9 +159,9 @@ phases:
 |Tool|Parameters|What it does|
 |-|-|-|
 |`graph_start`|`graphName: string`, `args?: object`|Create a run, return the first ready node (NextNode)|
-|`graph_advance`|`runId`, `nodeId`, `durationMs`, `skip?`|Report a node complete — notify + ask next in one step. `skip: true` marks a node skipped when its when-guard evaluated false. Output is not passed in — it lives in the agent session or on disk|
+|`graph_advance`|`runId`, `nodeId`, `durationMs`, `branchTo?`, `endRun?`|Report a node complete — notify + ask next in one step. `branchTo` passes a routing target (gate rework target / approval branch-route target); `endRun: true` completes the run immediately (approval end action). Output is not passed in — it lives in the agent session or on disk|
 |`graph_jump`|`runId`, `targetPhaseId`|Jump to a specific phase — re-run it after an approval REWORK decision|
-|`graph_force_end`|`runId`|Force-terminate a run — remaining nodes marked skipped, run marked terminated. **Irreversible**|
+|`graph_force_end`|`runId`|Force-terminate a run — unfinished nodes marked aborted, run marked terminated. **Irreversible**|
 |`graph_status`|`runId`|Full run snapshot — per-phase status, retry counts, timestamps|
 |`graph_list`|—|All run summaries (runId, graphName, status, startedAt), newest first|
 |`graph_init`|—|Initialize the database (create tables + run migration) plus a full health check — entry-skill contract alignment with orphan detection + config health report. Idempotent|
@@ -154,9 +175,10 @@ phases:
 |type|Meaning|Agent behavior|
 |-|-|-|
 |`main`|Execution node|Execute the task inline — context assembled from `channels`, `## Agent hints:` injected when declared|
+|`gate`|Machine decision node|Evaluate `jumps` rework conditions — first hit → backward jump to the target (scheduler resets target + downstream terminals, upstream kept); no hit → pass through|
 |`approval`|Human decision node|Present a Decision Card and collect the choice|
 
-`flow` is a load-time composition type, not a dispatch type — sub-graphs via `use` are flattened into the parent graph before execution (depth cap 5). `graph_start` / `graph_advance` only ever return `main` / `approval` nodes.
+`flow` is a load-time composition type, not a dispatch type — sub-graphs via `use` are flattened into the parent graph before execution (depth cap 5). `graph_start` / `graph_advance` only ever return `main` / `approval` / `gate` nodes.
 
 ### Typical call flow
 
@@ -171,22 +193,44 @@ graph_start({ graphName: "e2e-minimal" })
 
 ## Built-in Graphs
 
-12 graphs ship with the package (in `graphs/`, registered in `graphs/registry.json`). The project's `.graph-scheduler/graphs/` is searched first — a project graph with the same name overrides a built-in.
+15 graphs ship with the package (in `graphs/`, registered in `graphs/registry.json`). The project's `.graph-scheduler/graphs/` is searched first — a project graph with the same name overrides a built-in.
 
 |Graph|What it does|
 |-|-|
 |**e2e-minimal**|Minimal E2E: main → approval loop, for learning|
 |**arch-review**|Architecture review: scope detect → review report|
-|**arch-review-to-spec**|Composed pipeline: architecture review → decision gate (spec or document only) → optional spec generation|
-|**openspec-create**|OpenSpec spec creation: scope interview with input source detection → approval gate → arch-decision step → openspec propose CLI|
+|**grill-with-docs**|Raw idea entry: scope → grilling interview with inline domain-modeling side effects (CONTEXT.md terms + ADR offers, user-confirmed) → decision gate. Two-track shared idea-sharpening entry|
+|**arch-review-loop**|Closed-loop architecture review: entry (existing report or fresh review; run mode per activation) → arch-review re-review (round worker) → approve Top Rec → openspec-pipeline → round-end approval (Loop again default, Complete = user ends) → loop until no Top Rec remains|
+|**implement**|Generic implementation: input-source detection (change/tickets/PRD) → tdd implementation → dual-axis review → bounded gate → approval → conditional OpenSpec archive|
+|**openspec-create**|OpenSpec spec creation: scope interview with input source detection + inline ADR judgment → gate → openspec propose CLI|
 |**openspec-apply**|OpenSpec apply: apply change → dual review → bounded auto-rework gate → archive|
-|**openspec-pipeline**|OpenSpec lifecycle: spec creation (openspec-create) → human approval gate → implementation (openspec-apply)|
+|**openspec-engineer**|OpenSpec detailed implementation: spec synthesis → tickets → tdd implementation → dual review → bounded gate → approval → reverse-validated archive|
+|**openspec-pipeline**|OpenSpec full-lifecycle pipeline: raw idea entry (grill-with-docs) → spec creation (openspec-create) → human gate → branch (openspec-apply direct / openspec-engineer detailed) → archive|
 |**plan-generate**|Generic plan generation: scope interview → to-spec PRD → optional tickets split. Reusable via flow type|
 |**skill-author**|Skill authoring: create or edit — scope → write → review → approval → output|
 |**skill-delete**|Skill deletion: select → impact analysis → confirm → execute → review → approval|
-|**skill-change-workflow**|Orchestrated skill change: plan → flow phases (author + delete + doc) → cross review → approval|
+|**skill-change-workflow**|Orchestrated skill change: plan → parse → flow writers (author + delete + doc + spec, case-5 self-judged) → cross review → approval → archive|
 |**graph-generate**|Graph generation: interview → design → write → review → approval → examples|
 |**doc-update**|Document update: interview → analyze → confirm → write → review → approval|
+
+## arch-review-loop — one loop, one problem
+
+The flagship graph: each loop round takes the biggest remaining architectural problem from review to shipped change. Phases:
+
+|Phase|Type|Role|
+|-|-|-|
+|`loop-entry`|main|Scope interview (`atom-scope-interview`) — **re-confirmed every round**, never auto-skipped: domain/feature/problem + focus dimensions, plus report input — `fresh` (write a new report to a confirmed output path) or `existing` (closed-loop re-review of a prior report; the path's Top Recommendation is read)|
+|`review`|flow|Runs `arch-review` — the round worker, always executes. Round 2+ re-reads the report (single source of truth, no path re-confirmation), marks per-Top-Rec implementation progress from code evidence, updates the report in place, rewrites the Top Recommendation (strongest remaining candidate, or empty)|
+|`review-accept`|approval|Decision card — implement the Top Rec (continue) or end the loop (end action). Recommendation follows the report state|
+|`implement`|flow|Runs `openspec-pipeline` — grill → spec creation → track decision → direct apply / detailed engineer → archive|
+|`loop-gate`|gate|Backward jump to `loop-entry` when: run mode is auto AND `review/arch-review` output shows `top_rec_remaining: true` AND `loop-entry` retryCount < 8. No match → pass through|
+|`loop-accept`|approval|Round-end card — Loop again (default) or Complete (end action). Recommendation follows the report state and the loop bound; when nothing remains, ending IS the recommendation|
+
+Key semantics:
+
+- **Run mode** is a per-activation decision — the built-in `$run-mode-confirm` prologue (`args.mode` short-circuits, otherwise a question), never a graph topic. Auto mode executes the gate jump and the end actions without asking; manual mode presents every decision card.
+- **Round restart** jumps back to `loop-entry`, so the whole segment (scope → review → accept → implement) re-runs with re-confirmed scope.
+- **Normal end** = the review reports no remaining Top Recommendation (`top_rec_remaining: false`) — the loop finishes; the bound (`loop-entry` retryCount < 8) only caps forced auto rework.
 
 ## Making Skills and Graphs with Graphs
 
@@ -204,7 +248,7 @@ Use atom-pilot to run skill-author: make a skill that auto-generates changelogs 
 Use atom-pilot to run skill-delete: remove the changelog skill.
 ```
 
-**Orchestrated skill change** — `skill-change-workflow` plans a change, then runs author + delete + doc phases, a cross review, and an approval gate:
+**Orchestrated skill change** — `skill-change-workflow` plans the change, then runs four self-judged writer flows (skill-author, skill-delete, doc-update, openspec-create — each skips itself when the plan doesn't need it), a cross-artifact review, an approval gate, and archives:
 
 ```
 Use atom-pilot to run skill-change-workflow: rework the changelog skill to support conventional commits.

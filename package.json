@@ -1,22 +1,22 @@
 {
   "name": "ai-atomic-workflow",
-  "version": "0.1.0",
-  "description": "Graph-driven work-order system for AI agents — explicit phases, scoped context, and non-bypassable approval gates.",
+  "version": "0.2.0",
   "private": true,
+  "description": "Graph-driven work-order system for AI agents — explicit phases, scoped context, and non-bypassable approval gates.",
   "license": "MIT",
   "type": "module",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "yarn workspaces foreach --all run tsup",
     "check": "yarn typecheck && yarn lint && yarn format:check",
     "check:ci": "yarn typecheck && yarn lint && yarn format:check && yarn test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "lint:fix": "eslint --fix .",
-    "publish:all": "yarn workspaces foreach --all --no-private npm publish",
+    "publish:all": "yarn workspaces foreach --all --no-private npm publish --access public",
     "publish:dry": "yarn workspaces foreach --all --no-private npm publish --dry-run",
     "test": "vitest run",
     "test:watch": "vitest",

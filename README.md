@@ -70,7 +70,7 @@ bun add -g @ai-atomic-workflow/graph-scheduler
 Runtime: [bun](https://bun.sh) ≥ 1. bun executes the TypeScript entry directly:
 
 ```bash
-bun pm root -g   # → <bun-root>, e.g. ~/.bun/install/global/node_modules
+bun pm bin -g   # → <bun-bin>, e.g. ~/.bun/bin
 ```
 
 ```json
@@ -78,7 +78,7 @@ bun pm root -g   # → <bun-root>, e.g. ~/.bun/install/global/node_modules
   "mcpServers": {
     "graph-scheduler": {
       "command": "bun",
-      "args": ["<bun-root>/@ai-atomic-workflow/graph-scheduler/server.ts"]
+      "args": ["<bun-bin>/atom-graph-scheduler"]
     }
   }
 }
@@ -88,7 +88,7 @@ Config file locations: OMP → `~/.omp/agent/mcp.json`, OpenCode → `opencode.j
 
 ### graph-workflow
 
-Two install channels — pick one (all 13 built-in skills are required for graph execution):
+Two install channels — pick one (all 14 built-in skills are required for graph execution):
 
 **Option A: Claude Code marketplace**
 
@@ -99,10 +99,10 @@ Two install channels — pick one (all 13 built-in skills are required for graph
 **Option B: skills.sh** (third-party CLI, 76+ agent platforms — OpenCode / Codex / Cursor etc.)
 
 ```bash
-# Full install (13 graph-workflow skills + legacy skills)
+# Full install (14 graph-workflow skills + legacy skills)
 npx skills add makara/ai-atomic-workflow
 
-# graph-workflow only — 13 built-in skills (tree-subpath source, no marketplace.json dependency)
+# graph-workflow only — 14 built-in skills (tree-subpath source, no marketplace.json dependency)
 npx skills add https://github.com/makara/ai-atomic-workflow/tree/main/packages/graph-workflow/skills
 ```
 
@@ -117,7 +117,7 @@ Two prerequisites for the openspec graphs and the parent skill chain:
 
 ## Setup
 
-Initialize a project with the **setup-atomic-workflow** skill (the retired `graph-config` CLI no longer exists):
+Initialize a project with the **setup-atomic-workflow** skill (the retired `atom-graph-config` CLI no longer exists):
 
 ```
 Use setup-atomic-workflow to initialize this project
@@ -137,26 +137,21 @@ With graph-workflow skills installed, drive the built-in graphs with `atom-pilot
 Use atom-pilot to run <graph name>: <your goal in plain language>
 ```
 
-**1. Find problems or refine an idea** — run arch-review:
+**1. Solve a problem end-to-end — one loop** — `arch-review-loop` drives the whole flow — review, spec, implementation, round-end approval — in a single loop that repeats until nothing remains:
 
 ```
-Use atom-pilot to run arch-review: analyze this codebase for structure, coupling hotspots, and dead code.
+Use atom-pilot to run arch-review-loop: find and fix the biggest architectural problem in this codebase.
 ```
 
-**2. Turn the result into a change** — two routes:
+Each round: entry scope interview (fresh review or an existing report) → architecture review → approve the Top Recommendation → OpenSpec spec + implementation (`openspec-pipeline`) → round-end approval (Loop again default, Complete = you end). The loop ends when the review reports no remaining Top Recommendation — or you choose Complete. Run mode (manual/auto) is confirmed at each activation.
 
-**One step** — run the full lifecycle:
+**2. Same flow, decomposed** — equivalent to arch-review-loop, run step by step (what one loop automates):
 
-```
-Use atom-pilot to run openspec-pipeline: spec creation, human approval, and implementation in one run.
-```
-
-**Multi-step** — compose the pipeline yourself:
-
-- `openspec-create` — turn the review report into an OpenSpec change (spec)
+- `arch-review` — find problems or refine an idea (scope detect → review report)
+- `openspec-create` — turn the review's Top Recommendation into an OpenSpec change (spec)
 - (optional) `plan-generate` — generate implementation tickets from the spec
-- Implement the spec or tickets however you like — plain session, mattpocock/skills, your own flow
-- `openspec-apply` — apply the change: dual review, bounded rework, archive
+- `implement` / `openspec-apply` — implement the change: input-source detection, tdd implementation, dual-axis review, bounded gate; auto-archives when the input was an OpenSpec change
+- Re-run rounds while findings remain
 
 **3. Make a graph or a skill** — the meta-workflows are built-in graphs, driven the same way:
 
@@ -174,7 +169,7 @@ Use atom-pilot to run skill-author: make a skill that auto-generates changelogs 
 
 **Raw MCP tools?** The loop behind all of this is `graph_start` → execute the returned work order → `graph_advance` → repeat until null. If you want to drive the MCP tools directly instead of via atom-pilot, see the call-flow example in [packages/graph-scheduler/README.md](packages/graph-scheduler/README.md).
 
-**Want to go deeper?** → [packages/graph-scheduler/README.md](packages/graph-scheduler/README.md) for the graph format and all tools, [packages/graph-workflow/README.md](packages/graph-workflow/README.md) for the skill system, [docs/technical-overview.md](docs/technical-overview.md) for the execution model.
+**Want to go deeper?** → [packages/graph-scheduler/README.md](packages/graph-scheduler/README.md) for the graph format and all tools, [packages/graph-workflow/README.md](packages/graph-workflow/README.md) for the skill system.
 
 ---
 
@@ -191,16 +186,19 @@ Two packages:
 
 |Graph|What it does|
 |-|-|
-|**arch-review-to-spec**|Composed pipeline: architecture review → decision gate → optional spec generation|
+|**arch-review-loop**|Closed-loop architecture review: entry (existing report or fresh review + run mode) → arch-review re-review (round worker) → approve Top Rec → openspec-pipeline → round-end approval (Loop again default, Complete = user ends) → loop until the user approves ending|
 |**arch-review**|Architecture review: scope detect → review report|
 |**doc-update**|Document update: interview → analyze → confirm → write → review → approval|
 |**graph-generate**|Meta-graph: generates a `.taskflow.yaml` from a plain-language description|
+|**grill-with-docs**|Raw idea entry: scope → grilling interview with inline ADR/glossary side effects → decision gate|
+|**implement**|Generic implementation: input-source detection (change/tickets/PRD) → tdd implementation → dual-axis review → bounded gate → approval → conditional OpenSpec archive|
 |**openspec-apply**|OpenSpec apply: apply change → dual review → bounded rework → archive|
-|**openspec-create**|OpenSpec spec creation: scope interview → approval → arch decision → propose CLI|
-|**openspec-pipeline**|OpenSpec lifecycle: spec creation → human approval → implementation|
+|**openspec-create**|OpenSpec spec creation: scope interview with input-source detection + inline ADR judgment → bounded gate → openspec propose CLI|
+|**openspec-engineer**|OpenSpec detailed implementation: spec synthesis → tickets → tdd implementation → dual review → bounded gate → reverse-validated archive|
+|**openspec-pipeline**|OpenSpec full-lifecycle pipeline: raw idea (grill-with-docs) → spec creation (openspec-create) → human gate → branch (openspec-apply direct / openspec-engineer detailed) → archive|
 |**plan-generate**|Generic plan generation: scope interview → PRD → optional tickets split|
 |**skill-author**|Skill authoring: create or edit — scope → write → review → approval|
-|**skill-change-workflow**|Orchestrated skill change: plan → author + delete + doc → cross review → approval|
+|**skill-change-workflow**|Orchestrated skill change: plan → flow writers (author + delete + doc + spec, self-judged) → cross review → approval → archive|
 |**skill-delete**|Skill deletion: select → impact analysis → confirm → execute → review → approval|
 |**e2e-minimal**|Minimal E2E: main → approval loop, for learning|
 
@@ -213,14 +211,14 @@ Atomic Workflow is in **alpha**.
 **Stable** (implemented, no planned breaking changes before v1.0):
 
 - graph-scheduler FSM engine and 9 MCP tools
-- `.taskflow.yaml` graph format and phase schema (main/approval + flow composition, when-guards, join modes, channels, agent hints)
+- `.taskflow.yaml` graph format and phase schema (main/approval/gate + flow composition, join modes, channels, agent hints, branch routes)
 - CRUD execution loop (`graph_start` → `graph_advance` → `graph_jump`, plus `graph_status` / `graph_list`)
 - setup-atomic-workflow project initialization
-- 12 built-in graphs and 13 built-in skills
+- 15 built-in graphs and 14 built-in skills
 
 **Active development** (may change):
 
-- More control-flow features — when-guards, join modes, routing actions
+- More control-flow features — branch-route patterns, gate jump conditions
 - More built-in graphs / workflows
 - Data maintenance tools (current `graph_clean_*` are minimal) — the MCP tool interface may change
 
@@ -228,8 +226,6 @@ Atomic Workflow is in **alpha**.
 
 - [ ] skill-edit graph (alpha)
 - [ ] cross-platform MCP support + phase schema v1 freeze (v1.0)
-
-<!-- → See [ROADMAP.md](ROADMAP.md) for full details. -->
 
 ---
 
@@ -255,7 +251,5 @@ Bug reports and pull requests welcome. See [CONTEXT.md](CONTEXT.md) for the arch
 |-|-|
 |[packages/graph-scheduler/README.md](packages/graph-scheduler/README.md)|Graph format, all 9 MCP tools, built-in graphs, making skills/graphs with graphs|
 |[packages/graph-workflow/README.md](packages/graph-workflow/README.md)|Skill system, full skill list, how skills drive graph execution|
-|[docs/technical-overview.md](docs/technical-overview.md)|Graph execution model, phase types, when-guards, skill system|
 |[docs/glossary.md](docs/glossary.md)|Terminology reference|
-|[ROADMAP.md](ROADMAP.md)|Planned milestones and v1.0 goals|
 |[CONTEXT.md](CONTEXT.md)|Internal architecture reference for contributors|

@@ -429,7 +429,7 @@ describe('skill-change-workflow — cross-review structure', () => {
     const phase = graph.phases.find((p) => p.id === 'cross-review');
     expect(phase!.skill).toBeDefined();
     expect(phase!.skill).toBe('code-review');
-    expect(phase!.agent).toEqual(['reviewer', 'task']);
+    expect(phase!.agent).toEqual(['reviewer', 'explore', 'task', 'general']);
   });
 
   it('cross-review depends on all flow phases (skill-author-foo, skill-delete-foo, doc-update, openspec-create-foo)', () => {

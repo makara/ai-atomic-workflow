@@ -22,3 +22,11 @@ node_modules
 *.tmp
 *.swp
 *~
+
+# TEMP
+/docs/*
+!/docs/README.zh-CN.md
+!/docs/CHANGELOG.zh-CN.md
+/guides
+/openspec
+/standards

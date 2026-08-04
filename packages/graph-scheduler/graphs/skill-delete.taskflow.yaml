@@ -134,7 +134,7 @@ phases:
     type: main
     dependsOn: [skill-delete-execute]
     skill: code-review
-    agent: [reviewer, task]
+    agent: [reviewer, explore, task, general]
     task: |
       Review delete result per code-review (use ## Agent hints for axis sub-agents).
 

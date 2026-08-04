@@ -85,7 +85,7 @@ phases:
   - id: cross-review
     type: main
     skill: code-review
-    agent: [reviewer, task]
+    agent: [reviewer, explore, task, general]
     dependsOn: [skill-author-foo, skill-delete-foo, doc-update, openspec-create-foo]
     task: |
       Cross-artifact consistency review per code-review (use ## Agent hints for axis sub-agents).

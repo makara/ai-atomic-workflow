@@ -70,7 +70,7 @@ bun add -g @ai-atomic-workflow/graph-scheduler
 运行时：[bun](https://bun.sh) ≥ 1。bun 直接执行 TypeScript 入口：
 
 ```bash
-bun pm root -g   # → <bun-root>，例如 ~/.bun/install/global/node_modules
+bun pm bin -g   # → <bun-bin>，例如 ~/.bun/bin
 ```
 
 ```json
@@ -78,7 +78,7 @@ bun pm root -g   # → <bun-root>，例如 ~/.bun/install/global/node_modules
   "mcpServers": {
     "graph-scheduler": {
       "command": "bun",
-      "args": ["<bun-root>/@ai-atomic-workflow/graph-scheduler/server.ts"]
+      "args": ["<bun-bin>/atom-graph-scheduler"]
     }
   }
 }
@@ -88,7 +88,7 @@ bun pm root -g   # → <bun-root>，例如 ~/.bun/install/global/node_modules
 
 ### graph-workflow
 
-两条安装渠道，任选其一（执行图需要全部 13 个内置技能）：
+两条安装渠道，任选其一（执行图需要全部 14 个内置技能）：
 
 **选项 A：Claude Code marketplace**
 
@@ -99,10 +99,10 @@ bun pm root -g   # → <bun-root>，例如 ~/.bun/install/global/node_modules
 **选项 B：skills.sh**（第三方 CLI，支持 76+ 智能体平台——OpenCode / Codex / Cursor 等）
 
 ```bash
-# 完整安装（13 个 graph-workflow 技能 + 旧技能）
+# 完整安装（14 个 graph-workflow 技能 + 旧技能）
 npx skills add makara/ai-atomic-workflow
 
-# 仅 graph-workflow —— 13 个内置技能（tree-subpath 源，不依赖 marketplace.json）
+# 仅 graph-workflow —— 14 个内置技能（tree-subpath 源，不依赖 marketplace.json）
 npx skills add https://github.com/makara/ai-atomic-workflow/tree/main/packages/graph-workflow/skills
 ```
 
@@ -117,7 +117,7 @@ openspec 图和父级技能链的两个前置条件：
 
 ## 初始化（Setup）
 
-用 **setup-atomic-workflow** 技能初始化项目（已退役的 `graph-config` CLI 不再存在）：
+用 **setup-atomic-workflow** 技能初始化项目（已退役的 `atom-graph-config` CLI 不再存在）：
 
 ```
 Use setup-atomic-workflow to initialize this project
@@ -137,26 +137,21 @@ Use setup-atomic-workflow to initialize this project
 Use atom-pilot to run <graph name>: <your goal in plain language>
 ```
 
-**1. 发现问题或打磨想法** — 运行 arch-review：
+**1. 端到端解决一个问题——一个 loop** — `arch-review-loop` 在一个循环里驱动完整流程——评审、spec、实现、轮末审批——不断重复直到没有剩余问题：
 
 ```
-Use atom-pilot to run arch-review: analyze this codebase for structure, coupling hotspots, and dead code.
+Use atom-pilot to run arch-review-loop: find and fix the biggest architectural problem in this codebase.
 ```
 
-**2. 把结果变成变更** — 两条路线：
+每一轮：入口范围访谈（全新评审或已有报告）→ 架构评审 → 批准 Top Recommendation → OpenSpec spec + 实现（`openspec-pipeline`）→ 轮末审批（默认 Loop again，Complete = 你结束）。当评审报告显示没有剩余 Top Recommendation 时循环结束——或你选择 Complete。运行模式（manual/auto）在每次激活时确认。
 
-**一步到位** — 运行完整生命周期：
+**2. 同一流程的分解版本** — 等同于 arch-review-loop，逐步执行（一个 loop 自动化的内容）：
 
-```
-Use atom-pilot to run openspec-pipeline: spec creation, human approval, and implementation in one run.
-```
-
-**分步组合** — 自己编排流水线：
-
-- `openspec-create` — 把评审报告转成 OpenSpec 变更（spec）
+- `arch-review` — 发现问题或打磨想法（范围探测 → 评审报告）
+- `openspec-create` — 把评审的 Top Recommendation 转成 OpenSpec 变更（spec）
 - （可选）`plan-generate` — 从 spec 生成实现工单
-- 用你喜欢的方式实现 spec 或工单 — 普通会话、mattpocock/skills、你自己的流程
-- `openspec-apply` — 应用变更：双重评审、有界返工、归档
+- `implement` / `openspec-apply` — 实现变更：输入源检测、tdd 实现、双轴评审、有界关卡；输入为 OpenSpec 变更时自动归档
+- 还有发现就重复轮次
 
 **3. 制作图或技能** — 元工作流本身就是内置图，驱动方式相同：
 
@@ -174,7 +169,7 @@ Use atom-pilot to run skill-author: make a skill that auto-generates changelogs 
 
 **直接用 MCP 工具？** 这一切背后的循环是 `graph_start` → 执行返回的工作订单 → `graph_advance` → 重复直到 null。如果你想绕开 atom-pilot 直接驱动 MCP 工具，参见 [packages/graph-scheduler/README.md](../packages/graph-scheduler/README.md) 中的调用流示例。
 
-**想深入？** → [packages/graph-scheduler/README.md](../packages/graph-scheduler/README.md) 看图格式和全部工具，[packages/graph-workflow/README.md](../packages/graph-workflow/README.md) 看技能系统，[technical-overview.md](technical-overview.md) 看执行模型。
+**想深入？** → [packages/graph-scheduler/README.md](../packages/graph-scheduler/README.md) 看图格式和全部工具，[packages/graph-workflow/README.md](../packages/graph-workflow/README.md) 看技能系统。
 
 ---
 
@@ -191,16 +186,19 @@ Use atom-pilot to run skill-author: make a skill that auto-generates changelogs 
 
 |图|作用|
 |-|-|
-|**arch-review-to-spec**|组合流水线：架构评审 → 决策关卡 → 可选 spec 生成|
+|**arch-review-loop**|闭环架构评审：入口（已有报告或全新评审 + 运行模式）→ arch-review 再评审（轮次工作器）→ 确认 Top Rec → openspec-pipeline → 轮末审批（默认 Loop again，Complete = 用户结束）→ 循环直至用户批准结束|
 |**arch-review**|架构评审：范围探测 → 评审报告|
+|**grill-with-docs**|原始想法入口：范围 → grilling 访谈 + 内联 domain-modeling 副作用 → 决策关卡|
 |**doc-update**|文档更新：访谈 → 分析 → 确认 → 编写 → 评审 → 审批|
 |**graph-generate**|元图：从自然语言描述生成 `.taskflow.yaml`|
 |**openspec-apply**|OpenSpec 应用：应用变更 → 双重评审 → 有界返工 → 归档|
-|**openspec-create**|OpenSpec spec 创建：范围访谈 → 审批 → 架构决策 → propose CLI|
-|**openspec-pipeline**|OpenSpec 生命周期：spec 创建 → 人工审批 → 实现|
+|**openspec-create**|OpenSpec spec 创建：范围访谈 + 输入源检测 + 内联 ADR 判定 → 有界关卡 → openspec propose CLI|
+|**openspec-engineer**|OpenSpec 详细实现：spec 综合 → 工单 → tdd 实现 → 双重评审 → 有界关卡 → 反向验证归档|
+|**openspec-pipeline**|OpenSpec 全生命周期：原始想法（grill-with-docs）→ spec 创建（openspec-create）→ 人工审批 → 分支（openspec-apply 直接 / openspec-engineer 详细）→ 归档|
+|**implement**|通用实现：输入源检测（变更/工单/PRD）→ tdd 实现 → 双轴评审 → 有界关卡 → 审批 → 条件式 OpenSpec 归档|
 |**plan-generate**|通用计划生成：范围访谈 → PRD → 可选工单拆分|
 |**skill-author**|技能编写：创建或编辑 — 范围 → 编写 → 评审 → 审批|
-|**skill-change-workflow**|编排式技能变更：计划 → 编写 + 删除 + 文档 → 交叉评审 → 审批|
+|**skill-change-workflow**|编排式技能变更：计划 → 流程编写器（编写 + 删除 + 文档 + spec，自我判定）→ 交叉评审 → 审批 → 归档|
 |**skill-delete**|技能删除：选择 → 影响分析 → 确认 → 执行 → 评审 → 审批|
 |**e2e-minimal**|最小端到端：main → approval 循环，用于学习|
 
@@ -213,14 +211,14 @@ Atomic Workflow 处于 **alpha** 阶段。
 **稳定**（已实现，v1.0 前无计划中的破坏性变更）：
 
 - graph-scheduler FSM 引擎与 9 个 MCP 工具
-- `.taskflow.yaml` 图格式与阶段 schema（main/approval + flow 组合、when 守卫、join 模式、channels、agent 提示）
+- `.taskflow.yaml` 图格式与阶段 schema（main/approval/gate + flow 组合、join 模式、channels、agent 提示、分支路线）
 - CRUD 执行循环（`graph_start` → `graph_advance` → `graph_jump`，另有 `graph_status` / `graph_list`）
 - setup-atomic-workflow 项目初始化
-- 12 个内置图与 13 个内置技能
+- 15 个内置图与 14 个内置技能
 
 **活跃开发中**（可能变化）：
 
-- 更多控制流特性 — when 守卫、join 模式、routing 动作
+- 更多控制流特性 — 分支路线组合、gate 跳转条件
 - 更多内置图 / 工作流
 - 数据维护工具（当前 `graph_clean_*` 很简陋）— MCP 工具接口可能变化
 
@@ -228,8 +226,6 @@ Atomic Workflow 处于 **alpha** 阶段。
 
 - [ ] skill-edit 图（alpha）
 - [ ] 跨平台 MCP 支持 + phase schema v1 冻结（v1.0）
-
-<!-- → 详见 [ROADMAP.md](../ROADMAP.md)。 -->
 
 ---
 
@@ -255,7 +251,5 @@ Atomic Workflow 处于 **alpha** 阶段。
 |-|-|
 |[packages/graph-scheduler/README.md](../packages/graph-scheduler/README.md)|图格式、全部 9 个 MCP 工具、内置图、用图制作技能/图|
 |[packages/graph-workflow/README.md](../packages/graph-workflow/README.md)|技能系统、完整技能列表、技能如何驱动图执行|
-|[technical-overview.md](technical-overview.md)|图执行模型、阶段类型、when 守卫、技能系统|
 |[glossary.md](glossary.md)|术语参考|
-|[ROADMAP.md](../ROADMAP.md)|计划里程碑与 v1.0 目标|
 |[CONTEXT.md](../CONTEXT.md)|面向贡献者的内部架构参考|

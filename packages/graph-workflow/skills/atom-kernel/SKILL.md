@@ -26,11 +26,13 @@ last_updated: '2026-08-03'
 
 Primitive contracts are platform-neutral. Tool-name mappings vary per platform — single-sourced here, never assumed exact:
 
-|Primitive|Contract|OMP|Other platforms|
-|-|-|-|-|
-|`task()`|Sub-agent dispatch — batch in `tasks[]`, shared `context`, agent-hint selection|`task` tool|platform's sub-agent dispatch tool|
-|`question()`|Single-decision UI — header/options/custom, 8 format rules|`ask` tool|platform's decision-UI tool|
-|`judge()`|One-shot lightweight-model judgment — constrained answer (`'true'`/`'false'`), conservative failure|`completion(…, model="smol")`|platform's one-shot completion primitive|
+|Primitive|Contract|OMP|opencode|Other platforms|
+|-|-|-|-|-|
+|`task()`|Sub-agent dispatch — batch in `tasks[]`, shared `context`, agent-hint selection|`task` tool|`task` tool — built-in agents `build`/`plan`/`general`/`explore`/`scout`, default `general`|platform's sub-agent dispatch tool|
+|`question()`|Single-decision UI — header/options/custom, 8 format rules|`ask` tool|`question`|platform's decision-UI tool|
+|`judge()`|One-shot lightweight-model judgment — constrained answer (`'true'`/`'false'`), conservative failure|`completion(…, model="smol")`|one-shot completion primitive|platform's one-shot completion primitive|
+
+Agent vocabulary (hint availability + platform default): OMP — platform-registered agent types (`scout`/`reviewer`/`task`/…), default `task`; opencode — built-ins per the `task()` row above; other platforms — their sub-agent types, default per platform.
 
 Skills reference contract names only (`task()`, `question()`, `judge()`) — never platform tool spellings. Add a platform row when mapping a new platform; no skill changes needed.
 
@@ -100,8 +102,8 @@ task({ i, context, tasks })
 
 `task()` `agent` field accepts one concrete agent type. When the calling skill runs as a graph main phase, its context may carry a `## Agent hints: [<type-1>, <type-2>, …]` block (injected by atom-phase-handler from the phase `agent` array — priority-ordered). Consumption rule:
 
-- Pick the **first** hint whose agent type is available in the current platform environment.
-- None available → fall back to platform default (`task`).
+- Pick the **first** hint whose agent type is available in the current platform environment — availability SHALL be judged as membership in the current platform's agent vocabulary in §Platform Spellings, never environment intuition.
+- None available → fall back to the platform default agent (per §Platform Spellings — OMP `task`, opencode `general`).
 - Hints are advisory — a skill that doesn't dispatch ignores them entirely.
 - The skill chooses its own fan-out structure; hints only select the type for each dispatch.
 

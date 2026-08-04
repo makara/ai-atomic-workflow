@@ -112,7 +112,7 @@ describe('doc-update.taskflow.yaml — phase structure', () => {
     const review = phases[2];
     expect(review.id).toBe('doc-review');
     expect(review.skill).toBe('code-review');
-    expect(review.agent).toEqual(['reviewer', 'task']);
+    expect(review.agent).toEqual(['reviewer', 'explore', 'task', 'general']);
   });
 
   it('doc-gate is gate with bounded jumps (route-first redesign)', () => {

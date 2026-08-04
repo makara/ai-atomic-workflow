@@ -30,7 +30,7 @@ phases:
     type: main
     dependsOn: [apply-change]
     skill: code-review
-    agent: [reviewer, task]
+    agent: [reviewer, explore, task, general]
     channels:
       - skill:atom-graph-spec
     task: |

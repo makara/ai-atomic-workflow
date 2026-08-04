@@ -132,7 +132,7 @@ phases:
     type: main
     dependsOn: [skill-write, skill-edit-write]
     skill: code-review
-    agent: [reviewer, task]
+    agent: [reviewer, explore, task, general]
     task: |
       Review SKILL.md per code-review (use ## Agent hints for axis sub-agents).
 
