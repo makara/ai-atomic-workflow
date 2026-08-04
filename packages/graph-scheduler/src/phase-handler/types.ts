@@ -9,7 +9,6 @@
  */
 
 import type { Phase } from '../schemas/index.js';
-import type { RunMode } from '../types.js';
 
 /**
  * Phase handler — implemented once per supported phase type.
@@ -47,10 +46,6 @@ export interface IBaseNodeDetail {
   readonly handlerSkill: string;
   /** execution skill — phase.skill, the skill that executes this phase's work (main type; optional) */
   readonly skill?: string;
-  /** project constraints — run-record snapshot (frozen at graph_start, stable for run lifetime) */
-  readonly constraints: readonly string[];
-  /** Run Mode — run-level auto-approve mode, auto-supplied from the run record (never declarable in YAML) */
-  readonly runMode: RunMode;
   readonly retryAttempt: number;
 }
 
@@ -80,10 +75,6 @@ export interface INodeDetail {
   readonly routingActions?: ReadonlyArray<IApprovalAction>;
   /** All types — channel patterns (main: skill names/file globs/node:<id> against the skill contract; gate/approval: node:<id> judgment context only) */
   readonly channels?: string[];
-  /** project constraints — run-record snapshot (frozen at graph_start), all phase types carry */
-  readonly constraints: readonly string[];
-  /** Run Mode — run-level auto-approve mode, auto-supplied from the run record */
-  readonly runMode: RunMode;
   /** Gate phase — rework jumps (route-first): agent evaluates when against judgment context; hit → backward jump target */
   readonly jumps?: ReadonlyArray<IJumpCondition>;
   /** Route membership — all phase types (optional; absent = implicit default route) */

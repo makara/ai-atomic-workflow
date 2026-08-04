@@ -263,9 +263,7 @@ export function validateGraphContracts(
     // must span at least two distinct routes (a single-route any-join has
     // nothing to converge and hides a deadlock-prone mistake).
     if (phase.join === 'any') {
-      const upstreamRoutes = new Set(
-        deps.map((d) => str((byId.get(d) as Record<string, unknown> | undefined)?.route, '') || '__default__'),
-      );
+      const upstreamRoutes = new Set(deps.map((d) => str(byId.get(d)?.route, '') || '__default__'));
       if (upstreamRoutes.size < 2) {
         errors.push(
           `${prefix} — join: any requires direct upstreams spanning at least 2 distinct routes (branch-route convergence); upstreams sit on: ${[...upstreamRoutes].join(', ')}`,
@@ -300,8 +298,9 @@ export function validateGraphContracts(
     }
   }
 
-  // Run Mode — mode is a run field set at graph_start; graphs declare nothing.
-  // The entry-topic heuristic was removed with the topic blocks themselves.
+  // Run Mode — decided per activation by the built-in $run-mode-confirm
+  // prologue node (args.mode or a question); graphs declare nothing. The
+  // entry-topic heuristic was removed with the topic blocks themselves.
 
   return { errors, warnings };
 }

@@ -241,13 +241,14 @@ describe('initialize', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Schema migration — v1-era → current (v2) in-place upgrade (Run Mode run field)
+// Schema migration — v1-era → current (v2) in-place upgrade (routes + cleanup;
+// mode/constraints never shipped — interim-V2 dev DBs are repaired in place)
 // ---------------------------------------------------------------------------
 
 describe('schema migration v1-era → current', () => {
-  it('upgrades a v1 database in place: adds mode column, keeps rows', () => {
+  it('upgrades a v1 database in place: adds routes column, keeps rows', () => {
     const db = new Database(':memory:');
-    // Simulate a v1 database: original DDL + version marker, no mode column.
+    // Simulate a v1 database: original DDL + version marker, no routes column.
     db.exec(`
       CREATE TABLE graph_runs (
         run_id           TEXT PRIMARY KEY,
@@ -282,20 +283,15 @@ describe('schema migration v1-era → current', () => {
     const ver = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
     expect(ver.v).toBe(SCHEMA_VERSION);
 
-    // Pre-existing row preserved, mode defaults to manual.
-    const row = db.prepare('SELECT mode FROM graph_runs WHERE run_id = ?').get('old-run') as
-      { mode: string } | undefined;
-    expect(row?.mode).toBe('manual');
-
     // Pre-existing row preserved, routes defaults to '{}'.
     const rowRoutes = db.prepare('SELECT routes FROM graph_runs WHERE run_id = ?').get('old-run') as
       { routes: string } | undefined;
     expect(rowRoutes?.routes).toBe('{}');
 
-    // Pre-existing row preserved, constraints defaults to '[]'.
-    const rowConstraints = db.prepare('SELECT constraints FROM graph_runs WHERE run_id = ?').get('old-run') as
-      { constraints: string } | undefined;
-    expect(rowConstraints?.constraints).toBe('[]');
+    // mode/constraints columns NEVER exist in any shipped version.
+    const runCols = (db.prepare('PRAGMA table_info(graph_runs)').all() as Array<{ name: string }>).map((c) => c.name);
+    expect(runCols).not.toContain('mode');
+    expect(runCols).not.toContain('constraints');
 
     // v2 cleanup applied — topo_order / idx / applied_at dropped.
     const nodeCols = (db.prepare('PRAGMA table_info(node_states)').all() as Array<{ name: string }>).map((c) => c.name);
@@ -309,27 +305,79 @@ describe('schema migration v1-era → current', () => {
       .all() as Array<{ name: string }>;
     expect(indexes).toHaveLength(0);
 
-    // New run with explicit mode persists.
+    // New run persists (no mode/constraints params).
     const repo = buildService(db);
-    Effect.runSync(repo.createRun('new-run', 'g', undefined, 'auto'));
+    Effect.runSync(repo.createRun('new-run', 'g', { changeName: 'x' }));
     const run = Effect.runSync(repo.getRun('new-run'));
-    expect(run.mode).toBe('auto');
+    expect(run.args).toEqual({ changeName: 'x' });
+    expect(run.routes).toEqual({});
 
     // Idempotent — second migrate is a no-op.
     Effect.runSync(migrate(db));
-    expect(Effect.runSync(repo.getRun('old-run')).mode).toBe('manual');
+  });
+
+  it('repairs an interim-V2 dev database in place: drops mode/constraints columns, keeps routes', () => {
+    const db = new Database(':memory:');
+    // Simulate a dev DB that ran the interim V2 (mode + constraints shipped,
+    // v2 recorded) before the activation-prologue redesign stripped them.
+    db.exec(`
+      CREATE TABLE graph_runs (
+        run_id           TEXT PRIMARY KEY,
+        graph_name       TEXT NOT NULL,
+        fsm_state        TEXT NOT NULL DEFAULT 'idle',
+        args             TEXT,
+        mode             TEXT NOT NULL DEFAULT 'manual',
+        routes           TEXT NOT NULL DEFAULT '{}',
+        constraints      TEXT NOT NULL DEFAULT '[]',
+        created_at       TEXT NOT NULL,
+        updated_at       TEXT NOT NULL
+      );
+      CREATE TABLE node_states (
+        run_id        TEXT NOT NULL,
+        node_id       TEXT NOT NULL,
+        status        TEXT NOT NULL DEFAULT 'pending',
+        retry_count   INTEGER NOT NULL DEFAULT 0,
+        started_at    TEXT,
+        completed_at  TEXT,
+        PRIMARY KEY (run_id, node_id),
+        FOREIGN KEY (run_id) REFERENCES graph_runs(run_id)
+      );
+      CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+      INSERT INTO schema_version (version) VALUES (1), (2);
+      INSERT INTO graph_runs (run_id, graph_name, fsm_state, args, mode, routes, constraints, created_at, updated_at)
+      VALUES ('dev-run', 'g', 'running', NULL, 'auto', '{}', '[]', '2026-08-03T00:00:00.000Z', '2026-08-03T00:00:00.000Z');
+    `);
+
+    Effect.runSync(migrate(db));
+
+    // Columns dropped, routes preserved, version marker unchanged (v2 still valid).
+    const cols = (db.prepare('PRAGMA table_info(graph_runs)').all() as Array<{ name: string }>).map((c) => c.name);
+    expect(cols).not.toContain('mode');
+    expect(cols).not.toContain('constraints');
+    expect(cols).toContain('routes');
+    const ver = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
+    expect(ver.v).toBe(SCHEMA_VERSION);
+    const row = db.prepare('SELECT graph_name, routes FROM graph_runs WHERE run_id = ?').get('dev-run') as {
+      graph_name: string;
+      routes: string;
+    };
+    expect(row.graph_name).toBe('g');
+    expect(row.routes).toBe('{}');
   });
 
   it('V2_DDL covers every v1-created obsolete field — ghost-DDL tripwire', () => {
     // The ladder contract: v2 delivers the final shape by dropping the three
-    // v1-created obsolete artifacts and adding the run-context columns. A
-    // statement-set edit after the version is recorded without a version bump
-    // (ghost DDL) leaves DBs behind — this test pins the coverage so the next
-    // drift is a test failure, not a silent residue.
+    // v1-created obsolete artifacts and adding the routes column. mode/
+    // constraints are deliberately ABSENT — they never shipped in any
+    // version. A statement-set edit after the version is recorded without a
+    // version bump (ghost DDL) leaves DBs behind — this test pins the
+    // coverage so the next drift is a test failure, not a silent residue.
     const v2 = VERSIONED_DDL[1];
     expect(v2.some((s) => s.includes('DROP INDEX IF EXISTS idx_node_states_topo'))).toBe(true);
     expect(v2.some((s) => s.includes('ALTER TABLE node_states DROP COLUMN topo_order'))).toBe(true);
     expect(v2.some((s) => s.includes('ALTER TABLE schema_version DROP COLUMN applied_at'))).toBe(true);
-    expect(v2.some((s) => s.includes('ALTER TABLE graph_runs ADD COLUMN constraints'))).toBe(true);
+    expect(v2.some((s) => s.includes('ALTER TABLE graph_runs ADD COLUMN routes'))).toBe(true);
+    expect(v2.some((s) => s.includes('ADD COLUMN mode'))).toBe(false);
+    expect(v2.some((s) => s.includes('ADD COLUMN constraints'))).toBe(false);
   });
 });

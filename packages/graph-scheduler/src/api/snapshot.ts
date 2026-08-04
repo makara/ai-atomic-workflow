@@ -89,12 +89,16 @@ export function aggregateNodeMetrics(
   return { currentPhaseId, nodeCount: nodes.length, completedCount };
 }
 
-/** Find the first active node in the FSM state — returns null if none. */
+/**
+ * Find the first active node — prologue nodes first (they dispatch before
+ * author nodes at each activation), then author phases in declaration order.
+ * Returns null if none.
+ */
 export function findActiveNode(
   phases: Record<string, FsmNodeState>,
   graph: TaskflowGraph,
 ): { phaseId: string; nodeState: FsmNodeState } | null {
-  for (const p of graph.phases) {
+  for (const p of [...graph.prologue, ...graph.phases]) {
     const ns = phases[p.id];
     if (ns && ns.status === 'active') {
       return { phaseId: p.id, nodeState: ns };
@@ -108,19 +112,24 @@ export function findActiveNode(
  *
  * Handler resolution is static by type (main/approval); handlerSkill is the
  * constant atom-phase-handler, loaded by plain name per the skill-resolution convention.
- * runMode is auto-supplied from the run record. Node-scope gate:
+ * Run mode / constraints are NOT NodeDetail fields — they come from the
+ * activation prologue outputs (agent-side consumption). Node-scope gate:
  * `node:` channel targets outside the run's flattened node set are stripped
  * at dispatch (shared predicate — stale-file protection).
  */
 export function buildNodeDetail(input: NodeDetailInput): Effect.Effect<INodeDetail | null, DispatchConfigError> {
   return Effect.try({
     try: () => {
-      const phase = input.graph.phases.find((p) => p.id === input.phaseId);
+      // Prologue nodes dispatch like any other — look them up in the
+      // synthesized prefix first, then author phases.
+      const allPhases = [...input.graph.prologue, ...input.graph.phases];
+      const phase = allPhases.find((p) => p.id === input.phaseId);
       if (!phase) return null;
 
       // Dispatch-time run-scope gate — strip cross-run `node:` targets before
       // they reach the agent (the agent can no longer see out-of-run references).
-      const runNodeIds = new Set(input.graph.phases.map((p) => p.id));
+      // Run node set = author phases + prologue (prologue is in every run).
+      const runNodeIds = new Set(allPhases.map((p) => p.id));
       const { channels, warnings } = stripCrossRunChannels(phase.channels, runNodeIds);
       for (const w of warnings) {
         debugLog('runtime', { event: 'cross_run_channel_stripped', nodeId: input.phaseId, warning: w });
@@ -133,8 +142,6 @@ export function buildNodeDetail(input: NodeDetailInput): Effect.Effect<INodeDeta
         dependsOn: phase.dependsOn,
         handlerSkill: HANDLER_SKILL,
         skill: phase.skill,
-        constraints: input.constraints,
-        runMode: input.runMode,
         retryAttempt: input.nodeState.retryCount,
       };
 

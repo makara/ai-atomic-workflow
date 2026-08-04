@@ -1,5 +1,7 @@
 import { z } from 'zod/v4';
 
+import { PROLOGUE_IDS } from '../prologue.js';
+
 /**
  * Zod schema for a single phase/node definition within a taskflow graph.
  *
@@ -224,15 +226,34 @@ export const PhaseSchema = z
       ctx.addIssue({
         code: 'custom',
         path: ['constraints'],
-        message: `'constraints' is removed (route-first redesign) — project constraints inject from .graph-scheduler/constraints.md; delete this field`,
+        message: `'constraints' is removed (activation prologue redesign) — project constraints load via the built-in $load-constraints prologue node (override that id to change the source); delete this field`,
       });
     }
     if (data.runMode !== undefined) {
       ctx.addIssue({
         code: 'custom',
         path: ['runMode'],
-        message: `'runMode' is removed (route-first redesign) — run mode is a run attribute set at graph_start; delete this field`,
+        message: `'runMode' is removed (activation prologue redesign) — run mode is decided by the built-in $run-mode-confirm prologue node (args.mode or a per-activation question); delete this field`,
       });
+    }
+    // Activation prologue reserved ids — '$' is the built-in prefix; only the
+    // two known prologue ids may be declared (author override replaces the
+    // built-in default protocol), and only as entry phases (they run as the
+    // activation prefix, before any author node).
+    if (data.id.startsWith('$')) {
+      if (!(data.id in PROLOGUE_IDS)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['id'],
+          message: `'${data.id}' — '$' prefix is reserved for activation prologue built-ins ($run-mode-confirm, $load-constraints); declare one of those ids to override the built-in protocol, or rename this phase`,
+        });
+      } else if ((data.dependsOn?.length ?? 0) > 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['dependsOn'],
+          message: `'${data.id}' — reserved prologue nodes must be entry phases (dependsOn: []) — they run as the activation prefix, before any author node`,
+        });
+      }
     }
   });
 

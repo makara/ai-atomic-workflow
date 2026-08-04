@@ -26,10 +26,17 @@ import { findDownstream, resolveReady, routeActive, routeOf, type RouteMap } fro
 import type { FsmEffect, FsmNodeState } from './effects.js';
 import type { FsmEvent } from './events.js';
 
-/** Graph definition — name + phases, enough for topology and state init. */
+/** Graph definition — name + phases + activation prologue, enough for topology and state init. */
 export interface TaskflowGraph {
   readonly name: string;
   readonly phases: readonly Phase[];
+  /**
+   * Activation prologue — graph-external built-in nodes (reserved `$` ids,
+   * synthesized at load, author-overridable). NOT part of the author DAG:
+   * excluded from topology/jump-closure; the FSM gates author activation
+   * behind them and re-runs them on entry-target resets (round restart).
+   */
+  readonly prologue: readonly Phase[];
 }
 
 /**
@@ -88,15 +95,29 @@ export interface TransitionResult {
   readonly effects: readonly FsmEffect[];
 }
 
-/** Build initial node states — all pending, first ready batch set to active. */
-function initPhases(phases: readonly Phase[], startedAt: string): Record<string, FsmNodeState> {
+/**
+ * Build initial node states — all pending, first dispatch batch set to active.
+ * Prologue nodes occupy the first positions (first dispatch order) and are
+ * the only active nodes at START — author nodes wait for the round prefix
+ * (prologue gating). Without a prologue the first author-ready batch activates.
+ */
+function initPhases(graph: TaskflowGraph, startedAt: string): Record<string, FsmNodeState> {
   const map: Record<string, FsmNodeState> = {};
-  for (const p of phases) {
+  for (const p of graph.prologue) {
     map[p.id] = { status: 'pending', retryCount: 0 };
   }
-  const ready = resolveReady(phases, new Set(), map, {});
-  for (const p of ready) {
-    map[p.id] = { ...map[p.id], status: 'active', startedAt };
+  for (const p of graph.phases) {
+    map[p.id] = { status: 'pending', retryCount: 0 };
+  }
+  if (graph.prologue.length > 0) {
+    for (const p of graph.prologue) {
+      map[p.id] = { ...map[p.id], status: 'active', startedAt };
+    }
+  } else {
+    const ready = resolveReady(graph.phases, new Set(), map, {});
+    for (const p of ready) {
+      map[p.id] = { ...map[p.id], status: 'active', startedAt };
+    }
   }
   return map;
 }
@@ -121,6 +142,8 @@ function terminalIds(phases: Record<string, FsmNodeState>): Set<string> {
 /**
  * Activate all currently-ready phases (mutates phases, pushes effects).
  * Route-aware — resolveReady consults the route activation map.
+ * Prologue gating — while any prologue node is pending, ONLY prologue nodes
+ * are eligible; author nodes wait for the round prefix to finish.
  */
 function activateReady(
   phases: Record<string, FsmNodeState>,
@@ -130,6 +153,34 @@ function activateReady(
   runId: string,
   routes: RouteMap,
 ): void {
+  // Prologue gating — while any prologue node is NOT terminal (pending or
+  // active), ONLY prologue nodes are eligible; author nodes wait for the
+  // round prefix to finish. Pending check alone would leak: at START all P
+  // nodes activate together, so a still-running sibling is never "pending".
+  // A MISSING state (legacy run created before the prologue existed) never
+  // gates — the run continues with handler-side degradation, no deadlock.
+  const prologueGated = graph.prologue.some((p) => {
+    const s = phases[p.id]?.status;
+    return s !== undefined && s !== 'done' && s !== 'aborted';
+  });
+  if (prologueGated) {
+    for (const p of graph.prologue) {
+      if (phases[p.id]?.status !== 'pending') continue;
+      phases[p.id] = {
+        ...phases[p.id],
+        status: 'active',
+        startedAt: now,
+      };
+      effects.push({
+        type: 'persist_node_state',
+        runId,
+        nodeId: p.id,
+        state: phases[p.id],
+      });
+    }
+    return;
+  }
+
   const doneSet = terminalIds(phases);
   const ready = resolveReady(graph.phases, doneSet, phases, routes);
   for (const p of ready) {
@@ -207,7 +258,30 @@ function applyJumpReset(
     if (!resetSet.has(activator)) nextRoutes[routeId] = activator;
   }
 
-  activateReady(phases, graph, now, effects, runId, nextRoutes);
+  // Round restart — a reset whose target is an entry node (author DAG,
+  // in-degree 0) re-runs the activation prologue: the round prefix refreshes
+  // (constraints reload, run mode re-confirmed). Mid-graph rework resets do
+  // NOT touch P — the current round's prefix stays valid.
+  const targetPhase = graph.phases.find((p) => p.id === targetPhaseId);
+  if (targetPhase && (targetPhase.dependsOn?.length ?? 0) === 0) {
+    for (const p of graph.prologue) {
+      const ns = phases[p.id];
+      if (ns) {
+        phases[p.id] = { status: 'pending', retryCount: ns.retryCount + 1 };
+        effects.push({
+          type: 'persist_node_state',
+          runId,
+          nodeId: p.id,
+          state: phases[p.id],
+        });
+      }
+    }
+  }
+
+  // Activation is NOT done here — callers run a single activateReady after
+  // the routing block so prologue gating (P pending → P only) applies to the
+  // whole event; activating inside would let author nodes slip through in the
+  // same transition that re-armed the prefix.
   return nextRoutes;
 }
 
@@ -234,7 +308,7 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
       }
       const runId = randomUUID();
       const startedAt = new Date().toISOString();
-      const phases = initPhases(graph.phases, startedAt);
+      const phases = initPhases(graph, startedAt);
       const nextState: FsmState = {
         status: 'running',
         runId,
@@ -389,6 +463,10 @@ export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGrap
       const effects: FsmEffect[] = [];
 
       const routes = applyJumpReset(phases, graph, event.targetPhaseId, now, effects, state.runId, state.routes);
+
+      // Single activation point — prologue gating applies (entry-target jumps
+      // re-armed the prefix; P pending → P only).
+      activateReady(phases, graph, now, effects, state.runId, routes);
 
       effects.push({
         type: 'persist_run_state',

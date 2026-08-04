@@ -1,7 +1,8 @@
 /**
- * Content assertions — atom-phase-handler SKILL.md project constraints
- * injection: main/approval branches consume node.constraints, shared
- * ## Constraints Block Format, Constraint check visibility.
+ * Content assertions — atom-phase-handler SKILL.md activation prologue
+ * consumption: main/approval branches consume the $load-constraints /
+ * $run-mode-confirm prologue outputs, shared ## Constraints Block Format,
+ * Constraint check visibility.
  *
  * Injection-rule details (cap/dedup) live in atom-graph-spec §Constraint
  * Layering (single source) — asserted there, handler side keeps the pointer.
@@ -25,8 +26,11 @@ describe('atom-phase-handler SKILL.md — project constraints + gate branch cont
 
   // ── NodeDetail field ──────────────────────────────────────
 
-  it('documents constraints field in NodeDetail base fields', () => {
-    expect(skill).toMatch(/`constraints`\|string\[\]\|all\|Project constraints/);
+  it('documents NO constraints/runMode NodeDetail fields — prologue outputs instead', () => {
+    expect(skill).not.toMatch(/`constraints`\|string\[\]\|all/);
+    expect(skill).not.toMatch(/`runMode`\|`'manual' \| 'auto'`\|yes/);
+    expect(skill).toMatch(/\$run-mode-confirm.*\.taskflow\/outputs\/\$run-mode-confirm\.output\.txt/s);
+    expect(skill).toMatch(/\$load-constraints.*\.taskflow\/outputs\/\$load-constraints\.output\.txt/s);
   });
 
   // ── Constraints Block Format ──────────────────────────────
@@ -56,13 +60,13 @@ describe('atom-phase-handler SKILL.md — project constraints + gate branch cont
 
   it('prepends constraints block to main branch inline task', () => {
     const mainBranch = skill.slice(skill.indexOf('node.type = "main"'), skill.indexOf('node.type = "approval"'));
-    expect(mainBranch).toMatch(/Prepend `## Run Mode: <node\.runMode>` block \(always\) \+ project constraints block/);
+    expect(mainBranch).toMatch(/Prepend `## Run Mode: <mode>` block \(always\) \+ constraints block/);
   });
 
   it('prepends constraints block to approval pre-call text', () => {
     const approvalSection = skill.slice(skill.indexOf('node.type = "approval"'));
     expect(approvalSection).toMatch(
-      /Prepend `## Run Mode: <node\.runMode>` block \(always\) \+ project constraints block \(per §Constraints Block Format, when node\.constraints non-empty\) to pre-call text/,
+      /Prepend `## Run Mode: <mode>` block \(always\) \+ constraints block \(per §Constraints Block Format, when constraints non-empty\) to pre-call text/,
     );
   });
 
@@ -72,8 +76,14 @@ describe('atom-phase-handler SKILL.md — project constraints + gate branch cont
     expect(approvalSection).toMatch(/\[CONSTRAINT VIOLATION: <nodeId> × N\]/);
   });
 
-  it('includes constraints in eval auto-decision context', () => {
-    expect(skill).toMatch(/Constraints: <node\.constraints>/);
+  it('includes constraints + run mode in gate judgment context', () => {
+    expect(skill).toMatch(/Constraints: <constraints>/);
+    expect(skill).toMatch(/Run Mode: <mode>/);
+  });
+
+  it('documents the prologue degradation rule — missing output never blocks', () => {
+    expect(skill).toMatch(/Missing\/corrupt prologue output → degrade, never block/);
+    expect(skill).toMatch(/absence never auto/);
   });
 
   // ── Verification visibility ───────────────────────────────

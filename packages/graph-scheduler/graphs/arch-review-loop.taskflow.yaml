@@ -1,7 +1,8 @@
 name: arch-review-loop
 phases:
-  # Stage 1: Loop entry — scope interview. Run Mode is a run attribute decided
-  # at run creation (graph_start mode param), never a graph topic.
+  # Stage 1: Loop entry — scope interview. Run Mode is a per-activation
+  # decision made by the built-in $run-mode-confirm prologue node (args.mode
+  # or a question), never a graph topic.
   # Report input: existing report path (true closed loop) OR fresh review.
   - id: loop-entry
     type: main

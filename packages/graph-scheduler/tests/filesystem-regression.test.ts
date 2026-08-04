@@ -84,8 +84,13 @@ describe('FileSystem absolute path handling (P1 fix)', () => {
     const result = await rt.graphStart('test-graph');
     expect(result).toBeDefined();
     expect(result.runId).toBeTruthy();
+    // Activation prefix dispatches first (no approvals → load node)
     expect(result.node).toBeDefined();
-    expect(result.node?.nodeId).toBe('a1');
+    expect(result.node?.nodeId).toBe('$load-constraints');
+
+    // Prefix done → author node dispatches
+    const next = await rt.graphAdvance(result.runId, '$load-constraints', 10);
+    expect(next.node?.nodeId).toBe('a1');
   });
 
   it('accepts version as string (lenient validation)', async () => {

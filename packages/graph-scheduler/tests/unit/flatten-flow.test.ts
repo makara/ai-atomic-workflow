@@ -60,6 +60,48 @@ describe('flattenFlowPhases — single-level use', () => {
     expect(review?.dependsOn).not.toContain('skill-ops');
   });
 });
+describe('flattenFlowPhases — reserved prologue ids', () => {
+  it('keeps reserved ids unprefixed inside flows — author override preserved', () => {
+    const reservedChild = (): Taskflow => ({
+      name: 'reserved-child',
+      phases: [
+        { id: '$load-constraints', type: 'main', mode: 'exclusive', dependsOn: [], task: 'custom source' },
+        { id: 'child-node', type: 'main', mode: 'exclusive', dependsOn: [] },
+      ],
+    });
+    const loader = (name: string): Taskflow | null => (name === 'reserved-child' ? reservedChild() : null);
+    const parent: Taskflow = {
+      name: 'test',
+      phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'reserved-child', dependsOn: [] }],
+    };
+    const result = flattenFlowPhases(parent, loader, 1, 5);
+    const ids = result.phases.map((p) => p.id);
+    // Reserved id stays global (graph-level contract) — no flow prefix
+    expect(ids).toContain('$load-constraints');
+    expect(ids).not.toContain('ops/$load-constraints');
+    // Ordinary child nodes keep the prefix
+    expect(ids).toContain('ops/child-node');
+  });
+
+  it('rewrites dependsOn references TO reserved ids unprefixed', () => {
+    const reservedChild = (): Taskflow => ({
+      name: 'reserved-child',
+      phases: [
+        { id: '$load-constraints', type: 'main', mode: 'exclusive', dependsOn: [], task: 'custom source' },
+        { id: 'child-node', type: 'main', mode: 'exclusive', dependsOn: ['$load-constraints'] },
+      ],
+    });
+    const loader = (name: string): Taskflow | null => (name === 'reserved-child' ? reservedChild() : null);
+    const parent: Taskflow = {
+      name: 'test',
+      phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'reserved-child', dependsOn: [] }],
+    };
+    const result = flattenFlowPhases(parent, loader, 1, 5);
+    const child = result.phases.find((p) => p.id === 'ops/child-node');
+    expect(child?.dependsOn).toEqual(['$load-constraints']);
+  });
+});
+
 describe('flattenFlowPhases — def removed', () => {
   it('flow requires use — def inline is no longer a valid source', () => {
     const parent: Taskflow = {

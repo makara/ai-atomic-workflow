@@ -30,11 +30,11 @@ Execution flow:
 1. Load `atom-kernel` — task() contract
 2. Load `atom-phase-handler` — node dispatch schema
 3. Detect graph-scheduler MCP tools per §Graph-Scheduler Tool Detection
-4. **Run Mode decision** (the mode is a run attribute, decided by the run creator):
-   - `--auto` flag → mode `'auto'`; `--manual` flag → mode `'manual'`; neither → one question(): Manual (recommended, default) — every approval presents a decision card | Auto — every approval auto-executes the AI recommendation without a card. custom:true for free text.
-   - Direct MCP callers (no pilot) pass `mode` explicitly or default to `manual` — absence never means auto.
-5. Call graph_start { graphName, mode } → get { runId, node }
-6. Enter execute→advance loop per Loop Mechanics
+4. **Run Mode flags** (the mode is a per-activation decision made by the built-in `$run-mode-confirm` prologue node — the pilot never asks):
+   - `--auto` flag → `args: { mode: 'auto' }`; `--manual` flag → `args: { mode: 'manual' }`; neither → pass NO mode arg — the confirm node asks the user on first dispatch (Manual recommended — absence never means auto).
+   - Direct MCP callers (no pilot) pass `args.mode` explicitly or leave it unset — absence never means auto.
+5. Call graph_start { graphName, args? } → get { runId, node }
+6. Enter execute→advance loop per Loop Mechanics — the first dispatched node is the activation prefix (`$run-mode-confirm` when the graph has approvals, `$load-constraints` always); execute it like any main node.
 
 Verbosity: `--verbose` show MCP call summaries + judgment details. `--debug` add raw MCP JSON. Default quiet.
 
@@ -45,10 +45,10 @@ Verbosity: `--verbose` show MCP call summaries + judgment details. `--debug` add
 Detect graph-scheduler MCP tools at runtime — 9-tool substring matching rules live in atom-kernel §Graph-Scheduler Tool Detection (platform primitives, loaded with the kernel). Tool parameter and return value schemas unchanged (see §MCP Tool Reference).
 
 ```
-graph_start { graphName, mode?: 'manual' | 'auto' } → { runId, node: NodeDetail | null, snapshot: GraphSnapshot }
+graph_start { graphName, args? } → { runId, node: NodeDetail | null, snapshot: GraphSnapshot }
 ```
 
-Scheduler resolve graph name via merged registry. Return `runId` + first `node` (NodeDetail | null) + run `snapshot` (per-node states — jump navigation + progress display; Run Mode rides `node.runMode`, not the snapshot). Agent hold `runId` for all subsequent calls.
+Scheduler resolve graph name via merged registry. Return `runId` + first `node` (NodeDetail | null) + run `snapshot` (per-node states — jump navigation + progress display; the activation prefix nodes appear in `nodes` like any run member). Agent hold `runId` for all subsequent calls.
 
 ---
 
@@ -145,7 +145,7 @@ Tool names detected at runtime per §Graph-Scheduler Tool Detection. Parameter s
 
 |tool|purpose|key params|
 |-|-|-|
-|graph_start|create run, get first node + snapshot|graphName, args?, mode? ('manual'\|'auto', default manual)|
+|graph_start|create run, get first node + snapshot|graphName, args? (args.mode short-circuits $run-mode-confirm)|
 |graph_advance|report result + get next node|runId, nodeId, durationMs, branchTo?, endRun?|
 |graph_status|query run state|runId|
 |graph_list|list all runs|—|
@@ -155,7 +155,7 @@ Tool names detected at runtime per §Graph-Scheduler Tool Detection. Parameter s
 |graph_clean_completed|clean completed runs|before?|
 |graph_clean_all|clean all runs|—|
 
-`graph_start` returns `{ runId, node, snapshot }`. `graph_advance` / `graph_jump` return `{ snapshot, node }` — `node: null` = graph complete (`fsmState` `completed`). The snapshot (per-node states) accompanies every dispatch — jump navigation + progress display. Run Mode rides `node.runMode` — no output scans, no echo scans.
+`graph_start` returns `{ runId, node, snapshot }`. `graph_advance` / `graph_jump` return `{ snapshot, node }` — `node: null` = graph complete (`fsmState` `completed`). The snapshot (per-node states) accompanies every dispatch — jump navigation + progress display. Run mode comes from the `$run-mode-confirm` prologue output — no output scans, no echo scans, no backend field.
 
 ---
 
@@ -192,7 +192,7 @@ Node types — dispatched by type (main/approval/gate; handlerSkill constant `at
 
 - `node.type = "main"` → handler executes inline (with inline context assembly when channels present)
 - `node.type = "approval"` → handler assembles the decision card (Accept — AI recommendation + free input + AI-generated contextual options), returns IApprovalDecision → pilot routes per §Approval Decision Processing
-- `node.type = "gate"` → handler evaluates rework jumps against the judgment context (direct dependsOn outputs + node: channels) + snapshot + run mode, returns IApprovalDecision (hit: action: jump, target; no hit: action: continue) → pilot routes per §Gate Decision Routing — no question(), no pause
+- `node.type = "gate"` → handler evaluates rework jumps against the judgment context (direct dependsOn outputs + node: channels) + snapshot + run mode (from the `$run-mode-confirm` output), returns IApprovalDecision (hit: action: jump, target; no hit: action: continue) → pilot routes per §Gate Decision Routing — no question(), no pause
 - Node = null → graph complete.
 
 ## Approval Decision Processing

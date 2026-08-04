@@ -94,6 +94,20 @@ function nodeStatus(snapshot: { nodes: ReadonlyArray<{ nodeId: string; status: s
   return n?.status ?? 'missing';
 }
 
+/** Start a run and advance through the activation prologue prefix (P nodes) until the first author node dispatches. */
+async function startSkippingPrologue(
+  rt: SchedulerRuntime,
+  graphName: string,
+): Promise<{ runId: string; node: { nodeId: string; retryAttempt: number } | null }> {
+  const start = await rt.graphStart(graphName);
+  let node = start.node;
+  while (node?.nodeId.startsWith('$')) {
+    const next = await rt.graphAdvance(start.runId, node.nodeId, 0);
+    node = next.node;
+  }
+  return { runId: start.runId, node };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -111,7 +125,7 @@ describe('gate jump transport seam', () => {
 
   it('gate NodeDetail carries jumps — no reads/branches/default/routing', async () => {
     const rt = await createTestRuntime(fix);
-    const { runId, node: n1 } = await rt.graphStart('pass-test');
+    const { runId, node: n1 } = await startSkippingPrologue(rt, 'pass-test');
     expect(n1!.nodeId).toBe('seed');
 
     // seed → gate
@@ -131,7 +145,7 @@ describe('gate jump transport seam', () => {
 
   it('absent branchTo passes through the gate — downstream dispatched next', async () => {
     const rt = await createTestRuntime(fix);
-    const { runId } = await rt.graphStart('pass-test');
+    const { runId } = await startSkippingPrologue(rt, 'pass-test');
     await rt.graphAdvance(runId, 'seed', 0);
 
     // No branchTo — no jump hit, gate passes through to downstream
@@ -144,7 +158,7 @@ describe('gate jump transport seam', () => {
 
   it('branchTo to a terminal upstream node triggers JUMP reset with retryCount increment', async () => {
     const rt = await createTestRuntime(fix);
-    const { runId, node: n1 } = await rt.graphStart('rework-test');
+    const { runId, node: n1 } = await startSkippingPrologue(rt, 'rework-test');
     expect(n1!.nodeId).toBe('writer');
 
     // writer → review → gate
@@ -153,22 +167,29 @@ describe('gate jump transport seam', () => {
     const r2 = await rt.graphAdvance(runId, 'review', 10);
     expect(r2.node!.nodeId).toBe('gate');
 
-    // Gate rework decision → branchTo 'writer' (done) → JUMP reset: writer
-    // re-activated with retryCount 1, review + gate reset
+    // Gate rework decision → branchTo 'writer' (done, ENTRY node) → JUMP reset:
+    // writer re-activated with retryCount 1, review + gate reset, and the
+    // activation prefix re-runs (round restart) — the next dispatch is P.
     const r3 = await rt.graphAdvance(runId, 'gate', 10, 'writer');
-    expect(nodeStatus(r3.snapshot, 'writer')).toBe('active');
+    expect(nodeStatus(r3.snapshot, 'writer')).toBe('pending');
     expect(r3.snapshot.nodes.find((n) => n.nodeId === 'writer')?.retryCount).toBe(1);
     expect(nodeStatus(r3.snapshot, 'review')).toBe('pending');
     expect(nodeStatus(r3.snapshot, 'gate')).toBe('pending');
-    expect(r3.node!.nodeId).toBe('writer');
+    expect(r3.node!.nodeId).toBe('$load-constraints');
     expect(r3.node!.retryAttempt).toBe(1);
+
+    // After the prefix, the reset target re-dispatches with its retry visible
+    const r4 = await rt.graphAdvance(runId, '$load-constraints', 0);
+    expect(r4.node!.nodeId).toBe('writer');
+    expect(r4.node!.retryAttempt).toBe(1);
+    expect(nodeStatus(r4.snapshot, 'writer')).toBe('active');
 
     await rt.dispose();
   });
 
   it('run completes by natural drain — final node completion, node null', async () => {
     const rt = await createTestRuntime(fix);
-    const { runId } = await rt.graphStart('pass-test');
+    const { runId } = await startSkippingPrologue(rt, 'pass-test');
 
     // seed → gate → alpha — alpha is the last node; its completion drains the run
     await rt.graphAdvance(runId, 'seed', 0);
@@ -186,12 +207,13 @@ describe('gate jump transport seam', () => {
 
   it('rework graph completes via pass-through after bounded retry', async () => {
     const rt = await createTestRuntime(fix);
-    const { runId } = await rt.graphStart('rework-test');
+    const { runId } = await startSkippingPrologue(rt, 'rework-test');
 
-    // Round 1 with one rework loop
+    // Round 1 with one rework loop — the gate jump to the ENTRY re-runs P
     await rt.graphAdvance(runId, 'writer', 10);
     await rt.graphAdvance(runId, 'review', 10);
     await rt.graphAdvance(runId, 'gate', 10, 'writer'); // JUMP reset — retryCount 1
+    await rt.graphAdvance(runId, '$load-constraints', 0); // P prefix re-run
     expect(nodeStatus(await rt.graphStatus(runId), 'writer')).toBe('active');
 
     // Round 2 — gate no-match (pass-through) → accept → drain complete

@@ -1,10 +1,10 @@
 /**
  * Per-run in-memory cache — loaded graph definition.
  *
- * Constraints are NOT cached in-process: they snapshot into the run record
- * at graph_start (graph_runs.constraints — DB, durable across server
- * restarts). Entries are created at graphStart (crud.ts) / lazy graph load
- * (graph-loader.ts) and MUST be dropped when a run is deleted
+ * Constraints are NOT cached and NOT snapshotted: they load per activation
+ * via the built-in $load-constraints prologue node (round-level freeze —
+ * agent-side). Entries are created at graphStart (crud.ts) / lazy
+ * graph load (graph-loader.ts) and MUST be dropped when a run is deleted
  * (cleanCompleted/cleanAll) or force-ended (graphForceEnd) — otherwise a
  * long-lived MCP server accumulates one entry per run forever.
  *

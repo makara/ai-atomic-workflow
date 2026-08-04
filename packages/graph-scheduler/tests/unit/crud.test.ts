@@ -10,7 +10,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { GraphAdvanceSchema, RunModeSchema } from '../../server.js';
+import { GraphAdvanceSchema, GraphStartSchema } from '../../server.js';
+import type { NodeDetail } from '../../src/api/crud.js';
 import { graphLoadCache } from '../../src/api/run-caches.js';
 import type { SchedulerRuntime } from '../../src/scheduler-runtime.js';
 import { createRuntime } from '../../src/scheduler-runtime.js';
@@ -109,6 +110,24 @@ function hintGraph(): string {
 /** Invalid YAML for error testing. */
 const BAD_YAML = 'not valid yaml {{{';
 
+/**
+ * Start a run and advance through the activation prologue prefix (P nodes)
+ * until the first author node dispatches — the common test preamble for
+ * graphs whose dispatch order now starts with the built-in prefix.
+ */
+async function startSkippingPrologue(
+  rt: SchedulerRuntime,
+  graphName: string,
+): Promise<{ runId: string; node: NodeDetail | null }> {
+  const start = await rt.graphStart(graphName);
+  let node = start.node;
+  while (node?.nodeId.startsWith('$')) {
+    const next = await rt.graphAdvance(start.runId, node.nodeId, 10);
+    node = next.node;
+  }
+  return { runId: start.runId, node };
+}
+
 // ---------------------------------------------------------------------------
 // graphStart
 // ---------------------------------------------------------------------------
@@ -127,21 +146,25 @@ describe('graphStart', () => {
     expect(result.runId).toBeTruthy();
     // runId is UUID v4 — no longer run-* prefix
     expect(result.runId).toMatch(/^[0-9a-f-]{36}$/);
+    // First dispatch is the activation prologue prefix (no approvals → load only)
     expect(result.node).not.toBeNull();
-    expect(result.node?.nodeId).toBe('agent-a');
+    expect(result.node?.nodeId).toBe('$load-constraints');
     expect(result.node?.type).toBe('main');
   });
 
-  it('returns run snapshot — first node active, entry dispatch carries it', async () => {
+  it('returns run snapshot — prologue active, author entry pending behind it', async () => {
     fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
     const result = await fix.rt.graphStart('linear-agent');
 
     expect(result.snapshot.runId).toBe(result.runId);
     expect(result.snapshot.fsmState).toBe('running');
-    expect(result.snapshot.nodeCount).toBeGreaterThan(0);
+    expect(result.snapshot.nodeCount).toBe(3);
     expect(result.snapshot.completedCount).toBe(0);
     expect(result.snapshot.nodes).toEqual(
-      expect.arrayContaining([expect.objectContaining({ nodeId: 'agent-a', status: 'active', retryCount: 0 })]),
+      expect.arrayContaining([
+        expect.objectContaining({ nodeId: '$load-constraints', status: 'active', retryCount: 0 }),
+        expect.objectContaining({ nodeId: 'agent-a', status: 'pending', retryCount: 0 }),
+      ]),
     );
   });
 
@@ -154,11 +177,11 @@ describe('graphStart', () => {
 
   it('NodeDetail carries agent-hint array on main phases, absent otherwise', async () => {
     fix = await makeFixture({ hints: hintGraph() });
-    const first = await fix.rt.graphStart('hints');
-    expect(first.node?.nodeId).toBe('hinted');
-    expect(first.node?.agent).toEqual(['reviewer', 'task']);
+    const started = await startSkippingPrologue(fix.rt, 'hints');
+    expect(started.node?.nodeId).toBe('hinted');
+    expect(started.node?.agent).toEqual(['reviewer', 'task']);
 
-    const second = await fix.rt.graphAdvance(first.runId, 'hinted', 10);
+    const second = await fix.rt.graphAdvance(started.runId, 'hinted', 10);
     expect(second.node?.nodeId).toBe('plain');
     expect(second.node?.agent).toBeUndefined();
   });
@@ -181,15 +204,15 @@ describe('graphStart', () => {
       }),
     });
 
-    const first = await fix.rt.graphStart('dep-graph');
-    expect(first.node?.nodeId).toBe('w');
-    expect(first.node?.dependsOn).toBeUndefined();
+    const started = await startSkippingPrologue(fix.rt, 'dep-graph');
+    expect(started.node?.nodeId).toBe('w');
+    expect(started.node?.dependsOn).toBeUndefined();
 
-    const second = await fix.rt.graphAdvance(first.runId, 'w', 10);
+    const second = await fix.rt.graphAdvance(started.runId, 'w', 10);
     expect(second.node?.nodeId).toBe('m');
     expect(second.node?.dependsOn).toEqual(['w']);
 
-    const third = await fix.rt.graphAdvance(first.runId, 'm', 10);
+    const third = await fix.rt.graphAdvance(started.runId, 'm', 10);
     expect(third.node?.nodeId).toBe('a');
     expect(third.node?.dependsOn).toEqual(['m']);
   });
@@ -210,8 +233,12 @@ describe('graphAdvance', () => {
 
   beforeEach(async () => {
     fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
-    const { runId: rid } = await fix.rt.graphStart('linear-agent');
+    const { runId: rid, node } = await fix.rt.graphStart('linear-agent');
     runId = rid;
+    // Activation prefix — dispatch the built-in load node before author nodes
+    if (node?.nodeId.startsWith('$')) {
+      await fix.rt.graphAdvance(runId, node.nodeId, 10);
+    }
   });
 
   afterEach(() => {
@@ -278,7 +305,7 @@ describe('graphAdvance branchTo', () => {
   it('gate pass-through (absent branchTo) activates the downstream node', async () => {
     fix = await makeFixture({ 'gate-run': gateRunGraph() });
 
-    const { runId } = await fix.rt.graphStart('gate-run');
+    const { runId } = await startSkippingPrologue(fix.rt, 'gate-run');
     await fix.rt.graphAdvance(runId, 'seed', 10);
     const gate = await fix.rt.graphAdvance(runId, 'gate', 10);
 
@@ -286,23 +313,31 @@ describe('graphAdvance branchTo', () => {
     expect(gate.snapshot.nodes.find((n) => n.nodeId === 'alpha')?.status).toBe('active');
   });
 
-  it('gate jump branchTo resets the upstream target via JUMP — retryCount increments', async () => {
+  it('gate jump branchTo resets the upstream target via JUMP — prologue re-runs (entry target)', async () => {
     fix = await makeFixture({ 'gate-run': gateRunGraph() });
 
-    const { runId } = await fix.rt.graphStart('gate-run');
+    const { runId } = await startSkippingPrologue(fix.rt, 'gate-run');
     await fix.rt.graphAdvance(runId, 'seed', 10);
 
+    // Gate backward jump to the ENTRY node — the activation prefix re-runs
+    // (round restart), so the next dispatch is the prologue, not the target.
     const jump = await fix.rt.graphAdvance(runId, 'gate', 10, 'seed');
-    expect(jump.node?.nodeId).toBe('seed');
+    expect(jump.node?.nodeId).toBe('$load-constraints');
     expect(jump.node?.retryAttempt).toBe(1);
     expect(jump.snapshot.nodes.find((n) => n.nodeId === 'seed')?.retryCount).toBe(1);
+    expect(jump.snapshot.nodes.find((n) => n.nodeId === 'seed')?.status).toBe('pending');
     expect(jump.snapshot.nodes.find((n) => n.nodeId === 'gate')?.status).toBe('pending');
+
+    // After the prefix, the reset target re-dispatches with its retry visible
+    const after = await fix.rt.graphAdvance(runId, '$load-constraints', 10);
+    expect(after.node?.nodeId).toBe('seed');
+    expect(after.node?.retryAttempt).toBe(1);
   });
 
   it('run completes by natural drain — no end marker node', async () => {
     fix = await makeFixture({ 'gate-run': gateRunGraph() });
 
-    const { runId } = await fix.rt.graphStart('gate-run');
+    const { runId } = await startSkippingPrologue(fix.rt, 'gate-run');
     await fix.rt.graphAdvance(runId, 'seed', 10);
     await fix.rt.graphAdvance(runId, 'gate', 10);
     const done = await fix.rt.graphAdvance(runId, 'alpha', 10);
@@ -310,7 +345,7 @@ describe('graphAdvance branchTo', () => {
     expect(done.node).toBeNull();
   });
 
-  it('branchTo to a terminal upstream node resets it via JUMP — retryCount increments', async () => {
+  it('branchTo to a terminal upstream node resets it via JUMP — prologue re-runs (entry target)', async () => {
     const g = JSON.stringify({
       name: 'gate-rework',
       version: 1,
@@ -328,15 +363,18 @@ describe('graphAdvance branchTo', () => {
     });
     fix = await makeFixture({ 'gate-rework': g });
 
-    const { runId } = await fix.rt.graphStart('gate-rework');
+    const { runId } = await startSkippingPrologue(fix.rt, 'gate-rework');
     await fix.rt.graphAdvance(runId, 'w', 10);
     await fix.rt.graphAdvance(runId, 'r', 10);
 
     const jump = await fix.rt.graphAdvance(runId, 'g', 10, 'w');
-    expect(jump.node?.nodeId).toBe('w');
-    expect(jump.node?.retryAttempt).toBe(1);
+    expect(jump.node?.nodeId).toBe('$load-constraints');
     expect(jump.snapshot.nodes.find((n) => n.nodeId === 'w')?.retryCount).toBe(1);
     expect(jump.snapshot.nodes.find((n) => n.nodeId === 'g')?.status).toBe('pending');
+
+    const after = await fix.rt.graphAdvance(runId, '$load-constraints', 10);
+    expect(after.node?.nodeId).toBe('w');
+    expect(after.node?.retryAttempt).toBe(1);
   });
 });
 
@@ -353,15 +391,21 @@ describe('graphJump', () => {
 
   it('jumps to target phase in a running DAG', async () => {
     fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
-    const { runId } = await fix.rt.graphStart('linear-agent');
+    const { runId } = await startSkippingPrologue(fix.rt, 'linear-agent');
 
     // Advance to phase-2
     await fix.rt.graphAdvance(runId, 'agent-a', 50);
 
-    // Jump back to agent-a
+    // Jump back to the ENTRY node — the activation prefix re-runs first
     const result = await fix.rt.graphJump(runId, 'agent-a');
     expect(result.snapshot.runId).toBe(runId);
-    expect(result.node?.nodeId).toBe('agent-a');
+    expect(result.node?.nodeId).toBe('$load-constraints');
+    expect(result.node?.retryAttempt).toBe(1);
+
+    // After the prefix, the reset target re-dispatches
+    const after = await fix.rt.graphAdvance(runId, '$load-constraints', 10);
+    expect(after.node?.nodeId).toBe('agent-a');
+    expect(after.node?.retryAttempt).toBe(1);
   });
 });
 
@@ -408,13 +452,14 @@ describe('graphStatus', () => {
 
     const status = await fix.rt.graphStatus(runId);
     expect(status.runId).toBe(runId);
-    expect(status.nodeCount).toBe(2);
+    // author nodes + the activation prefix node
+    expect(status.nodeCount).toBe(3);
     expect(status.graphName).toBe('linear-agent');
   });
 
   it('reports completed state after full advance (natural drain)', async () => {
     fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
-    const { runId } = await fix.rt.graphStart('linear-agent');
+    const { runId } = await startSkippingPrologue(fix.rt, 'linear-agent');
     await fix.rt.graphAdvance(runId, 'agent-a', 50);
     await fix.rt.graphAdvance(runId, 'agent-b', 50);
 
@@ -429,13 +474,13 @@ describe('graphStatus', () => {
 
   it('per-node skill override is visible in node detail', async () => {
     fix = await makeFixture({ 'skill-override': skillOverrideGraph() });
-    const startResult = await fix.rt.graphStart('skill-override');
+    const started = await startSkippingPrologue(fix.rt, 'skill-override');
 
-    // First node uses phase skill (skill from phase.skill — no registry fallback)
-    expect(startResult.node?.skill).toBe('test-agent-skill');
+    // First author node uses phase skill (skill from phase.skill — no registry fallback)
+    expect(started.node?.skill).toBe('test-agent-skill');
 
     // Advance to node-b which has per-node skill override
-    const advResult = await fix.rt.graphAdvance(startResult.runId, 'agent-a', 50);
+    const advResult = await fix.rt.graphAdvance(started.runId, 'agent-a', 50);
     expect(advResult.node?.skill).toBe('custom-agent-skill');
   });
 
@@ -494,7 +539,7 @@ describe('run cache lifecycle', () => {
 
   it('drops graph cache for completed runs only on graphCleanCompleted', async () => {
     fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
-    const { runId: doneRun } = await fix.rt.graphStart('linear-agent');
+    const { runId: doneRun } = await startSkippingPrologue(fix.rt, 'linear-agent');
     await fix.rt.graphAdvance(doneRun, 'agent-a', 50);
     await fix.rt.graphAdvance(doneRun, 'agent-b', 50);
     const { runId: liveRun } = await fix.rt.graphStart('linear-agent');
@@ -521,42 +566,67 @@ describe('run cache lifecycle', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Run Mode — graph_start mode param
+// Activation prologue — first dispatch, graph-aware synthesis
 // ---------------------------------------------------------------------------
 
-describe('run mode', () => {
+describe('activation prologue dispatch', () => {
   let fix: Fixture;
 
   afterEach(() => {
     fix?.cleanup();
   });
 
-  it('graph_start with mode auto persists run mode and dispatches runMode: auto', async () => {
-    fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
-    const { runId, node } = await fix.rt.graphStart('linear-agent', undefined, 'auto');
-
-    expect(node?.runMode).toBe('auto');
-    const snapshot = await fix.rt.graphStatus(runId);
-    expect(snapshot.runId).toBe(runId);
-
-    // runMode persists across advance — comes from the run row, not the start call
-    const next = await fix.rt.graphAdvance(runId, 'agent-a', 10);
-    expect(next.node?.runMode).toBe('auto');
-  });
-
-  it('graph_start without mode defaults to manual', async () => {
+  it('graph without approvals dispatches $load-constraints first (no confirm)', async () => {
     fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
     const { node } = await fix.rt.graphStart('linear-agent');
 
-    expect(node?.runMode).toBe('manual');
+    expect(node?.nodeId).toBe('$load-constraints');
+    expect(node?.runMode).toBeUndefined();
+    expect(node?.constraints).toBeUndefined();
   });
 
-  it('rejects invalid mode at the MCP schema layer', () => {
-    // The runtime facade is typed — invalid mode is rejected by the server
-    // input schema (RunModeSchema enum), never reaching the persistence path.
-    expect(RunModeSchema.safeParse('auto').success).toBe(true);
-    expect(RunModeSchema.safeParse('invalid').success).toBe(false);
-    expect(RunModeSchema.safeParse(undefined).success).toBe(false);
+  it('graph with approvals dispatches $run-mode-confirm first', async () => {
+    const withApproval = JSON.stringify({
+      name: 'with-approval',
+      version: 1,
+      phases: [
+        { id: 'a', type: 'main', skill: 'test-agent-skill', task: 'do a' },
+        { id: 'accept', type: 'approval', dependsOn: ['a'], task: 'Accept?', topic: 'Accept?' },
+      ],
+    });
+    fix = await makeFixture({ 'with-approval': withApproval });
+    const { runId } = await fix.rt.graphStart('with-approval');
+    const snapshot = await fix.rt.graphStatus(runId);
+
+    // Prologue nodes are run members — visible in the snapshot
+    const prologue = snapshot.nodes.filter((n) => n.nodeId.startsWith('$'));
+    expect(prologue.map((n) => n.nodeId).sort()).toEqual(['$load-constraints', '$run-mode-confirm']);
+    expect(prologue.every((n) => n.status === 'active')).toBe(true);
+  });
+
+  it('author entry waits for the prologue prefix', async () => {
+    const withApproval = JSON.stringify({
+      name: 'with-approval',
+      version: 1,
+      phases: [
+        { id: 'a', type: 'main', skill: 'test-agent-skill', task: 'do a' },
+        { id: 'accept', type: 'approval', dependsOn: ['a'], task: 'Accept?', topic: 'Accept?' },
+      ],
+    });
+    fix = await makeFixture({ 'with-approval': withApproval });
+    const { runId } = await fix.rt.graphStart('with-approval');
+
+    // Complete the prefix — author node activates only after both P nodes
+    const n1 = await fix.rt.graphAdvance(runId, '$run-mode-confirm', 10);
+    expect(n1.node?.nodeId).toBe('$load-constraints');
+    const n2 = await fix.rt.graphAdvance(runId, '$load-constraints', 10);
+    expect(n2.node?.nodeId).toBe('a');
+  });
+
+  it('rejects a mode parameter at the MCP schema layer (strict)', () => {
+    // The mode param is removed — graph-level mode travels via args.mode
+    expect(GraphStartSchema.safeParse({ graphName: 'x', mode: 'auto' }).success).toBe(false);
+    expect(GraphStartSchema.safeParse({ graphName: 'x', args: { mode: 'auto' } }).success).toBe(true);
   });
 });
 
@@ -606,9 +676,10 @@ describe('run-scope channel gate', () => {
       ],
     });
     fix = await makeFixture({ standalone });
-    const { node } = await fix.rt.graphStart('standalone');
-
+    const { runId, node } = await startSkippingPrologue(fix.rt, 'standalone');
+    expect(node?.nodeId).toBe('main-a');
     expect(node?.channels).toEqual([]);
+    expect(runId).toBeTruthy();
   });
 
   it('keeps node: channel targets inside the run node set', async () => {
@@ -621,10 +692,10 @@ describe('run-scope channel gate', () => {
       ],
     });
     fix = await makeFixture({ 'two-node': g });
-    const start = await fix.rt.graphStart('two-node');
-    expect(start.node?.nodeId).toBe('writer');
+    const started = await startSkippingPrologue(fix.rt, 'two-node');
+    expect(started.node?.nodeId).toBe('writer');
 
-    const next = await fix.rt.graphAdvance(start.runId, 'writer', 10);
+    const next = await fix.rt.graphAdvance(started.runId, 'writer', 10);
     expect(next.node?.channels).toEqual(['node:writer']);
   });
 });

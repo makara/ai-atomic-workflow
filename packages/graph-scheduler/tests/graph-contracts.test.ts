@@ -1157,6 +1157,7 @@ describe('2.8 snapshot nodes enumeration (M2)', () => {
   it('snapshot annotates pending nodes on inactive routes with unactivated: true', () => {
     const graph: TaskflowGraph = {
       name: 'g',
+      prologue: [],
       phases: [
         { id: 'a', type: 'main' },
         { id: 'gate', type: 'gate', dependsOn: ['a'], jumps: [{ when: 'a output shows x', to: 'a' }] },

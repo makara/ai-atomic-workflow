@@ -72,19 +72,17 @@ function toMcpError(err: unknown): McpErrorInfo {
 
 // ── Zod schemas for MCP tool inputSchema ──────────────────────────
 
-/** Run Mode param schema — shared with tests for rejection coverage. */
-export const RunModeSchema = z.enum(['manual', 'auto']);
-
-const GraphStartSchema = z.object({
-  graphName: z.string().min(1).describe('Graph name — matches the name field of .taskflow.yaml or a registry entry'),
-  args: z
-    .record(z.string(), z.unknown())
-    .optional()
-    .describe('Optional — graph invocation arguments. Values are referenced as {args.key} in task templates'),
-  mode: RunModeSchema.optional().describe(
-    'Optional — Run Mode. auto: every approval executes its recommended routing action without a decision card; manual (default): every approval presents the card',
-  ),
-});
+export const GraphStartSchema = z
+  .object({
+    graphName: z.string().min(1).describe('Graph name — matches the name field of .taskflow.yaml or a registry entry'),
+    args: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe(
+        'Optional — graph invocation arguments. Values are referenced as {args.key} in task templates; args.mode short-circuits the built-in $run-mode-confirm prologue node',
+      ),
+  })
+  .strict();
 
 export const GraphAdvanceSchema = z
   .object({
@@ -146,7 +144,7 @@ server.tool(
   async (args) => {
     const rt = await getRuntime();
     try {
-      const result = await rt.graphStart(args.graphName, args.args, args.mode);
+      const result = await rt.graphStart(args.graphName, args.args);
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result) }],
       };

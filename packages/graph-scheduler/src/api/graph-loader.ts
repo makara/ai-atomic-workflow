@@ -21,6 +21,7 @@ import type { TaskflowGraph } from '../fsm/transition.js';
 import type { Taskflow } from '../graph-definition.js';
 import { loadGraph, loadGraphFromPath } from '../graph-definition.js';
 import { validatePhase } from '../phase-handler/index.js';
+import { synthesizePrologue } from '../prologue.js';
 import { RegistryLoader } from '../registry-loader.js';
 import type { GraphDefinitionError, RegistryLoadError, SchedulerError } from '../types.js';
 import { FlowPhaseError } from '../types.js';
@@ -264,6 +265,9 @@ export function loadGraphForRun(
  * Adapt taskflow-core Taskflow to the FSM's TaskflowGraph shape.
  * Also runs each phase through its handler's validate() — after schema.parse().
  * Flow phases are already flattened at this point; type is main/approval.
+ * Activation prologue synthesized from the flattened author phases
+ * (graph-aware: confirm only when approvals exist; author `$` declarations
+ * replace built-ins).
  */
 export function toTaskflowGraph(tf: Taskflow): Effect.Effect<TaskflowGraph, GraphDefinitionError> {
   return Effect.try({
@@ -274,7 +278,8 @@ export function toTaskflowGraph(tf: Taskflow): Effect.Effect<TaskflowGraph, Grap
         // Error names the type + registered list (from UnknownPhaseTypeError message).
         validatedPhases.push(validatePhase(p));
       }
-      return { name: tf.name ?? 'unnamed', phases: validatedPhases };
+      const prologue = synthesizePrologue(validatedPhases).map((p) => validatePhase(p));
+      return { name: tf.name ?? 'unnamed', phases: validatedPhases, prologue };
     },
     catch: (err: unknown): GraphDefinitionError => ({
       _tag: 'GraphDefinitionError',

@@ -11,7 +11,7 @@
 import { Context, Effect, Layer } from 'effect';
 import Database from 'libsql';
 import { debugLog } from '../../debug.js';
-import type { NotFoundError, PersistenceError, RunMode } from '../../types.js';
+import type { NotFoundError, PersistenceError } from '../../types.js';
 import { tryDb } from './helpers.js';
 import { migrate } from './migration.js';
 /** Row shape for graph_runs table. */
@@ -20,9 +20,7 @@ interface GraphRunRow {
   graph_name: string;
   fsm_state: string;
   args: string | null;
-  mode: string;
   routes: string | null;
-  constraints: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -43,12 +41,8 @@ export interface GraphRun {
   readonly graphName: string;
   readonly fsmState: string;
   readonly args: Record<string, unknown> | null;
-  /** Run Mode — decided at run creation (graph_start mode param), stable for run lifetime. */
-  readonly mode: RunMode;
   /** route activation map — routeId → activating node id (route-first redesign); absent route = inactive */
   readonly routes: Record<string, string>;
-  /** project constraints snapshot — frozen at run creation (graph_start), stable for run lifetime */
-  readonly constraints: readonly string[];
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -88,13 +82,11 @@ export interface RunSummaryItem {
 export class GraphRepository extends Context.Tag('GraphRepository')<
   GraphRepository,
   {
-    /** Insert a new run row — constraints snapshotted at run creation. */
+    /** Insert a new run row. */
     readonly createRun: (
       runId: string,
       graphName: string,
       args?: Record<string, unknown>,
-      mode?: RunMode,
-      constraints?: readonly string[],
     ) => Effect.Effect<void, PersistenceError>;
 
     /** Update a single node state row (partial). */
@@ -144,9 +136,7 @@ function rowToGraphRun(row: GraphRunRow): GraphRun {
     graphName: row.graph_name,
     fsmState: row.fsm_state,
     args: row.args ? (JSON.parse(row.args) as Record<string, unknown>) : null,
-    mode: row.mode === 'auto' ? 'auto' : 'manual',
     routes: row.routes ? (JSON.parse(row.routes) as Record<string, string>) : {},
-    constraints: row.constraints ? (JSON.parse(row.constraints) as string[]) : [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -176,16 +166,14 @@ export function buildService(db: ReturnType<typeof Database>): GraphRepository['
       runId: string,
       graphName: string,
       args?: Record<string, unknown>,
-      mode: RunMode = 'manual',
-      constraints: readonly string[] = [],
     ): Effect.Effect<void, PersistenceError> =>
       tryDb('createRun', () => {
         const nowISO = new Date().toISOString();
-        debugLog('runtime', { event: 'run_created', runId, graphName, mode });
+        debugLog('runtime', { event: 'run_created', runId, graphName });
         db.prepare(
-          `INSERT INTO graph_runs (run_id, graph_name, fsm_state, args, mode, routes, constraints, created_at, updated_at)
-           VALUES (?, ?, 'idle', ?, ?, '{}', ?, ?, ?)`,
-        ).run(runId, graphName, args ? JSON.stringify(args) : null, mode, JSON.stringify(constraints), nowISO, nowISO);
+          `INSERT INTO graph_runs (run_id, graph_name, fsm_state, args, routes, created_at, updated_at)
+           VALUES (?, ?, 'idle', ?, '{}', ?, ?)`,
+        ).run(runId, graphName, args ? JSON.stringify(args) : null, nowISO, nowISO);
       }),
 
     updateNodeState: (runId: string, nodeId: string, update: NodeStateUpdate): Effect.Effect<void, PersistenceError> =>

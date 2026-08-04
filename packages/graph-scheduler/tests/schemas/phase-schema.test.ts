@@ -447,24 +447,24 @@ describe('PhaseSchema — when guard removed (route-first redesign)', () => {
 });
 
 describe('PhaseSchema — constraints/runMode removed fields, loud rejection', () => {
-  it('rejects constraints with migration hint — project constraints inject from constraints.md', () => {
+  it('rejects constraints with migration hint — project constraints load via $load-constraints', () => {
     const raw = { id: 'p1', type: 'main', constraints: ['no git operations'] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
     const issue = result.error!.issues.find((i) => i.path.join('.') === 'constraints');
     expect(issue).toBeDefined();
     expect(issue!.message).toContain("'constraints' is removed");
-    expect(issue!.message).toContain('.graph-scheduler/constraints.md');
+    expect(issue!.message).toContain('$load-constraints');
   });
 
-  it('rejects runMode with migration hint — run mode is a run attribute', () => {
+  it('rejects runMode with migration hint — run mode is decided by $run-mode-confirm', () => {
     const raw = { id: 'p1', type: 'main', runMode: 'auto' };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
     const issue = result.error!.issues.find((i) => i.path.join('.') === 'runMode');
     expect(issue).toBeDefined();
     expect(issue!.message).toContain("'runMode' is removed");
-    expect(issue!.message).toContain('graph_start');
+    expect(issue!.message).toContain('$run-mode-confirm');
   });
 
   it('rejects both fields on any type — loud rejection, never silent strip', () => {
@@ -491,6 +491,36 @@ describe('PhaseSchema — constraints/runMode removed fields, loud rejection', (
       expect(result.data.constraints).toBeUndefined();
       expect(result.data.runMode).toBeUndefined();
     }
+  });
+});
+
+describe('PhaseSchema — activation prologue reserved ids', () => {
+  it('accepts $run-mode-confirm and $load-constraints declarations (override)', () => {
+    for (const id of ['$run-mode-confirm', '$load-constraints']) {
+      const raw = { id, type: 'main', task: 'custom protocol' };
+      const result = PhaseSchema.safeParse(raw);
+      expect(result.success, `${id} should be declarable`).toBe(true);
+    }
+  });
+
+  it('rejects any other $-prefixed id — reserved prefix', () => {
+    for (const id of ['$lang-confirm', '$foo', '$run-mode-confirm-extra']) {
+      const raw = { id, type: 'main', task: 'x' };
+      const result = PhaseSchema.safeParse(raw);
+      expect(result.success, `${id} should be rejected`).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'id');
+      expect(issue).toBeDefined();
+      expect(issue!.message).toContain("'$' prefix is reserved");
+    }
+  });
+
+  it('rejects reserved-id declarations with upstream dependencies — must be entry phases', () => {
+    const raw = { id: '$load-constraints', type: 'main', dependsOn: ['other'], task: 'x' };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'dependsOn');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toContain('entry phases');
   });
 });
 

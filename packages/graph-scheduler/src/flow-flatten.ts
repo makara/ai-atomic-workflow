@@ -10,6 +10,7 @@
  * @module
  */
 
+import { PROLOGUE_IDS } from './prologue.js';
 import type { Taskflow } from './schemas/index.js';
 import { FlowPhaseError } from './types.js';
 
@@ -116,13 +117,16 @@ export function flattenFlowPhases(
     // target and must be prefixed to match the flattened graph's node IDs.
     const parentIds = new Set(phases.map((p) => p.id));
 
-    // Prefix child phase IDs
+    // Prefix child phase IDs — EXCEPT activation prologue reserved ids
+    // (graph-global by contract: an author-declared $load-constraints inside
+    // a flow overrides the built-in; prefixing would silently break the id).
     const prefix = `${phase.id}/`;
     const childIds = new Set(flatChild.phases.map((p) => p.id));
     const entryPhaseId = flatChild.phases.find((p) => !p.dependsOn || p.dependsOn.length === 0)?.id;
     const entryNodeId = `${prefix}${entryPhaseId ?? flatChild.phases[0]?.id ?? ''}`;
     const prefixedPhases: Taskflow['phases'] = flatChild.phases.map((cp) => {
-      const prefixedId = `${prefix}${cp.id}`;
+      const isReserved = PROLOGUE_IDS[cp.id] === true;
+      const prefixedId = isReserved ? cp.id : `${prefix}${cp.id}`;
 
       // Conflict detection — check against all IDs including unprocessed parent phases
       if (allExistingIds.has(prefixedId)) {
@@ -139,7 +143,9 @@ export function flattenFlowPhases(
       // This preserves DAG topology + enables Scoped Context for child phases.
       const isEntryInChild = !cp.dependsOn || cp.dependsOn.length === 0;
       const flowDependsOn = isEntryInChild ? (phase.dependsOn ?? []) : [];
-      const childInternal = cp.dependsOn ? cp.dependsOn.map((dep) => `${prefix}${dep}`) : [];
+      const childInternal = cp.dependsOn
+        ? cp.dependsOn.map((dep) => (PROLOGUE_IDS[dep] === true ? dep : `${prefix}${dep}`))
+        : [];
       const rewiredDependsOn = [...flowDependsOn, ...childInternal];
 
       // Prefix routing targets to match expanded child IDs. Branch-route
@@ -149,7 +155,8 @@ export function flattenFlowPhases(
       // Child-internal node targets get the flow prefix; parent-level targets
       // (cross-level refs — e.g. loop-gate routing to loop-entry) stay
       // unprefixed. Gate jump targets prefix the same way.
-      const childRef = (ref: string): string => (childIds.has(ref) ? `${prefix}${ref}` : ref);
+      const childRef = (ref: string): string =>
+        PROLOGUE_IDS[ref] === true ? ref : childIds.has(ref) ? `${prefix}${ref}` : ref;
       const prefixedJumps = cp.jumps?.map((j) => ({ ...j, to: childRef(j.to) }));
       const prefixedRouting = cp.routing
         ? {

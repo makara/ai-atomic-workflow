@@ -21,7 +21,6 @@ import {
   type TransitionResult,
 } from '../fsm/transition.js';
 import type { Taskflow } from '../graph-definition.js';
-import { loadConstraintsFile } from '../lib/constraints.js';
 import { GraphRepository, type GraphRun } from '../lib/db/repository.js';
 import type { INodeDetail } from '../phase-handler/types.js';
 import { RegistryLoader } from '../registry-loader.js';
@@ -31,7 +30,6 @@ import type {
   NextNodeInput,
   NotFoundError,
   RegistryLoadError,
-  RunMode,
   SchedulerError,
 } from '../types.js';
 
@@ -103,8 +101,6 @@ function buildNextNode(input: NextNodeInput): Effect.Effect<NodeDetail | null, D
       phaseId: active.phaseId,
       nodeState: active.nodeState,
       graph: input.graph,
-      constraints: input.constraints,
-      runMode: input.mode,
       args: input.args,
     });
   });
@@ -131,15 +127,12 @@ function invalidState(runId: string, currentStatus: string, attemptedAction: str
  * persists the new run and node states, and returns the run ID + first node.
  *
  * @param graphName — graph name (resolved via registry or `${graphName}.taskflow.yaml`)
- * @param args      — optional invocation arguments (accessible via {args.X} in templates)
- * @param mode      — Run Mode: 'auto' executes the action declaring `default: true`
- *                    on every approval without a decision card; 'manual' (default)
- *                    always presents the card.
+ * @param args      — optional invocation arguments (accessible via {args.X} in templates);
+ *                    `args.mode` short-circuits the built-in $run-mode-confirm prologue node
  */
 export function graphStart(
   graphName: string,
   args?: Record<string, unknown>,
-  mode: RunMode = 'manual',
 ): Effect.Effect<
   {
     runId: string;
@@ -171,23 +164,26 @@ export function graphStart(
     }
 
     const runId = nextState.runId;
-    // Snapshot project constraints into the run record — frozen for run lifetime
-    const constraints = loadConstraintsFile();
     // Cache graph definition for subsequent advance/jump within this run
     graphLoadCache.set(runId, tf);
 
-    // Create run row + node state rows in DB
-    yield* repo.createRun(runId, graphName, args, mode, constraints);
-    const nodes = tf.phases.map((p: { id: string }) => ({
-      nodeId: p.id,
-    }));
+    // Create run row + node state rows in DB (prologue nodes included — they
+    // are run members and dispatch first; an author-declared reserved id is
+    // both a prologue member and a phase — seed it once)
+    yield* repo.createRun(runId, graphName, args);
+    const prologueIds = new Set(graph.prologue.map((p) => p.id));
+    const nodes = [...graph.prologue, ...graph.phases.filter((p) => !prologueIds.has(p.id))].map(
+      (p: { id: string }) => ({
+        nodeId: p.id,
+      }),
+    );
     yield* repo.createNodeStates(runId, nodes);
 
     // Execute transition effects
     yield* executeEffects(result.effects, repo, graph);
 
     // Build next node
-    const node = yield* buildNextNode({ runId, state: nextState, graph, mode, constraints, args: args ?? null });
+    const node = yield* buildNextNode({ runId, state: nextState, graph, args: args ?? null });
     // Contract warnings captured at load — surfaced for decision gates
     return { runId, node, contractWarnings: getContractWarnings(graphName), snapshot: buildSnapshot(nextState, graph) };
   });
@@ -239,8 +235,6 @@ export function graphAdvance(
       runId,
       state: nextState,
       graph,
-      mode: run.mode,
-      constraints: run.constraints,
       args: run.args,
     });
 
@@ -283,8 +277,6 @@ export function graphJump(
       runId,
       state: nextState,
       graph,
-      mode: run.mode,
-      constraints: run.constraints,
       args: run.args,
     });
 

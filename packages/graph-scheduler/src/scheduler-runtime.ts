@@ -64,7 +64,7 @@ import { cleanAll, cleanCompleted, graphInit, type IGraphInitReport, type IGraph
 import { graphList, graphStatus } from './api/query.js';
 import type { IGraphSnapshot } from './api/snapshot.js';
 
-import type { ConfigError, RunMode } from './types.js';
+import type { ConfigError } from './types.js';
 
 /** Run summary — returned by graphList. */
 export interface RunSummary {
@@ -80,7 +80,6 @@ export interface SchedulerRuntime {
   readonly graphStart: (
     graphName: string,
     args?: Record<string, unknown>,
-    mode?: RunMode,
   ) => Promise<{
     readonly runId: string;
     readonly node: NodeDetail | null;
@@ -352,8 +351,7 @@ export function createRuntime(config?: Partial<SchedulerConfig>): Effect.Effect<
 
     // Build the Promise-wrapped facade
     const schedulerRuntime: SchedulerRuntime = {
-      graphStart: (graphName: string, args?: Record<string, unknown>, mode: RunMode = 'manual') =>
-        run(graphStart(graphName, args, mode)),
+      graphStart: (graphName: string, args?: Record<string, unknown>) => run(graphStart(graphName, args)),
 
       graphAdvance: (runId: string, nodeId: string, durationMs: number, branchTo?: string, endRun?: boolean) =>
         run(graphAdvance(runId, nodeId, durationMs, branchTo, endRun)),

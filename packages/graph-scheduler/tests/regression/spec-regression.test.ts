@@ -48,6 +48,19 @@ function validGraph(overrides?: Record<string, unknown>): Record<string, unknown
 }
 
 /** Create a minimal runtime connected to the fixture directory. */
+/** Advance the activation prologue prefix (P nodes) and return the first author node. */
+async function afterPrologue(
+  rt: SchedulerRuntime,
+  start: { runId: string; node: { nodeId: string } | null },
+): Promise<{ nodeId: string; skill?: string; handlerSkill?: string; type?: string } | null> {
+  let node = start.node;
+  while (node?.nodeId.startsWith('$')) {
+    const next = await rt.graphAdvance(start.runId, node.nodeId, 10);
+    node = next.node;
+  }
+  return node;
+}
+
 async function createTestRuntime(
   fix: Fixture,
   opts?: {
@@ -90,8 +103,10 @@ describe('Graph loading chain (name → registry → .taskflow.yaml)', () => {
 
     expect(result.runId).toBeTruthy();
     expect(result.node).toBeDefined();
-    expect(result.node?.nodeId).toBe('agent-step');
-    expect(result.node?.type).toBe('main');
+    expect(result.node?.nodeId).toBe('$load-constraints');
+    const author = await afterPrologue(rt, result);
+    expect(author?.nodeId).toBe('agent-step');
+    expect(author?.type).toBe('main');
   });
 
   it('falls back to {name}.taskflow.yaml when name not in registry', async () => {
@@ -106,7 +121,9 @@ describe('Graph loading chain (name → registry → .taskflow.yaml)', () => {
     const result = await rt.graphStart('fallback-graph');
 
     expect(result.runId).toBeTruthy();
-    expect(result.node?.nodeId).toBe('agent-step');
+    expect(result.node?.nodeId).toBe('$load-constraints');
+    const author = await afterPrologue(rt, result);
+    expect(author?.nodeId).toBe('agent-step');
   });
 
   it('throws when graph is not found anywhere', async () => {
@@ -151,8 +168,10 @@ describe('Schema validation (valid / invalid taskflow YAML)', () => {
     const rt = await createTestRuntime(fix);
     const result = await rt.graphStart('valid');
     expect(result.runId).toBeTruthy();
-    expect(result.node?.nodeId).toBe('a1');
-    expect(result.node?.skill).toBe('entry-agent-skill');
+    expect(result.node?.nodeId).toBe('$run-mode-confirm');
+    const author = await afterPrologue(rt, result);
+    expect(author?.nodeId).toBe('a1');
+    expect(author?.skill).toBe('entry-agent-skill');
   });
 
   it('accepts version as string (lenient validation)', async () => {
@@ -247,7 +266,8 @@ describe('Agent registry merge (builtin + project override)', () => {
 
     const result = await rt.graphStart('skills-override');
     // skill comes from phase.skill; handlerSkill is the constant
-    expect(result.node?.skill).toBe('my-custom-agent-skill');
-    expect(result.node?.handlerSkill).toBe('atom-phase-handler');
+    const author = await afterPrologue(rt, result);
+    expect(author?.skill).toBe('my-custom-agent-skill');
+    expect(author?.handlerSkill).toBe('atom-phase-handler');
   });
 });

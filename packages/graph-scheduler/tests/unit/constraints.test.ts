@@ -1,65 +1,66 @@
 /**
- * Unit + integration tests for project constraint channel:
- * extractRules pure parser + .graph-scheduler/constraints.md loading
- * into NodeDetail.constraints.
+ * Unit + integration tests for the activation prologue constraints channel
+ * The scheduler carries NO constraints — NodeDetail has no
+ * `constraints` field, graph_start reads no file, and the built-in
+ * `$load-constraints` node carries the default copy protocol task text.
+ * The actual file reading is agent-side execution of the node's task.
  */
 import { Effect } from 'effect';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { extractRules, loadConstraintsFile } from '../../src/lib/constraints.js';
+import { toTaskflowGraph } from '../../src/api/graph-loader.js';
+import { DEFAULT_LOAD_TASK, PROLOGUE_CONFIRM_ID, PROLOGUE_LOAD_ID, synthesizePrologue } from '../../src/prologue.js';
 import type { SchedulerRuntime } from '../../src/scheduler-runtime.js';
 import { createRuntime } from '../../src/scheduler-runtime.js';
 
 // ---------------------------------------------------------------------------
-// extractRules — pure parser
+// synthesizePrologue — pure synthesis
 // ---------------------------------------------------------------------------
 
-describe('extractRules', () => {
-  it('returns empty array when no ## Rules section', () => {
-    expect(extractRules('# Title\n\nplain text without rules')).toEqual([]);
+describe('synthesizePrologue', () => {
+  it('always synthesizes $load-constraints; confirm only when an approval exists', () => {
+    const mainOnly = synthesizePrologue([{ id: 'a', type: 'main' }]);
+    expect(mainOnly.map((p) => p.id)).toEqual(['$load-constraints']);
+
+    const withApproval = synthesizePrologue([
+      { id: 'a', type: 'main' },
+      { id: 'accept', type: 'approval' },
+    ]);
+    expect(withApproval.map((p) => p.id)).toEqual(['$run-mode-confirm', '$load-constraints']);
   });
 
-  it('returns empty array on empty or malformed input', () => {
-    expect(extractRules('')).toEqual([]);
-    expect(extractRules('## Other\n- x')).toEqual([]);
-    expect(extractRules('### Rules\n- x')).toEqual([]);
+  it('author declaration replaces the built-in (same reserved id, own task)', () => {
+    const declared = { id: PROLOGUE_LOAD_ID, type: 'main', dependsOn: [], task: 'custom source' } as const;
+    const prologue = synthesizePrologue([declared, { id: 'a', type: 'main' }]);
+    expect(prologue.map((p) => p.id)).toEqual(['$load-constraints']);
+    expect(prologue[0]?.task).toBe('custom source');
   });
 
-  it('extracts one entry per bullet line', () => {
-    const md = '## Rules\n- content pure english\n- natural language meets caveman full level\n';
-    expect(extractRules(md)).toEqual(['content pure english', 'natural language meets caveman full level']);
+  it('default load task encodes the deterministic copy protocol', () => {
+    expect(DEFAULT_LOAD_TASK).toContain('## Rules');
+    expect(DEFAULT_LOAD_TASK).toContain('verbatim');
+    expect(DEFAULT_LOAD_TASK).toContain('.graph-scheduler/constraints.md');
   });
 
-  it('strips list markers and blank lines', () => {
-    const md = '## Rules\n\n* first\n\n- second\n';
-    expect(extractRules(md)).toEqual(['first', 'second']);
-  });
-
-  it('stops at next markdown heading', () => {
-    const md = '## Rules\n- keep me\n## Other\n- drop me\n';
-    expect(extractRules(md)).toEqual(['keep me']);
-  });
-
-  it('skips html comments', () => {
-    const md = '## Rules\n<!-- example: english only -->\n- real rule\n';
-    expect(extractRules(md)).toEqual(['real rule']);
-  });
-
-  it('preserves document order', () => {
-    const md = '## Rules\n- b\n- a\n- c\n';
-    expect(extractRules(md)).toEqual(['b', 'a', 'c']);
+  it('default confirm task references the args.mode placeholder', () => {
+    const prologue = synthesizePrologue([
+      { id: 'a', type: 'main' },
+      { id: 'accept', type: 'approval' },
+    ]);
+    const confirm = prologue.find((p) => p.id === PROLOGUE_CONFIRM_ID);
+    expect(confirm?.task).toContain('{args.mode}');
   });
 });
 
 // ---------------------------------------------------------------------------
-// Runtime — constraints file → NodeDetail.constraints
+// Runtime — constraints live in the prologue node, not the scheduler
 // ---------------------------------------------------------------------------
 
 /** Temp project root with .graph-scheduler/ + taskflow dir; chdir isolates CWD reads. */
-describe('runtime constraints loading', () => {
+describe('runtime constraints decoupling', () => {
   let projectRoot: string;
   let cwdBackup: string;
   let rt: SchedulerRuntime | null;
@@ -96,129 +97,43 @@ describe('runtime constraints loading', () => {
     );
   }
 
-  /** Start a run on the current runtime. */
-  async function startRun(
-    rt: SchedulerRuntime,
-  ): Promise<{ readonly runId: string; readonly constraints: readonly string[] | undefined }> {
+  it('NodeDetail never carries constraints — the field is gone', async () => {
+    writeFileSync(join(projectRoot, '.graph-scheduler', 'constraints.md'), '## Rules\n- content pure english\n');
+    rt = await makeRuntime();
     const result = await rt.graphStart('constraint-graph');
-    return { runId: result.runId, constraints: result.node?.constraints };
-  }
-
-  it('carries project constraints on first node', async () => {
-    writeFileSync(
-      join(projectRoot, '.graph-scheduler', 'constraints.md'),
-      '## Rules\n- content pure english\n- natural language meets caveman full level\n',
-    );
-    rt = await makeRuntime();
-    const { constraints } = await startRun(rt);
-    expect(constraints).toEqual(['content pure english', 'natural language meets caveman full level']);
+    expect(result.node?.nodeId).toBe('$load-constraints');
+    expect(result.node?.constraints).toBeUndefined();
+    expect(result.node?.runMode).toBeUndefined();
   });
 
-  it('yields empty constraints when constraints file missing', async () => {
+  it('graph_start succeeds without reading the constraints file — no magic path in the scheduler', async () => {
+    // No .graph-scheduler/constraints.md at all — run starts cleanly
     rt = await makeRuntime();
-    const { constraints } = await startRun(rt);
-    expect(constraints).toEqual([]);
+    const result = await rt.graphStart('constraint-graph');
+    expect(result.node?.nodeId).toBe('$load-constraints');
   });
 
-  it('yields empty constraints when file has no ## Rules section', async () => {
-    writeFileSync(join(projectRoot, '.graph-scheduler', 'constraints.md'), '# Nothing here\n');
+  it('first dispatch is the load node carrying the default copy protocol task', async () => {
     rt = await makeRuntime();
-    const { constraints } = await startRun(rt);
-    expect(constraints).toEqual([]);
+    const result = await rt.graphStart('constraint-graph');
+    expect(result.node?.nodeId).toBe('$load-constraints');
+    expect(result.node?.task).toContain('.graph-scheduler/constraints.md');
+    expect(result.node?.task).toContain('## Rules');
   });
 
-  it('snapshots constraints per run — new run re-reads file, old run keeps snapshot', async () => {
-    writeFileSync(join(projectRoot, '.graph-scheduler', 'constraints.md'), '## Rules\n- first rule\n');
-    rt = await makeRuntime();
-    const first = await startRun(rt);
-    expect(first.constraints).toEqual(['first rule']);
-
-    // Edit constraints file — second run on same runtime sees new set
-    writeFileSync(join(projectRoot, '.graph-scheduler', 'constraints.md'), '## Rules\n- first rule\n- second rule\n');
-    const second = await startRun(rt);
-    expect(second.constraints).toEqual(['first rule', 'second rule']);
-
-    // Old run unchanged — advance keeps its snapshot
-    const adv = await rt.graphAdvance(first.runId, 'a', 10);
-    expect(adv.node?.constraints).toEqual(['first rule']);
-  });
-
-  it('keeps the run-record snapshot across a server restart — file edits never leak mid-run', async () => {
-    const dbPath = join(projectRoot, 'restart.db');
+  it('author-declared $load-constraints replaces the built-in protocol', async () => {
     const graph = JSON.stringify({
-      name: 'constraint-graph',
+      name: 'override-graph',
       version: 1,
       phases: [
-        { id: 'a', type: 'main', skill: 'test-skill', task: 'do a' },
-        { id: 'b', type: 'main', skill: 'test-skill', task: 'do b', dependsOn: ['a'] },
+        { id: '$load-constraints', type: 'main', task: 'load from custom source' },
+        { id: 'a', type: 'main', task: 'do a' },
       ],
     });
-    writeFileSync(join(projectRoot, 'constraint-graph.taskflow.yaml'), graph);
-    writeFileSync(join(projectRoot, '.graph-scheduler', 'constraints.md'), '## Rules\n- snapshot rule\n');
-
-    // "Server" 1 — creates the run and snapshots constraints
-    const rt1 = await Effect.runPromise(createRuntime({ dbPath, taskflowDir: projectRoot }));
-    const started = await rt1.graphStart('constraint-graph');
-    expect(started.node?.constraints).toEqual(['snapshot rule']);
-    const runId = started.runId;
-    await rt1.dispose();
-
-    // Mid-run file edit + server restart — new process, same DB, no process cache
-    writeFileSync(join(projectRoot, '.graph-scheduler', 'constraints.md'), '## Rules\n- changed rule\n');
-    const rt2 = await Effect.runPromise(createRuntime({ dbPath, taskflowDir: projectRoot }));
-    const adv = await rt2.graphAdvance(runId, 'a', 10);
-    expect(adv.node?.constraints).toEqual(['snapshot rule']);
-    await rt2.dispose();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// loadConstraintsFile — load-time diagnostics (Defect 2)
-// ---------------------------------------------------------------------------
-
-describe('loadConstraintsFile diagnostics', () => {
-  let projectRoot: string;
-  let cwdBackup: string;
-
-  beforeEach(() => {
-    projectRoot = join(tmpdir(), `constraints-diag-test-${Math.random().toString(36).slice(2)}`);
-    mkdirSync(join(projectRoot, '.graph-scheduler'), { recursive: true });
-    cwdBackup = process.cwd();
-    process.chdir(projectRoot);
-  });
-
-  afterEach(() => {
-    process.chdir(cwdBackup);
-    vi.restoreAllMocks();
-    rmSync(projectRoot, { recursive: true, force: true });
-  });
-
-  it('stays silent when file missing', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(loadConstraintsFile()).toEqual([]);
-    expect(warnSpy).not.toHaveBeenCalled();
-  });
-
-  it('warns when file present but no rules extracted', () => {
-    writeFileSync(join(projectRoot, '.graph-scheduler', 'constraints.md'), '# Nothing here\n');
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(loadConstraintsFile()).toEqual([]);
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0][0]).toContain('no rules extracted');
-  });
-
-  it('includes near-miss heading hint on case-mismatched heading', () => {
-    writeFileSync(join(projectRoot, '.graph-scheduler', 'constraints.md'), '## rules\n- no git\n');
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(loadConstraintsFile()).toEqual([]);
-    expect(warnSpy.mock.calls[0][0]).toContain('near-miss heading');
-    expect(warnSpy.mock.calls[0][0]).toContain('## rules');
-  });
-
-  it('stays silent when rules extracted successfully', () => {
-    writeFileSync(join(projectRoot, '.graph-scheduler', 'constraints.md'), '## Rules\n- rule one\n');
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(loadConstraintsFile()).toEqual(['rule one']);
-    expect(warnSpy).not.toHaveBeenCalled();
+    writeFileSync(join(projectRoot, 'override-graph.taskflow.yaml'), graph);
+    rt = await Effect.runPromise(createRuntime({ dbPath: ':memory:', taskflowDir: projectRoot }));
+    const result = await rt.graphStart('override-graph');
+    expect(result.node?.nodeId).toBe('$load-constraints');
+    expect(result.node?.task).toBe('load from custom source');
   });
 });

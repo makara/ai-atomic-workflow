@@ -3,8 +3,8 @@
  *
  * Tracks applied version in a `schema_version` meta-table.
  * v1: original full schema (graph_runs + node_states + topo index).
- * v2: final shape — mode + routes columns, unused-field cleanup (topo_order /
- * topo index / applied_at dropped).
+ * v2: final shape — routes column + unused-field cleanup (topo_order / topo
+ * index / applied_at dropped). mode/constraints never shipped in any version.
  * Fresh databases apply the ladder in one pass; existing databases upgrade
  * only the missing versions (idempotent).
  *
@@ -46,10 +46,33 @@ export function currentVersion(db: ReturnType<typeof Database>): Effect.Effect<n
 }
 
 /**
+ * Interim-V2 column drop — dev databases that ran the interim V2 (which
+ * shipped mode + constraints columns before the activation-prologue redesign)
+ * drop the two columns; routes stays (still a V2 feature). Idempotent by
+ * column existence check — fresh databases have no columns and skip. Runs
+ * before the version ladder so repaired DBs then proceed normally.
+ */
+function dropInterimV2RunColumns(db: ReturnType<typeof Database>): void {
+  const rows = db.prepare(`SELECT name FROM pragma_table_info('graph_runs')`).all() as Array<{ name: string }>;
+  const names = new Set(rows.map((r) => r.name));
+  const dropped: string[] = [];
+  for (const col of ['mode', 'constraints']) {
+    if (names.has(col)) {
+      db.exec(`ALTER TABLE graph_runs DROP COLUMN ${col}`);
+      dropped.push(col);
+    }
+  }
+  if (dropped.length > 0) {
+    debugLog('runtime', { event: 'migration_local_repair', dropped });
+  }
+}
+
+/**
  * Initialize the database up to SCHEMA_VERSION.
  *
  * Idempotent — no-op once the applied version is >= SCHEMA_VERSION.
  * Applies versioned DDL ladders inside one transaction per version.
+ * Runs the stripped-column repair on every init (cheap existence checks).
  *
  * @param db — open libsql Database handle
  * @returns Effect that completes when the database is initialized
@@ -57,6 +80,8 @@ export function currentVersion(db: ReturnType<typeof Database>): Effect.Effect<n
 export function migrate(db: ReturnType<typeof Database>): Effect.Effect<void, PersistenceError> {
   return Effect.gen(function* () {
     const version = yield* currentVersion(db);
+
+    yield* tryDb('migrate_interim_v2_drop', () => dropInterimV2RunColumns(db));
 
     if (version >= SCHEMA_VERSION) {
       debugLog('runtime', { event: 'migration_already_current', version, target: SCHEMA_VERSION });

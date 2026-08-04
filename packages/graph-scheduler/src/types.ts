@@ -80,16 +80,11 @@ export class DispatchConfigError extends Error {
   }
 }
 
-/** Run Mode — run-level auto-approve convention; decided at run creation, stable for run lifetime. */
-export type RunMode = 'manual' | 'auto';
-
 /** NodeDetail construction input — single object, all fields required; args matches GraphRun (null when absent). */
 export interface NodeDetailInput {
   readonly phaseId: string;
   readonly nodeState: FsmNodeState;
   readonly graph: TaskflowGraph;
-  readonly constraints: readonly string[];
-  readonly runMode: RunMode;
   readonly args: Record<string, unknown> | null;
 }
 
@@ -98,9 +93,6 @@ export interface NextNodeInput {
   readonly runId: string;
   readonly state: FsmState;
   readonly graph: TaskflowGraph;
-  readonly mode: RunMode;
-  /** project constraints — run-record snapshot (same source as mode) */
-  readonly constraints: readonly string[];
   readonly args: Record<string, unknown> | null;
 }
 

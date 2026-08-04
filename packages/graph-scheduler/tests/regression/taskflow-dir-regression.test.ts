@@ -84,11 +84,14 @@ phases:
       }),
     );
 
-    // Registry has no entry → falls back to direct load → finds project file
+    // Registry has no entry → falls back to direct load → finds project file.
+    // Activation prefix dispatches first, then the author node.
     const result = await rt.graphStart('unique-project-graph');
     expect(result).toBeDefined();
     expect(result.runId).toBeTruthy();
-    expect(result.node?.nodeId).toBe('project-only');
+    expect(result.node?.nodeId).toBe('$load-constraints');
+    const next = await rt.graphAdvance(result.runId, '$load-constraints', 10);
+    expect(next.node?.nodeId).toBe('project-only');
 
     await rt.dispose();
   });

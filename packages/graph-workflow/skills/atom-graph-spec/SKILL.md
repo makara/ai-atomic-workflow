@@ -93,7 +93,8 @@ Auto-supplied fields (NEVER write in YAML):
 - `handlerSkill` (string) — constant `atom-phase-handler` for main/approval/gate (no registry).
 - `skill` (string) — resolved from `skill` field; the execution skill for the phase's work.
 - `retryAttempt` (number) — runtime counter. 0-based. The node's own jump re-execution count; gate jump bounds reference the TARGET node's `retryCount` (single counter — see §Gate Jump Conditions).
-- `runMode` (`'manual' | 'auto'`) — the run's mode, read from the run record (§Run Mode). `constraints`/`runMode` declared in YAML → schema rejection.
+
+Run mode and project constraints are NOT NodeDetail fields — they arrive via the activation prologue node outputs (§Activation Prologue). `constraints`/`runMode` declared in YAML → schema rejection with migration hints.
 
 ## Routes
 
@@ -323,7 +324,7 @@ Neither mechanism references a node — completion is an action and a drain, nev
 
 ## Constraint Layering
 
-Project constraints — `.graph-scheduler/constraints.md` — inject into every node (main/approval/gate) as `## Constraints` block. The scheduler snapshots the parsed rules into the run record at `graph_start` (`graph_runs.constraints`) and every dispatch reads the snapshot from the run row — the same source as `runMode` (run context). The snapshot is stable for the run lifetime and survives server restarts (no process cache; a mid-run file edit never affects an in-flight run). Layer order (additive floor):
+Project constraints — `.graph-scheduler/constraints.md` — inject into every node (main/approval/gate) as `## Constraints` block. The source is the built-in `$load-constraints` activation prologue node (§Activation Prologue): it reloads the file at EVERY activation (run start and entry-target resets) and its output JSON is the round's constraint snapshot — round-level freeze (the round's dispatches read the same output; a mid-round file edit never affects the in-flight round). No run-record snapshot, no process cache, no scheduler file reads — the load protocol is agent-executed (## Rules verbatim-copy contract in the built-in task). Layer order (additive floor):
 
 platform injection < node-level task/context < skill-level `## Rules`
 
@@ -331,7 +332,7 @@ platform injection < node-level task/context < skill-level `## Rules`
 - Same-dimension conflict (e.g. language) → keep both entries, agent judges by more specific layer
 - Dedup: drop entries duplicating `lang.conversation`/`lang.documents`/`git.policy` structured fields (atom-kernel rule 3 reuse)
 - Block cap 2 KB — exceed → explicit warning, never silent truncation
-- The YAML `constraints` phase field was removed (zero usage in built-in graphs) — project constraints are the single injection source
+- The YAML `constraints` phase field was removed — project constraints are the single injection source; authors override the source by declaring their own `$load-constraints` node (reserved-id override)
 
 ---
 
@@ -475,23 +476,40 @@ Gate jump conditions drive automatic rework. Auto-rework conditions SHALL satisf
 
 ---
 
+# Activation Prologue
+
+The activation prefix (P) is the graph-level abstract-node mechanism that carries user-layer facts (run mode, project constraints) as agent-executed nodes instead of backend run-record fields. Two reserved-id built-ins, synthesized at load, executed before every round:
+
+|Node|Reserved id|Behavior (built-in default)|
+|-|-|-|
+|Run mode confirm|`$run-mode-confirm`|Emit `args.mode` when set (`{args.mode}` interpolation); otherwise question() the user (Manual recommended — absence NEVER auto). Output JSON `{"mode": "manual"\|"auto"}`. Re-decides EVERY activation — round restarts re-ask (no echo).|
+|Constraints load|`$load-constraints`|Read `.graph-scheduler/constraints.md` `## Rules` verbatim-copy protocol (deterministic task contract). Output JSON `{"constraints": [...]}`. Reloads EVERY activation — round-level freeze.|
+
+Mechanics:
+
+- **Synthesis** — P is NOT part of the author DAG: excluded from topology, contract checks, and jump-closure math. `$load-constraints` is always synthesized; `$run-mode-confirm` only when the flattened graph contains an approval node (mode exists only where consumed — approval-less graphs get no mode question, no `## Run Mode:` block).
+- **Reserved ids** — `$` prefix is reserved for the two prologue built-ins. Declaring the same id in YAML REPLACES the built-in (own task/skill — custom constraints source, forced-auto CI graph, disabled confirm); any other `$` id and any non-entry reserved declaration are schema-rejected.
+- **Activation rule** — P runs at run start AND on every backward reset (gate branchTo or graph_jump) whose target is an entry node (flattened in-degree 0): round restart re-runs the prefix (constraints reload, mode re-confirmed). Mid-graph rework resets never touch P.
+- **Gating** — while any P node is not terminal, ONLY P nodes are eligible; author nodes dispatch after the prefix completes. P nodes are run members (snapshot `nodes` visible).
+- **Consumption** — the handler reads the P output files per dispatch and formats `## Run Mode:` / `## Constraints:` blocks (main/approval/gate alike). Missing/corrupt P output → degrade (manual mode, empty constraints) + warning — never blocks, absence never auto.
+
 # Run Mode
 
-Run Mode = run-level auto-approve convention. A run may opt into auto-approval at its creation: every approval in the run (entry confirmations excluded — they are interviews, never auto) then auto-executes the AI recommendation without a card. The mode is a **run attribute** carried as a **run field** — decided once at `graph_start`, persisted on the run record, auto-supplied on every dispatch as `node.runMode`. Zero per-approval declarations — no static default field exists; the recommendation is agent-judged at execution.
+Run Mode = auto-approve convention driven by the `$run-mode-confirm` activation prologue node (§Activation Prologue). Every activation (run start and round restarts) re-confirms the mode: `args.mode` short-circuits (flags/headless callers), otherwise the node asks the user (Manual recommended — absence is never silent Auto). The mode is NOT a run field, NOT a NodeDetail field — approval dispatches read the confirm node's output. Zero per-approval declarations — no static default field exists; the recommendation is agent-judged at execution.
 
-## Mode decision (run creation)
+## Mode decision (per activation)
 
-`graph_start { graphName, mode?: 'manual' | 'auto' }` — optional top-level param, default `'manual'` (absence is never silent Auto). The run creator decides: atom-pilot asks one question at run start (Manual recommended; `--auto`/`--manual` flags skip the question); direct MCP callers pass the param. Flow composition needs no plumbing — nested graphs share the run, so `runMode` propagates by construction at any nesting depth.
+`graph_start { graphName, args?: { mode?: 'manual' | 'auto' } }` — the mode travels as an ordinary graph input (`{args.mode}` interpolation); there is no `mode` top-level param. atom-pilot maps `--auto`/`--manual` to `args.mode` and never asks pre-start; direct MCP callers pass `args.mode` or leave it unset. Flow composition needs no plumbing — nested graphs share the same run activation, so the confirm output applies at any nesting depth.
 
-- Graphs SHALL NOT declare a mode topic in entry task texts — the topic blocks were removed; entry output contracts carry no `auto_approve` field.
-- The mode is stable for the run lifetime — no mid-run switching.
+- Graphs SHALL NOT declare a mode topic in entry task texts — the mode question lives in the built-in confirm node.
+- The mode is re-decided per activation — round restarts may change it (the confirm node re-asks; no echo).
 
 ## Consumption (direct branch)
 
-atom-phase-handler approval branch checks `node.runMode`:
+atom-phase-handler approval branch reads the `$run-mode-confirm` output:
 
-- `'auto'` → the handler judges the AI recommendation from the judgment context (direct dependsOn outputs + `channels` `node:` targets) + snapshot + run mode (case 3). A recommendation exists → auto-execute it: `IApprovalDecision { action, target?, value, label, note: 'run mode: auto' }`, decision file persisted WITH the value + label — downstream gate jump conditions consume the decision `value` exactly as the human path. When ending IS the recommendation, auto mode ends automatically (case 4 — `graph_advance` `endRun`). No recommendation (judgment fails / context insufficient) → human card even in auto — never guess an action.
-- `'manual'` → human card. No output scans, no parse/conflict fail-safe matrix — the run field is the single source of truth.
+- `'auto'` → the handler judges the AI recommendation from the judgment context (direct dependsOn outputs + `channels` `node:` targets) + snapshot + run mode. A recommendation exists → auto-execute it: `IApprovalDecision { action, target?, value, label, note: 'run mode: auto' }`, decision file persisted WITH the value + label — downstream gate jump conditions consume the decision `value` exactly as the human path. When ending IS the recommendation, auto mode ends automatically (`graph_advance` `endRun`). No recommendation (judgment fails / context insufficient) → human card even in auto — never guess an action.
+- `'manual'` (or missing confirm output) → human card. No output scans, no parse/conflict fail-safe matrix — the confirm output is the single source of truth.
 
 ## Context injection
 
@@ -507,9 +525,9 @@ Run Mode controls **approval presentation only**:
 
 ## Loop Router Integration
 
-arch-review-loop demonstrates the full pattern: `loop-entry` (scope interview — **re-confirmed every round**: the round origin, always re-run, jump-back target) → `review` flow → `review-accept` (decision confirmation — recommendation: implement when Top Rec remains, else end; auto mode executes it) → `implement` flow (plain composition — sequencing by dependsOn, end by endRun) → `loop-gate` (loop router — jump condition references `run mode is auto`, the round worker's `top_rec_remaining`, and the bound `loop-entry retryCount < 8`; hit → re-round target `loop-entry`) → `loop-accept` (decision confirmation — recommendation: loop again when Top Rec remains AND bound not exhausted, else end action; auto mode ends automatically when end IS the recommendation). Termination is never a node: completion = end action or natural drain.
+arch-review-loop demonstrates the full pattern: `$run-mode-confirm`/`$load-constraints` (activation prefix — re-run every round restart via the entry-target reset) → `loop-entry` (scope interview — **re-confirmed every round**: the round origin, always re-run, jump-back target) → `review` flow → `review-accept` (decision confirmation — recommendation: implement when Top Rec remains, else end; auto mode executes it) → `implement` flow (plain composition — sequencing by dependsOn, end by endRun) → `loop-gate` (loop router — jump condition references `run mode is auto`, the round worker's `top_rec_remaining`, and the bound `loop-entry retryCount < 8`; hit → re-round target `loop-entry`) → `loop-accept` (decision confirmation — recommendation: loop again when Top Rec remains AND bound not exhausted, else end action; auto mode ends automatically when end IS the recommendation). …
 
-Round reset semantics: `review` flow `dependsOn: [loop-entry]` + `implement` flow `dependsOn: [review-accept]` — a jump to `loop-entry` resets the whole round (scope → review → accept → implement) via the JUMP closure (target + downstream). The implement pipeline's grilling is a **mandatory interview** (graph dispatch: zero-question degradation disabled — at least one question() per grill round; auto mode exempts approval cards only, never interviews).
+Round reset semantics: `review` flow `dependsOn: [loop-entry]` + `implement` flow `dependsOn: [review-accept]` — a jump to `loop-entry` (entry node) resets the whole round (scope → review → accept → implement) via the JUMP closure (target + downstream) AND re-runs the activation prefix (constraints refresh, mode re-confirmed). The implement pipeline's grilling is a **mandatory interview** (graph dispatch: zero-question degradation disabled — at least one question() per grill round; auto mode exempts approval cards only, never interviews).
 
 ---
 

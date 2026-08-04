@@ -34,7 +34,19 @@ function ph(id: string, overrides: Partial<Phase> = {}): Phase {
 }
 
 function graph(name: string, phases: readonly Phase[]): TaskflowGraph {
-  return { name, phases };
+  return { name, phases, prologue: [] };
+}
+
+/** Graph with an activation prologue — confirm + load precede author phases. */
+function prologueGraph(name: string, phases: readonly Phase[], prologue?: readonly Phase[]): TaskflowGraph {
+  return {
+    name,
+    phases,
+    prologue: prologue ?? [
+      { id: '$run-mode-confirm', type: 'main', dependsOn: [], task: 'confirm' },
+      { id: '$load-constraints', type: 'main', dependsOn: [], task: 'load' },
+    ],
+  };
 }
 
 /** Main-only entry graph — START/FORCE_END tests (drains after n1 completes). */
@@ -883,6 +895,184 @@ describe('transition()', () => {
       expect(completedPhases['t1'].status).toBe('pending');
       expect(completedPhases['t2'].status).toBe('pending');
     });
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// Activation prologue — P nodes gate author activation
+// ══════════════════════════════════════════════════════════════════════════
+
+describe('activation prologue', () => {
+  /** entry → review chain with P: confirm + load precede the author entry. */
+  function entryProGraph(): TaskflowGraph {
+    return prologueGraph('entry-pro', [ph('entry'), ph('review', { dependsOn: ['entry'] })]);
+  }
+
+  it('START activates only prologue nodes — author entry waits for the round prefix', () => {
+    const g = entryProGraph();
+    const state = transition({ status: 'idle' }, startEvent(), g).nextState;
+    const phases = narrowRunning(state).phases;
+    expect(phases['$run-mode-confirm'].status).toBe('active');
+    expect(phases['$load-constraints'].status).toBe('active');
+    expect(phases['entry'].status).toBe('pending');
+    expect(phases['review'].status).toBe('pending');
+  });
+
+  it('author entry activates only after every prologue node completes', () => {
+    const g = entryProGraph();
+    let state: FsmState = { status: 'idle' };
+    state = transition(state, startEvent(), g).nextState;
+
+    // First prologue done — second still pending → author entry stays pending
+    state = transition(state, completeEvent('$run-mode-confirm'), g).nextState;
+    let phases = narrowRunning(state).phases;
+    expect(phases['$load-constraints'].status).toBe('active');
+    expect(phases['entry'].status).toBe('pending');
+
+    // Both done — author entry activates
+    state = transition(state, completeEvent('$load-constraints'), g).nextState;
+    phases = narrowRunning(state).phases;
+    expect(phases['entry'].status).toBe('active');
+  });
+
+  it('prologue nodes persist their states and appear in the state map', () => {
+    const g = entryProGraph();
+    let state: FsmState = { status: 'idle' };
+    state = transition(state, startEvent(), g).nextState;
+    const result = transition(state, completeEvent('$run-mode-confirm'), g);
+    expect(result.effects.some((e) => e.type === 'persist_node_state' && e.nodeId === '$run-mode-confirm')).toBe(true);
+    const phases = narrowRunning(result.nextState).phases;
+    expect(phases['$run-mode-confirm'].status).toBe('done');
+    expect(phases['$run-mode-confirm'].retryCount).toBe(0);
+  });
+
+  it('JUMP to an entry node re-runs the prologue — P reset to pending and re-dispatched first', () => {
+    const g = entryProGraph();
+    let state: FsmState = { status: 'idle' };
+    state = transition(state, startEvent(), g).nextState;
+    state = transition(state, completeEvent('$run-mode-confirm'), g).nextState;
+    state = transition(state, completeEvent('$load-constraints'), g).nextState;
+    state = transition(state, completeEvent('entry'), g).nextState;
+    expect(narrowRunning(state).phases['review'].status).toBe('active');
+
+    // Jump back to the entry (round restart) — P re-runs, review resets
+    const result = transition(state, jumpEvent('entry'), g);
+    const phases = narrowRunning(result.nextState).phases;
+    expect(phases['$run-mode-confirm'].status).toBe('active');
+    expect(phases['$load-constraints'].status).toBe('active');
+    expect(phases['$run-mode-confirm'].retryCount).toBe(1);
+    expect(phases['$load-constraints'].retryCount).toBe(1);
+    expect(phases['entry'].status).toBe('pending');
+    expect(phases['review'].status).toBe('pending');
+  });
+
+  it('gate branchTo reset to an entry node re-runs the prologue (round restart)', () => {
+    const g = prologueGraph(
+      'gate-entry-pro',
+      [
+        ph('entry'),
+        ph('review', { dependsOn: ['entry'] }),
+        ph('gate', { type: 'gate', dependsOn: ['review'], jumps: [{ when: 'x', to: 'entry' }] }),
+      ],
+      [{ id: '$load-constraints', type: 'main', dependsOn: [], task: 'load' }],
+    );
+    let state: FsmState = { status: 'idle' };
+    state = transition(state, startEvent(), g).nextState;
+    state = transition(state, completeEvent('$load-constraints'), g).nextState;
+    state = transition(state, completeEvent('entry'), g).nextState;
+    state = transition(state, completeEvent('review'), g).nextState;
+    expect(narrowRunning(state).phases['gate'].status).toBe('active');
+
+    // Gate backward jump to the entry — P re-runs, gate resets
+    const result = transition(state, completeEvent('gate', 42, 'entry'), g);
+    const phases = narrowRunning(result.nextState).phases;
+    expect(phases['$load-constraints'].status).toBe('active');
+    expect(phases['$load-constraints'].retryCount).toBe(1);
+    expect(phases['entry'].status).toBe('pending');
+    expect(phases['review'].status).toBe('pending');
+    expect(phases['gate'].status).toBe('pending');
+  });
+
+  it('JUMP to a mid-graph node does NOT touch the prologue (in-round rework)', () => {
+    const g = prologueGraph(
+      'mid-jump-pro',
+      [ph('entry'), ph('review', { dependsOn: ['entry'] })],
+      [{ id: '$load-constraints', type: 'main', dependsOn: [], task: 'load' }],
+    );
+    let state: FsmState = { status: 'idle' };
+    state = transition(state, startEvent(), g).nextState;
+    state = transition(state, completeEvent('$load-constraints'), g).nextState;
+    state = transition(state, completeEvent('entry'), g).nextState;
+    expect(narrowRunning(state).phases['review'].status).toBe('active');
+
+    // Mid-graph rework — P untouched (done, retryCount 0), review re-runs
+    const result = transition(state, jumpEvent('review'), g);
+    const phases = narrowRunning(result.nextState).phases;
+    expect(phases['$load-constraints'].status).toBe('done');
+    expect(phases['$load-constraints'].retryCount).toBe(0);
+    expect(phases['review'].status).toBe('active');
+    expect(phases['review'].retryCount).toBe(1);
+  });
+
+  it('approval endRun completes the run even while the prologue is pending', () => {
+    const g = prologueGraph('end-pro', [ph('a'), ph('accept', { type: 'approval', dependsOn: ['a'] })]);
+    let state: FsmState = { status: 'idle' };
+    // Force author node active behind the prologue via direct state manipulation
+    const started = transition(state, startEvent(), g).nextState;
+    state = narrowRunning(started);
+    state = {
+      ...state,
+      phases: {
+        ...state.phases,
+        a: { status: 'active', retryCount: 0 },
+        '$run-mode-confirm': { status: 'active', retryCount: 0 },
+        '$load-constraints': { status: 'done', retryCount: 0 },
+      },
+    };
+    const event: FsmEvent = { type: 'COMPLETE', phaseId: 'a', durationMs: 10, endRun: true };
+    const result = transition(state, event, g);
+    expect(result.nextState.status).toBe('completed');
+  });
+
+  it('drain waits for a pending prologue when no author node is eligible', () => {
+    const g = prologueGraph(
+      'drain-pro',
+      [ph('entry')],
+      [{ id: '$load-constraints', type: 'main', dependsOn: [], task: 'load' }],
+    );
+    let state: FsmState = { status: 'idle' };
+    state = transition(state, startEvent(), g).nextState;
+    state = transition(state, completeEvent('$load-constraints'), g).nextState;
+    const phases = narrowRunning(state).phases;
+    expect(phases['entry'].status).toBe('active');
+  });
+
+  it('a graph without prologue activates the first author-ready batch (regression)', () => {
+    const g = entryOnlyGraph();
+    const state = transition({ status: 'idle' }, startEvent(), g).nextState;
+    expect(narrowRunning(state).phases['n1'].status).toBe('active');
+  });
+
+  it('missing prologue state (legacy run predating the prefix) never gates — no deadlock', () => {
+    const g = prologueGraph('legacy-pro', [ph('entry'), ph('review', { dependsOn: ['entry'] })]);
+    // Legacy in-flight run: node_states has no P rows — the reconstructed
+    // state map contains author nodes only.
+    const state: FsmState = {
+      status: 'running',
+      runId: 'legacy',
+      graphName: 'legacy-pro',
+      startedAt: 't0',
+      phases: {
+        entry: { status: 'active', retryCount: 0 },
+        review: { status: 'pending', retryCount: 0 },
+      },
+      routes: {},
+    };
+    const result = transition(state, completeEvent('entry'), g);
+    const phases = narrowRunning(result.nextState).phases;
+    // Gating treats missing P as terminal — the author chain proceeds and
+    // the run stays recoverable (handler-side degradation covers the blocks).
+    expect(phases['review'].status).toBe('active');
   });
 });
 
