@@ -12,6 +12,7 @@
         "atom-graph-spec",
         "atom-graph-writer",
         "atom-kernel",
+        "atom-mcp-contract",
         "atom-openspec-archive",
         "atom-phase-handler",
         "atom-pilot",

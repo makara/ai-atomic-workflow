@@ -7,7 +7,7 @@ version: 2.11.0
 last_updated: '2026-08-04'
 ---
 
-> **Runtime constraints** — load skill atom-kernel for task() dispatch and question() decision UI. Graph-scheduler MCP tools are not called here — tool detection lives in atom-kernel §Graph-Scheduler Tool Detection for the entry points that do (pilot).
+> **Runtime constraints** — load skill atom-kernel for task() dispatch and question() decision UI. Load skill atom-mcp-contract alongside — auxiliary reference (tool-call contracts for serena/jcodemunch/headroom/graph-scheduler; schema-first + failure recovery; see atom-skill-spec §Invocation injection-only model). Graph-scheduler MCP tools are not called here — tool detection lives in atom-kernel §Graph-Scheduler Tool Detection for the entry points that do (pilot).
 
 # Atom-Phase-Handler
 

@@ -22,6 +22,7 @@
         "./skills/atom-graph-spec",
         "./skills/atom-graph-writer",
         "./skills/atom-kernel",
+        "./skills/atom-mcp-contract",
         "./skills/atom-openspec-archive",
         "./skills/atom-phase-handler",
         "./skills/atom-pilot",

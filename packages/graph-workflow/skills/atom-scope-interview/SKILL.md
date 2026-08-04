@@ -29,7 +29,7 @@ last_updated: '2026-08-03'
 
 ### Reference skills
 
-<!-- atom-kernel excluded — platform primitive, always injected via auxiliary-skills constant; not a channel-resolved reference -->
+<!-- atom-kernel + atom-mcp-contract excluded — platform primitives, always injected via auxiliary-skills constant; not channel-resolved references -->
 
 ### Files
 

@@ -41,6 +41,7 @@ Two choices — per `writing-great-skills` §Invocation:
 |-|-|-|
 |model-invoked|Omit `disable-model-invocation`|Description in window every turn. Agent fires autonomously; other skills reach it|
 |user-invoked|`disable-model-invocation: true` + `user-invocable: true`|Zero context. Loads only when user types name. Cognitive: user must remember it|
+|injection-only (reference)|`disable-model-invocation: true` + `user-invocable: false`|Never auto-listed, never user-invoked. Loaded by name from auxiliary layer (`atom-kernel`, `atom-mcp-contract`) — handler runtime-constraints instruction on every dispatch|
 
 Default model-invoked. Pick user-invoked only when agent should never auto-load.
 
@@ -71,7 +72,7 @@ Entry skills declare runtime context needs via `## Context Requirements` section
 2. **Placeholder entries forbidden** — `<configurable …>` style entries fail contract parsing with an error. Every entry MUST be a concrete node ID, skill name, or file glob.
 3. **No hardcoded output paths in skill body** — skills MUST NOT reference `.taskflow/outputs/<id>.output.txt` directly; upstream content arrives via injected context (dependsOn implicit + `node:` channels).
 4. **No self-load duplication** — content reachable via declared channels is handler-injected; the skill body MUST NOT re-load reference skills or re-read declared files as its primary mechanism (standalone-use wording allowed with "graph dispatch: handler-injected" annotation).
-5. `atom-kernel` excluded from Reference skills — platform primitive, always injected via the auxiliary-skills constant, never a channel.
+5. `atom-kernel` and `atom-mcp-contract` excluded from Reference skills — platform primitives, always injected via the auxiliary-skills constant, never a channel.
 
 ### Mandatory
 
