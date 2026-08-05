@@ -324,12 +324,21 @@ describe('runtime scenarios', () => {
     // Route-first: no written actions — card = Accept + free input + AI options
     expect(accept.routingActions).toBeUndefined();
 
-    // Human continue → archive → final node drains the run (no end node)
+    // Human continue → archive → post-archive doc-maintenance flow (spec-archive
+    // trigger; case-5 no-work when archive output absent — flow drains empty)
     const r4 = await rt.graphAdvance(runId, 'change-accept', 100);
     expect(r4.node!.nodeId).toBe('archive');
     const r5 = await rt.graphAdvance(runId, 'archive', 100);
-    expect(r5.snapshot.fsmState).toBe('completed');
-    expect(r5.node).toBeNull();
+    expect(r5.node!.nodeId).toBe('doc-maintenance/doc-trigger');
+    const r6 = await rt.graphAdvance(runId, 'doc-maintenance/doc-trigger', 100);
+    expect(r6.node!.nodeId).toBe('doc-maintenance/doc-maintain');
+    const r7 = await rt.graphAdvance(runId, 'doc-maintenance/doc-maintain', 100);
+    expect(r7.node!.nodeId).toBe('doc-maintenance/doc-review');
+    const r8 = await rt.graphAdvance(runId, 'doc-maintenance/doc-review', 100);
+    expect(r8.node!.nodeId).toBe('doc-maintenance/doc-accept');
+    const r9 = await rt.graphAdvance(runId, 'doc-maintenance/doc-accept', 100);
+    expect(r9.snapshot.fsmState).toBe('completed');
+    expect(r9.node).toBeNull();
   });
 
   // ── Scenario 3: Force end ────────────────────────────────────────

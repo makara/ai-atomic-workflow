@@ -1,76 +1,83 @@
 name: doc-update
 phases:
-  - id: doc-scope
+  - id: doc-trigger
     type: main
     dependsOn: []
     skill: atom-scope-interview
     channels:
       - ./CONTEXT.md
     task: |
-      Execute scope interview per atom-scope-interview.
-      Flow context: prefer upstream plan-parse doc_update_files (injected when orchestrated); else interview (skill Step 1).
+      Classify the document-maintenance trigger (trigger-first — event driven, no
+      interview-driven scope collection).
 
-      Topics: target document paths; change type (new document / in-place edit / restructure / delete); change scope (full rewrite / section update / metadata update); dependencies (docs or skills referencing these documents); save location.
+      Flow context: prefer upstream plan-parse doc_update_files (injected when
+      orchestrated via skill-change-workflow); else read upstream outputs for the
+      triggering event. When orchestrated after a spec archive (openspec-family
+      graphs), classify from the event: archive succeeded → spec-archive; skill
+      assets changed → skill-change; domain table mutated → domain-change. Direct
+      invocation with no event → proactive.
 
-      Output: confirmed scope (target files, change type, expected changes), impact analysis, scope_complete: true, save_locations.
+      Output: trigger (spec-archive | domain-change | skill-change | proactive),
+      affected_classes (index | derived-view | normative | contract), scope_hints
+      (change name, affected domains — from upstream when present).
 
-  - id: doc-write
+  - id: doc-maintain
     type: main
-    dependsOn: [doc-scope]
-    skill: atom-doc-writer
+    dependsOn: [doc-trigger]
+    skill: atom-doc-maintenance
     task: |
-      Execute document update per confirmed plan.
+      Execute document maintenance per atom-doc-maintenance.
 
-      Read doc-scope output (injected).
+      Read doc-trigger output (injected). Run the maintenance pipeline:
 
-      Execute interview({ goal: "write document updates per confirmed plan", research: true, context }) in solve mode:
+      maintain({ trigger, scope }) — classify trigger, enumerate affected document
+      classes per the taxonomy, apply per-class rules (index evolution four-step /
+      derived-view source→transform→verify / normative targeted edits / contract
+      delta flow), then run the consistency gate (mapping, links, counts, derived).
 
-      confirm(goal): Confirm write scope with user — verify change plan is still accurate.
+      Write document updates per class rules. Do NOT edit contract documents
+      (openspec/specs/) directly — flag them for the delta flow instead.
 
-      research: Read target document files. Load any referenced style guides or format rules. Verify save locations.
-
-      think: Draft complete document content — updated text, preserved structure, updated cross-references.
-
-      interview(details): Present content decisions one at a time — key content changes, reference updates, formatting. User rejects → return to think.
-
-      Output: When all confirmed, write document files to save_locations. Write output paths + summary (main agent collects).
+      Output (main agent collects): changes (document, action, reason), validation
+      (gate results per class), updated (paths).
     channels:
-      - skill:atom-doc-spec
+      - node:doc-trigger
+      - ./CONTEXT.md
+      - docs/domains.md
+      - skill:codebase-design
+      - skill:clean-ddd-hexagonal
+      - skill:caveman
+      - skill:domain-modeling
   - id: doc-review
     type: main
-    dependsOn: [doc-write]
+    dependsOn: [doc-maintain]
     skill: code-review
     agent: [reviewer, explore, task, general]
     task: |
       Review document changes per code-review (use ## Agent hints for axis sub-agents).
 
-      Artifact: document paths from doc-write output (injected).
-      Standards: General Markdown/documentation conventions — structure, formatting, link validity, language consistency.
-      Spec: doc-scope output (injected) — check doc matches confirmed change plan.
+      Artifact: document paths + validation from doc-maintain output (injected).
+      Standards: atom-doc-maintenance Format Reference — metadata block, heading
+      hierarchy, link validity, code blocks, document types; language consistency.
+      Spec: doc-trigger output (injected) — check maintenance matches trigger scope.
 
-      Output machine-parseable YAML with overall: pass | fail. Write report (main agent collects).
+      Output machine-parseable YAML with overall: pass | fail. Write report (main
+      agent collects).
     channels:
-      - node:doc-scope
-
-  - id: doc-gate
-    type: gate
-    dependsOn: [doc-review]
-    jumps:
-      - when: 'doc-review output shows overall: fail AND doc-write retryCount < 2'
-        to: doc-write
+      - node:doc-trigger
+      - node:doc-maintain
 
   # Accept — decision confirmation (route-first: no written actions).
-  # Recommendation follows the review verdict; revise/revise-plan are AI-generated
+  # Recommendation follows the review verdict; revise/revise-trigger are AI-generated
   # dynamic options, not written.
   - id: doc-accept
     type: approval
-    dependsOn: [doc-gate]
+    dependsOn: [doc-review]
     channels:
       - node:doc-review
     task: |
-      Accept the document?
+      Accept the document maintenance?
 
-      doc-review reported the document review verdict. Recommendation follows
-      the review verdict and the rework bound: accept when the document passes;
-      otherwise revise (re-run doc-write with review feedback) or revise the plan
-      (re-run the scope interview).
+      doc-review reported the maintenance verdict. Recommendation follows the review
+      verdict: accept when the document passes; otherwise revise (re-run doc-maintain
+      with review feedback) or revise the trigger (re-classify at doc-trigger).

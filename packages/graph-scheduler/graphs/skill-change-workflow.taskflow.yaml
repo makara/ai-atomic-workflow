@@ -70,6 +70,9 @@ phases:
       doc_update_needed: true, this flow has NO WORK — finish with an empty
       declaration (echo doc_update_needed: false) and no artifact; this is
       normal execution, not a skip.
+      When triggered: doc-update's doc-trigger classifies the skill-change
+      trigger from the plan-parse event; doc_update_files arrive via upstream
+      injection.
 
   - id: openspec-create-foo
     type: flow

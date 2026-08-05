@@ -4,6 +4,9 @@
  * Validate doc-update.taskflow.yaml against PhaseSchema, TaskflowSchema,
  * and topology constraints. Graph file exists — tests serve as regression
  * validation for schema compliance and DAG correctness.
+ *
+ * Trigger-first topology: doc-trigger → doc-maintain → doc-review → doc-accept
+ * (4 phases, no gate — rework flows through approval dynamic options).
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -46,10 +49,10 @@ describe('doc-update.taskflow.yaml — schema validation', () => {
     expect(graph.phases.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('has exactly 5 phases — route-first redesign (no end node)', () => {
+  it('has exactly 4 phases — trigger-first redesign (no end node, no gate)', () => {
     const raw = readFileSync(GRAPH_PATH, 'utf-8');
     const graph = parseYaml(raw);
-    expect(graph.phases).toHaveLength(5);
+    expect(graph.phases).toHaveLength(4);
   });
 
   it('every phase passes PhaseSchema validation individually', () => {
@@ -83,29 +86,28 @@ describe('doc-update.taskflow.yaml — phase structure', () => {
 
   it('has correct phase IDs in order', () => {
     const ids = phases.map((p) => p.id);
-    expect(ids).toEqual(['doc-scope', 'doc-write', 'doc-review', 'doc-gate', 'doc-accept']);
+    expect(ids).toEqual(['doc-trigger', 'doc-maintain', 'doc-review', 'doc-accept']);
   });
 
   it('has correct phase types', () => {
     const byId: Record<string, Phase['type']> = {};
     for (const p of phases) byId[p.id] = p.type;
-    expect(byId['doc-scope']).toBe('main');
-    expect(byId['doc-write']).toBe('main');
+    expect(byId['doc-trigger']).toBe('main');
+    expect(byId['doc-maintain']).toBe('main');
     expect(byId['doc-review']).toBe('main');
-    expect(byId['doc-gate']).toBe('gate');
     expect(byId['doc-accept']).toBe('approval');
   });
 
-  it('doc-write has skill: atom-doc-writer', () => {
-    const write = phases[1];
-    expect(write.id).toBe('doc-write');
-    expect(write.skill).toBe('atom-doc-writer');
+  it('doc-maintain has skill: atom-doc-maintenance', () => {
+    const maintain = phases[1];
+    expect(maintain.id).toBe('doc-maintain');
+    expect(maintain.skill).toBe('atom-doc-maintenance');
   });
 
-  it('doc-scope is entry point (empty dependsOn)', () => {
-    const scope = phases[0];
-    expect(scope.id).toBe('doc-scope');
-    expect(scope.dependsOn).toEqual([]);
+  it('doc-trigger is entry point (empty dependsOn)', () => {
+    const trigger = phases[0];
+    expect(trigger.id).toBe('doc-trigger');
+    expect(trigger.dependsOn).toEqual([]);
   });
 
   it('doc-review has skill: code-review with reviewer hint', () => {
@@ -115,32 +117,24 @@ describe('doc-update.taskflow.yaml — phase structure', () => {
     expect(review.agent).toEqual(['reviewer', 'explore', 'task', 'general']);
   });
 
-  it('doc-gate is gate with bounded jumps (route-first redesign)', () => {
-    const gate = phases[3];
-    expect(gate.id).toBe('doc-gate');
-    expect(gate.type).toBe('gate');
-    expect(gate.eval).toBeUndefined();
-    expect(gate.branches).toBeUndefined();
-    expect(gate.default).toBeUndefined();
-    expect(gate.jumps).toBeDefined();
-    expect(gate.jumps!.length).toBeGreaterThanOrEqual(1);
+  it('no phase references retired doc skills', () => {
+    for (const p of phases) {
+      expect(p.skill).not.toBe('atom-doc-spec');
+      expect(p.skill).not.toBe('atom-doc-writer');
+    }
   });
 
-  it('doc-gate jump is bounded FAIL → retry rule (contract field, no DEBT)', () => {
-    const gate = phases[3];
-    const jumpText = gate.jumps!.map((j) => j.when).join(' ');
-    expect(jumpText).toContain('overall: fail');
-    expect(jumpText).toContain('retryCount < 2');
-    expect(jumpText).not.toContain('DEBT');
-    const retryJumps = gate.jumps!.filter((j) => j.to === 'doc-write');
-    expect(retryJumps.length).toBe(1);
+  it('doc-maintain channels include trigger output and domain index', () => {
+    const maintain = phases[1];
+    expect(maintain.channels).toContain('node:doc-trigger');
+    expect(maintain.channels).toContain('docs/domains.md');
   });
 
   it('doc-accept is approval with no written routing and no branches/eval', () => {
-    const accept = phases[4];
+    const accept = phases[3];
     expect(accept.id).toBe('doc-accept');
     expect(accept.type).toBe('approval');
-    expect(accept.dependsOn).toEqual(['doc-gate']);
+    expect(accept.dependsOn).toEqual(['doc-review']);
     // route-first: default card = Accept + free input + AI-generated options
     expect(accept.routing).toBeUndefined();
     expect(accept.eval).toBeUndefined();
@@ -169,13 +163,13 @@ describe('doc-update.taskflow.yaml — topology', () => {
     expect(layers.length).toBeGreaterThan(0);
   });
 
-  it('all 5 phases appear in topoLayers', () => {
+  it('all 4 phases appear in topoLayers', () => {
     const layers = topoLayers(phases);
     const allIds = layers
       .flat()
       .map((p) => p.id)
       .sort();
-    expect(allIds).toEqual(['doc-accept', 'doc-gate', 'doc-review', 'doc-scope', 'doc-write'].sort());
+    expect(allIds).toEqual(['doc-accept', 'doc-maintain', 'doc-review', 'doc-trigger'].sort());
   });
 
   it('all dependsOn references point to existing phase IDs', () => {
@@ -187,20 +181,11 @@ describe('doc-update.taskflow.yaml — topology', () => {
     }
   });
 
-  it('approval depends on single gate node — writer not listed', () => {
+  it('linear trigger-first chain — approval depends on review only', () => {
     const deps = new Map(phases.map((p) => [p.id, p.dependsOn ?? []]));
-    expect(deps.get('doc-scope')).toEqual([]);
-    expect(deps.get('doc-write')).toEqual(['doc-scope']);
-    expect(deps.get('doc-review')).toEqual(['doc-write']);
-    expect(deps.get('doc-gate')).toEqual(['doc-review']);
-    expect(deps.get('doc-accept')).toEqual(['doc-gate']);
-  });
-
-  it('doc-gate jump targets doc-write (bounded backward rework)', () => {
-    const gate = phases[3];
-    const jumps = gate.jumps!;
-    expect(jumps.length).toBe(1);
-    expect(jumps[0].to).toBe('doc-write');
-    expect(jumps[0].when).toContain('retryCount');
+    expect(deps.get('doc-trigger')).toEqual([]);
+    expect(deps.get('doc-maintain')).toEqual(['doc-trigger']);
+    expect(deps.get('doc-review')).toEqual(['doc-maintain']);
+    expect(deps.get('doc-accept')).toEqual(['doc-review']);
   });
 });

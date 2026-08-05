@@ -19,14 +19,19 @@ phases:
       judgment is never a separate autonomous step):
       - Sharpened inputs (wayfinder-map / arch-review / grill-consensus): decisions already
         crystallized upstream — adr_created ECHOES the upstream judgment (grill-consensus
-        adr_created / review report decision), no re-derivation. Check docs/adr/ for an
-        existing ADR covering the change's decisions and record it in adr_path (reuse —
-        informational only, NEVER flips adr_created).
+        adr_created / review report decision), no re-derivation. Check docs/adr/index.md
+        (live decision index) for an existing ADR covering the change's decisions and
+        record it in adr_path (reuse — informational only, NEVER flips adr_created).
       - Direct input: at decision-crystallization moments apply the three-condition test
         (hard-to-reverse / surprising-without-context / real-trade-off); PROPOSE the ADR to
         the user — write to docs/adr/ only after explicit user confirmation; a declined ADR
         is recorded in the output without writing the file. Update CONTEXT.md terms as they
         crystallize.
+      - ADR emission SHALL write lifecycle records per the adr domain contract (ADR 0093):
+        metadata block (id/title/date/status/domain/decision/supersedes/superseded_by/related)
+        + Context / Decision / Consequences body, pure English. When the record declares
+        `supersedes` edges, invoke maintain({ trigger: "adr-created" }) (atom-doc-maintenance
+        §ADR Lifecycle) in the same phase — fold validation, archive move, index rebuild.
       - adr_created MUST always be present in output — a missing judgment is an incomplete scope.
 
       Topics: spec domain + change type + input artifacts + destination (change name).

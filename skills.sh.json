@@ -6,8 +6,7 @@
       "title": "Graph Workflow",
       "description": "Graph-workflow domain — built-in skills for graph lifecycle orchestration (CRUD-driven loop via graph-scheduler MCP tools)",
       "skills": [
-        "atom-doc-spec",
-        "atom-doc-writer",
+        "atom-doc-maintenance",
         "atom-graph-design",
         "atom-graph-spec",
         "atom-graph-writer",

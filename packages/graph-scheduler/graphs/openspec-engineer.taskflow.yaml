@@ -131,3 +131,16 @@ phases:
         - change_name: <name>
         - validation_result: pass | fail | warn
         - message: <summary>
+
+  # Stage 8: Document maintenance — trigger-first flow after archive
+  # (spec-archive trigger; when guard = archive succeeded).
+  - id: doc-maintenance
+    type: flow
+    use: doc-update
+    dependsOn: [openspec-archive]
+    task: |
+      Case-5 self-judgment: if openspec-archive output (injected) does not show
+      archive_status: success, this flow has NO WORK — finish with an empty
+      declaration and no artifact; this is normal execution, not a skip.
+      Otherwise the post-archive maintenance runs — doc-update's doc-trigger
+      classifies the spec-archive trigger; scope_hints carry the change name.

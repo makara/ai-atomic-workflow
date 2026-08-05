@@ -268,9 +268,9 @@ function docUpdateGraph(): Taskflow {
     name: 'doc-update',
     version: 1,
     phases: [
-      { id: 'doc-scope', type: 'main', mode: 'exclusive', dependsOn: [], task: 'scope docs' },
-      { id: 'doc-write', type: 'main', mode: 'exclusive', dependsOn: ['doc-scope'], task: 'write' },
-      { id: 'doc-review', type: 'main', mode: 'exclusive', dependsOn: ['doc-write'], task: 'review' },
+      { id: 'doc-trigger', type: 'main', mode: 'exclusive', dependsOn: [], task: 'classify trigger' },
+      { id: 'doc-maintain', type: 'main', mode: 'exclusive', dependsOn: ['doc-trigger'], task: 'maintain' },
+      { id: 'doc-review', type: 'main', mode: 'exclusive', dependsOn: ['doc-maintain'], task: 'review' },
       { id: 'doc-accept', type: 'approval', mode: 'exclusive', dependsOn: ['doc-review'] },
     ],
   };
@@ -331,8 +331,8 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
     expect(ids).toContain('skill-delete-foo/delete-review');
     expect(ids).toContain('skill-delete-foo/delete-accept');
     // Doc-update child phases prefixed
-    expect(ids).toContain('doc-update/doc-scope');
-    expect(ids).toContain('doc-update/doc-write');
+    expect(ids).toContain('doc-update/doc-trigger');
+    expect(ids).toContain('doc-update/doc-maintain');
     expect(ids).toContain('doc-update/doc-review');
     expect(ids).toContain('doc-update/doc-accept');
     // Cross-review rewired to child terminals (delete-accept, doc-accept)

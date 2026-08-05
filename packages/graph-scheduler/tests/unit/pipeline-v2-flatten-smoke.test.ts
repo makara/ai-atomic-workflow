@@ -31,6 +31,7 @@ const loader = (name: string): Taskflow | null => {
     case 'openspec-create':
     case 'openspec-apply':
     case 'openspec-engineer':
+    case 'doc-update':
       return loadGraph(`${name}.taskflow.yaml`);
     default:
       return null;
@@ -113,9 +114,11 @@ describe('openspec-pipeline v3 flatten smoke — route-first branch-route carrie
 
   it('pipeline-done joins on both track flow terminals (routes)', () => {
     const done = phaseOf('pipeline-done');
-    // openspec-apply terminal = archive; openspec-engineer terminal = openspec-archive
+    // Track terminals extend through the post-archive doc-maintenance flow:
+    // apply terminal = minimal-track/doc-maintenance/doc-accept;
+    // engineer terminal = detailed-track/doc-maintenance/doc-accept
     expect(done?.dependsOn).toEqual(
-      expect.arrayContaining(['minimal-track/archive', 'detailed-track/openspec-archive']),
+      expect.arrayContaining(['minimal-track/doc-maintenance/doc-accept', 'detailed-track/doc-maintenance/doc-accept']),
     );
   });
 

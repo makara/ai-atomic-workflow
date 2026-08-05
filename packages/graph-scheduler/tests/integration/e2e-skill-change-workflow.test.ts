@@ -392,7 +392,7 @@ describe('skill-change-workflow — flow-flatten correctness', () => {
     const cases = [
       { use: 'skill-delete', entry: 'skill-select', field: 'skill_delete_name' },
       { use: 'skill-author', entry: 'scope-confirm', field: 'skill_create_name' },
-      { use: 'doc-update', entry: 'doc-scope', field: 'doc_update_files' },
+      { use: 'doc-update', entry: 'doc-trigger', field: 'doc_update_files' },
     ];
 
     for (const { use, entry, field } of cases) {
