@@ -7,6 +7,15 @@
 
 node_modules
 
+# Docs
+/docs/*
+!/docs/domains.md
+!/docs/README.zh-CN.md
+!/docs/CHANGELOG.zh-CN.md
+!/docs/readme-blueprint.md
+/openspec/*
+!/openspec/specs
+
 # Build output
 /dist
 /packages/**/dist
@@ -24,9 +33,5 @@ node_modules
 *~
 
 # TEMP
-/docs/*
-!/docs/README.zh-CN.md
-!/docs/CHANGELOG.zh-CN.md
 /guides
-/openspec
 /standards

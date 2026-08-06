@@ -2,11 +2,44 @@
 
 > ⚠️ AI-generated README — edit [docs/readme-blueprint.md](../../docs/readme-blueprint.md) instead.
 
+## Table of Contents
+
+- [graph-workflow](#graph-workflow)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
+  - [How Skills Drive Graphs](#how-skills-drive-graphs)
+  - [Making a Graph](#making-a-graph)
+  - [Install](#install)
+  - [Skill List](#skill-list)
+  - [Development](#development)
+  - [Related Docs](#related-docs)
+
+## Overview
+
 Graph-driven work-order system for AI agents — explicit phases, scoped context, and non-bypassable approval gates.
 
-The skill system that drives graph execution — 14 built-in skills.
+The skill system that drives graph execution — 12 built-in skills.
 
-graph-workflow is the agent-side half of Atomic Workflow. [graph-scheduler](../graph-scheduler/README.md) issues runtime work orders; these skills execute them. Each phase of a graph maps to a skill: the graph declares the skill in the phase definition, and the skill knows how to run that phase — the interview, the review, the write, the approval.
+graph-workflow is the agent-side half of Atomic Workflow. [graph-scheduler](../graph-scheduler/README.md) issues runtime work orders; these skills execute them. Each phase of a graph maps to a skill: the graph declares the skill in the phase definition, and the skill knows how to run that phase — the interview, the review, the write, the approval. Graph execution serves the two journeys: the **maker journey** (produce a new graph via `graph-generate`) and the **improver journey** (improve built-in graphs or project-owned skills via `arch-review-loop`).
+
+The graph basics: a graph is a work-order board declared in a `.taskflow.yaml` file — a named set of phases wired by `dependsOn` edges; the scheduler issues each ready phase as a work order and tracks progress, it executes nothing. Phases are `main` (inline execution), `approval` (human decision card), `gate` (machine rework judgment), plus `flow` composition via `use`. Built-in graphs ship in `packages/graph-scheduler/graphs/` (registered in `graphs/registry.json`); user graphs live in `.graph-scheduler/graphs/` and override built-ins by name (project-first).
+
+The flagship loop these skills drive — one round composes requirement production, adoption, and implementation (two tracks: minimal apply / detailed engineer); `loop-gate` re-enters the loop while a Top Recommendation remains (auto mode, bounded):
+
+```mermaid
+graph LR
+    REQ[Requirement<br/>arch-review] --> ADOPT[Adopt<br/>adopt-with-docs]
+    ADOPT --> TRACK{ADR exists?}
+    TRACK -->|no: minimal| MIN[Apply + review]
+    TRACK -->|yes: detailed| DET[Spec + tickets + implement]
+    MIN --> GATE{Accept?}
+    DET --> GATE
+    GATE -->|no: rework| TRACK
+    GATE -->|yes| ARCHIVE[Archive spec]
+    ARCHIVE --> LOOP{Review reqs}
+    LOOP -->|Top Rec remains<br/>auto · bounded| REQ
+    LOOP -->|no Top Rec| DONE[Loop complete]
+```
 
 ## How Skills Drive Graphs
 
@@ -16,14 +49,37 @@ The execution chain:
 |-|-|
 |`atom-pilot`|Graph lifecycle manager — runs the execute → advance loop (`graph_start` → dispatch → `graph_advance`)|
 |`atom-phase-handler`|Central dispatch — routes each node by its `type` (main/approval/gate base types). The single entry point for running graphs; consumes prologue outputs, injects `## Agent hints:` / `## Run Mode:` / `## Constraints` blocks|
-|`atom-kernel`|Platform primitives — `task()` dispatch, `question()` decision UI, `interview()` consensus (single contract, consensus + solve modes), graph-scheduler tool detection (ADR 0059). Sole dispatch-primitive source|
-|`atom-scope-interview`|Shared scope-confirmation interview for graph entry phases — search conversation, one-question-per-turn + solve mode, uniform `scope_complete` output contract; used by arch-review, arch-review-loop, openspec-create, plan-generate, doc-update, skill-author, graph-generate, grill-with-docs|
-|Entry skills|One per graph domain — `atom-skill-writer` (skills), `atom-graph-design` (graph topology design), `atom-graph-writer` (graph YAML), `atom-doc-writer` (docs), `atom-openspec-archive` (change archival), `setup-atomic-workflow` (project setup); review / idea grilling / ADR judgment run via upstream `improve-codebase-architecture` / `grilling` / `domain-modeling` (direct use, no local wrappers)|
-|Reference skills|Format specifications — `atom-graph-spec` (.taskflow.yaml), `atom-skill-spec` (SKILL.md), `atom-doc-spec` (markdown docs), `atom-mcp-contract` (exact parameter schemas for serena / jcodemunch / headroom / graph-scheduler; contract-missing tool → read full docs first)|
+|`atom-kernel`|Platform primitives — `task()` dispatch, `question()` decision UI, `interview()` consensus (single contract, consensus + solve modes), graph-scheduler tool detection. Sole dispatch-primitive source|
+|`atom-scope-interview`|Shared scope-confirmation interview for graph entry phases — search conversation, one-question-per-turn + solve mode, uniform `scope_complete` output contract; used by arch-review, arch-review-loop, adopt-with-docs, graph-generate|
+|Entry skills|One per graph domain — `atom-doc-maintenance` (docs — maintain() contract, ADR 0091), `atom-openspec-archive` (change archival), `setup-atomic-workflow` (project setup), `atom-scope-interview` (shared scope-confirm interview for entry phases); review / idea grilling / ADR judgment run via upstream `improve-codebase-architecture` / `grilling` / `domain-modeling` (direct use, no local wrappers)|
+|Reference skills|Format specifications — `atom-graph-spec` (.taskflow.yaml), `atom-skill-spec` (SKILL.md), `atom-mcp-contract` (exact parameter schemas for serena / jcodemunch / headroom / graph-scheduler; contract-missing tool → read full docs first). Document format rules live inside `atom-doc-maintenance` §Format Reference|
+
+## Making a Graph
+
+The maker journey is itself a graph — `graph-generate` is the concrete maker journey graph: entry (atom-scope-interview, no CONTEXT.md hard dependency) → spec (topology design per atom-graph-spec) → spec-accept → implement (writes the `.taskflow.yaml` + registry entry + attached doc `.graph-scheduler/docs/<name>.md`) → review → gate → accept. Single kind (graph), single operation (create). Driven the same way as every graph:
+
+```text
+Use atom-pilot to run graph-generate: generate a workflow for release notes from merged PRs.
+```
+
+The maker journey at a glance:
+
+```mermaid
+graph LR
+    ENTRY[Entry<br/>scope interview] --> SPEC[Spec<br/>atom-graph-spec]
+    SPEC --> DESIGN[Design]
+    DESIGN --> IMPL[Implement]
+    IMPL --> REVIEW[Review]
+    REVIEW --> GATE{Accept?}
+    GATE -->|no: rework| IMPL
+    GATE -->|yes| ACCEPT[Accepted]
+```
+
+Skill production (create/edit) flows through `arch-review-loop` openspec changes (improver journey) — implementation loads the spec skill per affected domain (graph → atom-graph-spec, skill → atom-skill-spec, doc → atom-doc-maintenance).
 
 ## Install
 
-Two channels — pick one. **All 14 skills are required for graph execution.**
+Two channels — pick one. **All 12 skills are required for graph execution.**
 
 **Option A: Claude Code marketplace**
 
@@ -34,18 +90,14 @@ Two channels — pick one. **All 14 skills are required for graph execution.**
 **Option B: skills.sh** (third-party CLI, 76+ agent platforms — OpenCode / Codex / Cursor etc.)
 
 ```bash
-# Full install (14 graph-workflow skills + legacy skills)
 npx skills add makara/ai-atomic-workflow
-
-# graph-workflow only — 14 built-in skills (tree-subpath source, no marketplace.json dependency)
-npx skills add https://github.com/makara/ai-atomic-workflow/tree/main/packages/graph-workflow/skills
 ```
 
 Common flags (verified via `npx skills --help`): `-a <agent>` pick platform (`-a '*'` all), `-g` global install, `-y` non-interactive, `-l` preview without installing.
 
 ## Skill List
 
-14 skills in `skills/`:
+12 skills in `skills/`:
 
 |Skill|What it does|
 |-|-|
@@ -53,15 +105,13 @@ Common flags (verified via `npx skills --help`): `-a <agent>` pick platform (`-a
 |**atom-phase-handler**|Central dispatch — `{ node, snapshot? }` schema, static dispatch (main/approval/gate base types), agent-hint injection|
 |**atom-kernel**|Platform primitives — `task()` dispatch, `question()` (8 rules), `interview()` (single contract — consensus + solve modes), graph-scheduler tool detection. Sole dispatch-primitive source|
 |**atom-scope-interview**|Shared scope-confirmation interview for graph entry phases — search conversation, interview() one-question-per-turn, solve mode until complete, uniform `scope_complete` output contract|
-|**atom-skill-writer**|Entry skill for skill authoring — loads atom-skill-spec, writes or edits SKILL.md. Auto-detects create vs edit mode from scope-confirm output fields|
-|**atom-graph-writer**|Entry skill for graph YAML generation — loads atom-graph-spec, validates topology, generates valid `.taskflow.yaml`|
-|**atom-graph-design**|Entry skill for graph topology design — loads atom-graph-spec, analyzes requirements, designs the phase list with dependsOn/when/channels|
-|**atom-doc-writer**|Entry skill for document editing — loads atom-doc-spec, modifies markdown documents in-place|
-|**atom-openspec-archive**|Archive a completed OpenSpec change via `openspec archive` CLI — reverse-validates task completion against code evidence before archiving. Used as a graph phase post-approval (skill-change-workflow)|
+|**atom-doc-maintenance**|Doc maintenance deep module — maintain() contract (trigger classification, document taxonomy, per-class rules, consistency gate) + Format Reference. Replaces atom-doc-spec/atom-doc-writer|
+|**atom-openspec-archive**|Archive a completed OpenSpec change via `openspec archive` CLI — reverse-validates task completion against code evidence before archiving. Used as a graph phase post-approval (openspec-apply / openspec-engineer)|
 |**setup-atomic-workflow**|Initialize graph-scheduler project config — setup `.graph-scheduler`, create config.json, scaffold constraints.md, verify existing layout. Replaces the retired `atom-graph-config` CLI|
-|**atom-graph-spec**|Reference for the `.taskflow.yaml` format — PhaseSchema, topology, when guards, join modes, channels, approval/gate routing|
+|**atom-graph-spec**|Reference for the `.taskflow.yaml` format — PhaseSchema, topology constraints, gate rework jumps, join modes, channel requirements, approval decision confirmation, branch routes, Run Mode|
+|**atom-graph-design**|Entry skill for graph topology design — loads atom-graph-spec, analyzes requirements, designs the phase list with dependsOn/when/channels. Trigger: spec phase in graph-generate|
+|**atom-graph-writer**|Entry skill for graph YAML generation — loads atom-graph-spec, validates topology, generates valid `.taskflow.yaml`. Trigger: implement phase in graph-generate|
 |**atom-skill-spec**|Reference for the SKILL.md format — frontmatter rules, body content rules, language constraints, reference boundaries|
-|**atom-doc-spec**|Reference for the markdown document format — metadata block, heading hierarchy, link validity, document types (ADR, report)|
 |**atom-mcp-contract**|MCP tool-call contract — exact parameter schemas for serena / jcodemunch / headroom / graph-scheduler tools; schema-first protocol, failure recovery chain; contract-missing tool → read full docs first|
 
 ## Development
