@@ -29,8 +29,8 @@ describe('atom-phase-handler SKILL.md — project constraints + gate branch cont
   it('documents NO constraints/runMode NodeDetail fields — prologue outputs instead', () => {
     expect(skill).not.toMatch(/`constraints`\|string\[\]\|all/);
     expect(skill).not.toMatch(/`runMode`\|`'manual' \| 'auto'`\|yes/);
-    expect(skill).toMatch(/\$run-mode-confirm.*\.taskflow\/outputs\/\$run-mode-confirm\.output\.txt/s);
-    expect(skill).toMatch(/\$load-constraints.*\.taskflow\/outputs\/\$load-constraints\.output\.txt/s);
+    expect(skill).toMatch(/\$run-mode-confirm.*\.taskflow\/outputs\/<runId>\/\$run-mode-confirm\.output\.txt/s);
+    expect(skill).toMatch(/\$load-constraints.*\.taskflow\/outputs\/<runId>\/\$load-constraints\.output\.txt/s);
   });
 
   // ── Constraints Block Format ──────────────────────────────

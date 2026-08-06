@@ -20,6 +20,7 @@ function mockFsLayer(files: Record<string, string>): Layer.Layer<FileSystem, nev
       if (content !== undefined) return Effect.succeed(content);
       return Effect.fail(new FileSystemError(path, `ENOENT: file not found: ${path}`));
     },
+    resolvePath: (filePath: string) => (filePath in files ? filePath : null),
   });
 }
 
@@ -34,29 +35,29 @@ describe('makeRegistryLoader', () => {
   const PATHS = ['reg1.json', 'reg2.json'];
 
   it('resolveGraph finds a graph in first registry', async () => {
-    const loader = makeRegistryLoader(PATHS);
+    const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({
       'reg1.json': validRegistry([{ name: 'graph-a', path: 'graphs/a.taskflow.yaml' }]),
       'reg2.json': validRegistry([{ name: 'graph-b', path: 'graphs/b.taskflow.yaml' }]),
     });
 
     const result = await runSuccess(loader.resolveGraph('graph-a').pipe(Effect.provide(layer)));
-    expect(result).toMatch(/graphs\/a\.taskflow\.yaml$/);
+    expect(result.path).toMatch(/graphs\/a\.taskflow\.yaml$/);
   });
 
   it('resolveGraph finds a graph in second registry', async () => {
-    const loader = makeRegistryLoader(PATHS);
+    const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({
       'reg1.json': validRegistry([{ name: 'graph-a', path: 'graphs/a.taskflow.yaml' }]),
       'reg2.json': validRegistry([{ name: 'graph-b', path: 'graphs/b.taskflow.yaml' }]),
     });
 
     const result = await runSuccess(loader.resolveGraph('graph-b').pipe(Effect.provide(layer)));
-    expect(result).toMatch(/graphs\/b\.taskflow\.yaml$/);
+    expect(result.path).toMatch(/graphs\/b\.taskflow\.yaml$/);
   });
 
   it('resolveGraph fails for unknown graph name', async () => {
-    const loader = makeRegistryLoader(PATHS);
+    const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({
       'reg1.json': validRegistry([{ name: 'graph-a', path: 'graphs/a.taskflow.yaml' }]),
       'reg2.json': validRegistry([]),
@@ -67,19 +68,31 @@ describe('makeRegistryLoader', () => {
     );
   });
 
-  it('later registry overrides earlier for same-named graph (merge priority)', async () => {
-    const loader = makeRegistryLoader(PATHS);
+  it('project registry (later) overrides builtin (earlier) for same-named graph — project-first precedence', async () => {
+    const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({
       'reg1.json': validRegistry([{ name: 'dup', path: 'graphs/v1.taskflow.yaml' }]),
       'reg2.json': validRegistry([{ name: 'dup', path: 'graphs/v2.taskflow.yaml' }]),
     });
 
     const result = await runSuccess(loader.resolveGraph('dup').pipe(Effect.provide(layer)));
-    expect(result).toMatch(/graphs\/v2\.taskflow\.yaml$/);
+    expect(result.path).toMatch(/graphs\/v2\.taskflow\.yaml$/);
+    expect(result.source).toBe('project');
+  });
+
+  it('resolvedFrom reports builtin when only builtin registry has the graph', async () => {
+    const loader = makeRegistryLoader(PATHS, 'reg1.json');
+    const layer = mockFsLayer({
+      'reg1.json': validRegistry([{ name: 'builtin-only', path: 'graphs/b.taskflow.yaml' }]),
+      'reg2.json': validRegistry([]),
+    });
+
+    const result = await runSuccess(loader.resolveGraph('builtin-only').pipe(Effect.provide(layer)));
+    expect(result.source).toBe('builtin');
   });
 
   it('registry method returns merged map with all entries', async () => {
-    const loader = makeRegistryLoader(PATHS);
+    const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({
       'reg1.json': validRegistry([{ name: 'a', path: 'a.json' }]),
       'reg2.json': validRegistry([{ name: 'b', path: 'b.json' }]),
@@ -94,19 +107,20 @@ describe('makeRegistryLoader', () => {
   // ── Error handling ─────────────────────────────────────────────
 
   it('skips missing registry file gracefully', async () => {
-    const loader = makeRegistryLoader(PATHS);
+    const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({
       'reg2.json': validRegistry([{ name: 'b', path: 'b.json' }]),
     });
 
     const result = await runSuccess(loader.resolveGraph('b').pipe(Effect.provide(layer)));
-    expect(result).toMatch(/b\.json$/);
+    expect(result.path).toMatch(/b\.json$/);
   });
 
   it('fails on non-ENOENT file error (e.g. Permission denied)', async () => {
-    const loader = makeRegistryLoader(PATHS);
+    const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = Layer.succeed(FileSystem, {
       readFile: (_path: string) => Effect.fail(new FileSystemError('reg1.json', 'Permission denied')),
+      resolvePath: () => null,
     });
 
     await expect(Effect.runPromise(loader.resolveGraph('anything').pipe(Effect.provide(layer)))).rejects.toThrow(
@@ -115,7 +129,7 @@ describe('makeRegistryLoader', () => {
   });
 
   it('fails on invalid JSON in registry', async () => {
-    const loader = makeRegistryLoader(PATHS);
+    const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({
       'reg1.json': 'not valid json {{{',
       'reg2.json': validRegistry([]),
@@ -127,7 +141,7 @@ describe('makeRegistryLoader', () => {
   });
 
   it('fails when "graphs" is not an array', async () => {
-    const loader = makeRegistryLoader(PATHS);
+    const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({
       'reg1.json': JSON.stringify({ graphs: 'not-an-array' }),
       'reg2.json': validRegistry([]),
@@ -139,7 +153,7 @@ describe('makeRegistryLoader', () => {
   });
 
   it('skips invalid entries within the graphs array', async () => {
-    const loader = makeRegistryLoader(PATHS);
+    const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({
       'reg1.json': JSON.stringify({
         graphs: [
@@ -155,11 +169,11 @@ describe('makeRegistryLoader', () => {
     });
 
     const result = await runSuccess(loader.resolveGraph('valid').pipe(Effect.provide(layer)));
-    expect(result).toMatch(/valid\.json$/);
+    expect(result.path).toMatch(/valid\.json$/);
   });
 
   it('registry entry with description is loaded correctly', async () => {
-    const loader = makeRegistryLoader(PATHS);
+    const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({
       'reg1.json': JSON.stringify({
         graphs: [{ name: 'a', path: 'a.json', description: 'Test graph A' }],
@@ -174,7 +188,7 @@ describe('makeRegistryLoader', () => {
   // ── Fresh reads ────────────────────────────────────────────────
 
   it('registries are re-read on every call — no stale cache', async () => {
-    const loader = makeRegistryLoader(PATHS);
+    const loader = makeRegistryLoader(PATHS, 'reg1.json');
     let readCount = 0;
     const layer = Layer.succeed(FileSystem, {
       readFile: (path: string) => {
@@ -183,6 +197,7 @@ describe('makeRegistryLoader', () => {
         if (path === 'reg2.json') return Effect.succeed(validRegistry([{ name: 'b', path: 'b.json' }]));
         return Effect.fail(new FileSystemError(path, 'ENOENT'));
       },
+      resolvePath: (filePath: string) => filePath,
     });
 
     await runSuccess(loader.resolveGraph('a').pipe(Effect.provide(layer)));
@@ -193,7 +208,7 @@ describe('makeRegistryLoader', () => {
   });
 
   it('registry method returns merged index', async () => {
-    const loader = makeRegistryLoader(PATHS);
+    const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({
       'reg1.json': validRegistry([{ name: 'a', path: 'a.json' }]),
       'reg2.json': validRegistry([{ name: 'b', path: 'b.json' }]),
@@ -206,14 +221,14 @@ describe('makeRegistryLoader', () => {
   // ── Edge cases ─────────────────────────────────────────────────
 
   it('all registry files missing — resolveGraph fails', async () => {
-    const loader = makeRegistryLoader(PATHS);
+    const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({});
 
     await expect(Effect.runPromise(loader.resolveGraph('anything').pipe(Effect.provide(layer)))).rejects.toThrow();
   });
 
   it('empty registries — resolveGraph fails for any graph name', async () => {
-    const loader = makeRegistryLoader(PATHS);
+    const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({
       'reg1.json': validRegistry([]),
       'reg2.json': validRegistry([]),

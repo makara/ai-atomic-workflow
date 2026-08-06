@@ -1,6 +1,6 @@
 name: openspec-apply
 phases:
-  # Stage 1: Apply — implement the openspec change (entry contract)
+  # Apply — implement the confirmed openspec change (entry contract).
   - id: apply-change
     type: main
     dependsOn: []
@@ -8,41 +8,48 @@ phases:
     channels:
       - node:change-review
     task: |
+      Implement tasks from the confirmed openspec change per
+      openspec-apply-change.
 
-      Implement tasks from the confirmed openspec change per openspec-apply-change skill.
+      Spec standards per affected domain — deterministic mapping rule:
+      graph → atom-graph-spec, skill → atom-skill-spec, doc →
+      atom-doc-maintenance. Determine the change's affected files (delta
+      spec domains / openspec instructions apply contextFiles), load each
+      corresponding spec skill BEFORE writing, and validate the
+      implementation against its rule classes (deterministic rules →
+      validation errors, heuristic rules → warnings) while writing.
 
-      Change name resolution — NEVER ask the user:
-      1. {args.changeName} if provided (graph_start args).
-      2. Else `openspec list --json` — exactly one active change → use it.
-      3. Else apply_status: blocked + candidate list, implement nothing.
+      Change name resolution — NEVER ask: {args.changeName} → openspec list
+      --json single active → apply_status: blocked + candidates. Re-run
+      rounds: fix every change-review finding FIRST, then continue.
 
-      Re-run rounds: change-review output is injected via node:change-review channel — FIRST fix every finding, THEN continue remaining tasks.
+      Output contract: change_name, apply_status (complete | blocked |
+      partial), changed_files, spec_paths, blocked_reason.
 
-      Output contract:
-        - change_name: <name>
-        - apply_status: complete | blocked | partial
-        - changed_files: [paths]
-        - spec_paths: [contextFiles paths]
-        - blocked_reason: <text when partial/blocked>
-
-  # Stage 2: Review — dual-axis audit of the implementation
+  # Review — dual-axis audit of the implementation.
   - id: change-review
     type: main
     dependsOn: [apply-change]
     skill: code-review
     agent: [reviewer, explore, task, general]
     channels:
-      - skill:atom-graph-spec
+      - node:apply-change
     task: |
-      Dual-axis review of the openspec change implementation per code-review (use ## Agent hints for axis sub-agents).
+      Dual-axis review of the openspec change implementation per code-review
+      (use ## Agent hints for axis sub-agents). Spec: the change's delta
+      specs — every SHALL requirement implemented.
 
-      Artifact set: change implementation — delta specs (openspec/changes/<change_name>/specs/**), design/tasks, and changed_files from apply-change output (injected).
-      Standards: atom-graph-spec (injected) for graph definitions; repo-documented coding standards for code — auto-discovered per code-review §3 (repository scan + Fowler smell baseline).
-      Spec: the change's delta specs — every SHALL requirement implemented; graph-definition hygiene — gate branch conditions bounded by target retryCount, branch targets are writer nodes, conditions reference contract fields / decision values; output contract — apply-change output carries change_name/apply_status/changed_files/spec_paths.
+      Spec standards per affected domain — deterministic mapping rule:
+      graph → atom-graph-spec, skill → atom-skill-spec, doc →
+      atom-doc-maintenance. Determine the change's affected files, load each
+      corresponding spec skill, validate the implementation against its rule
+      classes (deterministic rules → validation errors, heuristic rules →
+      warnings) + repo-documented coding standards.
 
-      Output machine-parseable YAML report with overall: pass | fail. Write report (main agent collects).
+      Output contract: report (machine-parseable YAML, overall:
+      pass | fail).
 
-  # Stage 3: Gate — bounded backward rework on FAIL (route-first: pure backward jump)
+  # Gate — bounded rework on FAIL (backward jump to apply-change).
   - id: change-gate
     type: gate
     dependsOn: [change-review]
@@ -50,9 +57,7 @@ phases:
       - when: 'change-review output shows overall: fail AND apply-change retryCount < 2'
         to: apply-change
 
-  # Stage 4: Accept — decision confirmation (route-first: no written actions).
-  # Recommendation follows the review verdict; revise/restart are AI-generated
-  # dynamic options, not written.
+  # Accept — decision confirmation.
   - id: change-accept
     type: approval
     dependsOn: [change-gate]
@@ -61,12 +66,9 @@ phases:
     task: |
       Accept the implementation?
 
-      change-review reported the dual-axis verdict. Recommendation follows the
-      review verdict and the rework bound: continue (approve and archive) when
-      the implementation passes; otherwise revise (re-run apply-change with
-      review feedback) or restart (re-apply from scratch).
-
-  # Stage 5: Archive — finalize the completed change
+      Decision: continue (approve + archive) when the implementation passes
+      review; revise/restart otherwise.
+  # Archive — reverse-validated change archival.
   - id: archive
     type: main
     dependsOn: [change-accept]
@@ -74,32 +76,18 @@ phases:
     channels:
       - node:apply-change
     task: |
-      Archive the completed openspec change via openspec archive CLI.
+      Archive the completed openspec change per atom-openspec-archive.
+      Change name: apply-change output change_name (echo).
 
-      Read change-accept output (injected via dependsOn implicit context).
-      Read apply-change output (injected via node:apply-change context channel) for change metadata.
-
-      Execute per atom-openspec-archive flow:
-      1. Determine change_name from apply-change output change_name field; if absent, `openspec list --json` filtered to complete changes — single entry use it, multiple/zero → archive_status: blocked + candidates. NEVER ask user.
-      2. Reverse-validate task completion against code evidence before archive (openspec instructions apply --json + verification.md).
-      3. Run `openspec archive <change> --yes --json`.
-      4. Verify archive result — change moved to archive, specs synced.
-
-      Write output (main agent collects):
-        - archive_status: success | failed | blocked
-        - change_name: <name>
-        - validation_result: pass | fail | warn
-        - message: <summary>
-
-  # Stage 5: Document maintenance — trigger-first flow after archive
-  # (spec-archive trigger; when guard = archive succeeded).
+      Output contract: archive_status (success | failed | blocked),
+      change_name, validation_result, message.
+  # Post-archive doc maintenance — runs only when archive succeeded.
   - id: doc-maintenance
     type: flow
     use: doc-update
     dependsOn: [archive]
     task: |
-      Case-5 self-judgment: if archive output (injected) does not show
-      archive_status: success, this flow has NO WORK — finish with an empty
-      declaration and no artifact; this is normal execution, not a skip.
-      Otherwise the post-archive maintenance runs — doc-update's doc-trigger
-      classifies the spec-archive trigger; scope_hints carry the change name.
+      Case-5 self-judgment: archive output shows archive_status:
+      success → run post-archive maintenance (doc-trigger classifies the
+      spec-archive trigger; scope_hints carry the change name); otherwise NO
+      WORK — empty declaration, no artifact (normal execution, not a skip).

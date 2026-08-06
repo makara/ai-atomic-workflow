@@ -33,7 +33,7 @@ export const PhaseSchema = z
     agent: z.array(z.string()).optional(),
     /** per-node execution skill — the skill that runs this phase's work */
     skill: z.string().optional(),
-    /** main-type channel patterns — skill names, file globs, or node:<id> refs. Resolved against the execution skill's Context Requirements contract. */
+    /** per-phase context additions — all entry kinds (skill:<name>, file globs, node:<id> read edges), uniform across main/approval/gate. Resolved against the execution skill's Context Requirements contract when one exists; node: entries read the named node's output stream. */
     channels: z.array(z.string()).optional(),
     /** task instruction text (main) / decision-card prompt (approval — first line = header, rest = card body) */
     task: z.string().optional(),
@@ -111,18 +111,16 @@ export const PhaseSchema = z
   )
   .superRefine((data, ctx) => {
     // Field semantics split by phase type — one field, one meaning.
-    // Gate/approval channels — judgment context, node:-only entries (no
-    // skill contract to resolve skills/globs against; judgment reads outputs).
-    if ((data.type === 'gate' || data.type === 'approval') && data.channels !== undefined) {
-      for (const entry of data.channels) {
-        if (!entry.startsWith('node:')) {
-          ctx.addIssue({
-            code: 'custom',
-            path: ['channels'],
-            message: `'${data.type}' phase channels entries must be 'node:<id>' references (judgment context = node outputs); '${entry}' is not a node: entry`,
-          });
-        }
-      }
+    // Phase channels — uniform across main/approval/gate (two-scope context
+    // model): all entry kinds (skill:/glob/node:) legal for every type.
+    // Flow phases declare none — ambient context lives at graph level
+    // (`context:`), reads on the consuming phase.
+    if (data.type === 'flow' && data.channels !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['channels'],
+        message: `flow phase must not declare 'channels' (two-scope context model) — move ambient entries to the graph's top-level 'context:' and cross-level data reads to the consuming phase's 'channels: [node:<id>]'`,
+      });
     }
     if (data.type === 'approval' && data.agent !== undefined) {
       ctx.addIssue({

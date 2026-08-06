@@ -25,13 +25,17 @@ export class FileSystemError {
 /**
  * FileSystem Context.Tag — injectable I/O seam.
  *
- * Single method `readFile` returns Effect<string, FileSystemError>.
- * Consumers catch FileSystemError in Effect.gen and re-wrap into
- * domain-specific error types (GraphDefinitionError, AgentConfigError).
+ * `readFile` returns Effect<string, FileSystemError>; `resolvePath` returns
+ * the absolute path a relative file resolves to through the taskflow dirs
+ * (or the input when absolute), null when not found. Consumers catch
+ * FileSystemError in Effect.gen and re-wrap into domain-specific error
+ * types (GraphDefinitionError, AgentConfigError).
  */
 export class FileSystem extends Context.Tag('FileSystem')<
   FileSystem,
   {
     readonly readFile: (path: string) => Effect.Effect<string, FileSystemError>;
+    /** Resolve a relative path through the taskflow dirs → absolute path (input when absolute); null when not found. */
+    readonly resolvePath: (filePath: string) => string | null;
   }
 >() {}

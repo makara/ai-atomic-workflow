@@ -1,6 +1,6 @@
 ---
 name: atom-graph-writer
-description: 'Entry skill for graph YAML generation — loads atom-graph-spec, validates topology, generates valid .taskflow.yaml. Trigger: graph-write phase in graph-generate graph.'
+description: 'Entry skill for graph YAML generation — loads atom-graph-spec, validates topology, generates valid .taskflow.yaml. Trigger: implement phase in graph-generate graph.'
 user-invocable: false
 version: 1.1.0
 last_updated: '2026-07-30'
@@ -16,8 +16,8 @@ Entry skill for graph YAML generation. Loads atom-graph-spec as format reference
 
 ### From upstream
 
-- scope-confirm
-- graph-design
+- entry
+- spec
 
 ### Reference skills
 
@@ -25,13 +25,13 @@ Entry skill for graph YAML generation. Loads atom-graph-spec as format reference
 
 ## Entry
 
-**MUST WRITE** — when dispatched by atom-phase-handler for graph-write phase node.
+**MUST WRITE** — when dispatched by atom-phase-handler for the implement phase node in the graph-generate maker journey.
 
 ## Flow
 
 ### Step 1: Read Design
 
-Read from graph-design output (injected by main agent). Extract:
+Read from spec output (injected by main agent). Extract:
 
 - `graph_name` — top-level name field
 - `phases` — array of { id, type, dependsOn, when, join, task_summary, channels }
@@ -70,11 +70,11 @@ Validate generated YAML against every atom-graph-spec rule class (schema fields,
 
 ### Step 4: Write
 
-Write generated YAML to path from scope-confirm output. Default: `<graph_name>.taskflow.yaml` in working directory. Create parent directories if needed.
+Write generated YAML to the save_location from the entry output. Default: `<graph_name>.taskflow.yaml` in working directory. Create parent directories if needed.
 
 ### Step 5: Output
 
-Write result to graph-write output (main agent collects):
+Write result to the implement output (main agent collects):
 
 ```
 graph_path: <absolute path to written .taskflow.yaml>

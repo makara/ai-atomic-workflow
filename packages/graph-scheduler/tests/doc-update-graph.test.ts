@@ -124,10 +124,17 @@ describe('doc-update.taskflow.yaml — phase structure', () => {
     }
   });
 
-  it('doc-maintain channels include trigger output and domain index', () => {
+  it('ambient context at graph level — doc-maintain carries no per-phase channels; graph top level holds domain index', () => {
     const maintain = phases[1];
-    expect(maintain.channels).toContain('node:doc-trigger');
-    expect(maintain.channels).toContain('docs/domains.md');
+    // doc-trigger is a direct dependsOn — declaration surface = effective
+    // surface (redundant node: channel removed); ambient context (domain
+    // index + vocabulary skills) moved to graph-level channels (scope
+    // hierarchy)
+    expect(maintain.channels).toBeUndefined();
+    const raw = parseYaml(readFileSync(GRAPH_PATH, 'utf-8')) as { context?: string[]; channels?: unknown };
+    expect(raw.context).toContain('docs/domains.md');
+    expect(raw.context).toContain('skill:codebase-design');
+    expect(raw.context).toContain('./CONTEXT.md');
   });
 
   it('doc-accept is approval with no written routing and no branches/eval', () => {

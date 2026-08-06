@@ -85,6 +85,12 @@ export interface SchedulerRuntime {
     readonly node: NodeDetail | null;
     /** contract warnings captured at load — empty when clean (optional) */
     readonly contractWarnings?: string[];
+    /** resolution source of the loaded graph — project | builtin | fallback */
+    readonly resolvedFrom: 'project' | 'builtin' | 'fallback';
+    /** absolute path the graph was loaded from */
+    readonly resolvedPath: string;
+    /** graph top-level description — purpose-focused identity text; absent when undeclared */
+    readonly description?: string;
     /** run snapshot — entry dispatch carries it (jump nav + progress display) */
     readonly snapshot: IGraphSnapshot;
   }>;
@@ -133,6 +139,7 @@ export interface SchedulerRuntime {
   readonly dispose: () => Promise<void>;
 }
 
+import { ConfigService } from './config-service.js';
 // Config schema — single source of truth for config.json validation
 import { ConfigFileSchema, type SchedulerConfig } from './schemas/index.js';
 export { ConfigFileSchema, type SchedulerConfig };
@@ -200,6 +207,8 @@ interface ResolvedConfig {
   readonly registryPaths: readonly string[];
   /** skills package dir for entry-skill alignment — undefined = probing fallback. */
   readonly skillsDir: string | undefined;
+  /** project-level ambient context (config.json `context`) — default layer of the global channel. */
+  readonly context: readonly string[];
 }
 
 /** Resolve final config: built-in defaults → config.json → env vars → programmatic override.
@@ -209,9 +218,10 @@ function resolveConfig(override?: Partial<SchedulerConfig>): ResolvedConfig {
   const result = loadConfigFile();
   const fileConfig = result?.config;
 
-  // Built-in registry path (low priority) + project paths (high priority)
+  // Project-first precedence: builtin first (fallback layer), project paths
+  // last (later wins) — a same-named project entry shadows the builtin.
   const registryPaths =
-    override?.registryPaths ?? ([...(fileConfig?.registryPaths ?? []), BUILTIN_REGISTRY_PATH] as readonly string[]);
+    override?.registryPaths ?? ([BUILTIN_REGISTRY_PATH, ...(fileConfig?.registryPaths ?? [])] as readonly string[]);
 
   // taskflowDirs: project dir first, built-in dir last for fallback
   const projectTaskflowDir: string | undefined =
@@ -225,6 +235,7 @@ function resolveConfig(override?: Partial<SchedulerConfig>): ResolvedConfig {
     taskflowDirs,
     registryPaths,
     skillsDir: override?.skillsDir ?? fileConfig?.skillsDir,
+    context: override?.context ?? fileConfig?.context ?? [],
   };
 }
 
@@ -236,6 +247,20 @@ function resolveConfig(override?: Partial<SchedulerConfig>): ResolvedConfig {
  * Directories searched: project dir first, built-in dir last (fallback).
  */
 function makeTaskflowFileSystemLayer(taskflowDirs: readonly string[]): Layer.Layer<FileSystem, never, never> {
+  const resolvePath = (filePath: string): string | null => {
+    if (path.isAbsolute(filePath)) return filePath;
+    for (const dir of taskflowDirs) {
+      const candidate = `${dir}/${filePath}`;
+      try {
+        readFileSync(candidate, 'utf-8');
+        return candidate;
+      } catch {
+        // try next dir
+      }
+    }
+    return null;
+  };
+
   return Layer.succeed(FileSystem, {
     readFile: (filePath: string) =>
       Effect.try({
@@ -259,6 +284,7 @@ function makeTaskflowFileSystemLayer(taskflowDirs: readonly string[]): Layer.Lay
         catch: (cause): FileSystemError =>
           new FileSystemError(filePath, `File not found or unreadable: ${String(cause)}`, cause),
       }),
+    resolvePath,
   });
 }
 
@@ -322,11 +348,17 @@ export function createRuntime(config?: Partial<SchedulerConfig>): Effect.Effect<
     const fileSystemLayer = makeTaskflowFileSystemLayer(taskflowDirs);
 
     // Layer 2b: registry loader
-    const registryLoaderService = makeRegistryLoader(registryPaths);
+    const registryLoaderService = makeRegistryLoader(registryPaths, BUILTIN_REGISTRY_PATH);
     const registryLoaderLayer = Layer.succeed(RegistryLoader, registryLoaderService);
 
-    // Compose: persistence + fs + registry
-    const envLayer = Layer.merge(persistenceLayer, Layer.merge(fileSystemLayer, registryLoaderLayer));
+    // Layer 2c: runtime config — project-level ambient context for dispatch merge
+    const configServiceLayer = Layer.succeed(ConfigService, { context: resolved.context });
+
+    // Compose: persistence + fs + registry + config
+    const envLayer = Layer.merge(
+      persistenceLayer,
+      Layer.merge(fileSystemLayer, Layer.merge(registryLoaderLayer, configServiceLayer)),
+    );
 
     const runtime = ManagedRuntime.make(envLayer);
 
@@ -340,7 +372,7 @@ export function createRuntime(config?: Partial<SchedulerConfig>): Effect.Effect<
      * Error with the Cause pretty-printed.
      */
     /** Env union the managed runtime provides — effects runnable through the facade. */
-    type SchedulerEnv = GraphRepository | FileSystem | RegistryLoader;
+    type SchedulerEnv = GraphRepository | FileSystem | RegistryLoader | ConfigService;
 
     const run = <A, E>(eff: Effect.Effect<A, E, SchedulerEnv>): Promise<A> =>
       runtime.runPromiseExit(eff).then((exit) => {

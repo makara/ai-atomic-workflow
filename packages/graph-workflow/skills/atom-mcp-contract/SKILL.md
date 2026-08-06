@@ -1,8 +1,8 @@
 ---
 name: atom-mcp-contract
 description: 'MCP tool-call contract — exact parameter schemas for serena, jcodemunch, headroom, graph-scheduler tools; schema-first protocol; failure recovery chain. Use before any MCP tool call: parameter names NEVER guessed; contract-missing tool → read full tool docs first. Trigger: MCP call, serena tool, jcodemunch tool, headroom, graph-scheduler, validation error, invalid args.'
-version: 1.0.1
-last_updated: '2026-08-04'
+version: 1.1.0
+last_updated: '2026-08-06'
 user-invocable: false
 disable-model-invocation: true
 ---
@@ -25,15 +25,17 @@ Tool-call contract for mounted MCP servers. Single source of truth for exact par
 
 |Task class|Order|||
 |-|-|-|-|
-|Code nav / symbol|serena|jcodemunch|text tools (grep/read)|
-|References|serena `find_referencing_symbols`|jcodemunch `find_references`|text search|
-|Edit|serena (replace/rename/insert)|jcodemunch `register_edit` after manual edit|plain edit|
+|Code nav / symbol|jcodemunch|serena (LSP covers language only)|text tools (grep/read)|
+|References|jcodemunch `find_references`|serena `find_referencing_symbols` (LSP covers language only)|text search|
+|Edit|platform-native edit / lsp rename|serena (replace/rename/insert)|plain edit + jcodemunch `register_edit`|
 
-Third-party servers (serena/jcodemunch/headroom) not project dependencies — contract is best-practice layer. Server unavailable → skip to next tier silently.
+Third-party servers (serena/jcodemunch/headroom) not project dependencies — contract is best-practice layer. Server unavailable → skip to next tier silently. Serena tier unavailable when its LSP does not cover the file's language — see Availability note.
 
 ## serena
 
 LSP-powered code navigation + editing. All paths relative to project root. Symbol address = name path (file-local symbol tree, e.g. `MyClass/my_method`; overloads append `[i]`).
+
+**Availability**: requires a language server for the file's language in `.serena/project.yml` (`languages` list). Missing LSP → symbol queries return empty; treat tier as unavailable, skip to next tier silently. LSP backend initializes at serena process start — config changes need server restart to take effect.
 
 ### Navigation
 
@@ -308,7 +310,7 @@ Graph lifecycle CRUD. Tool names detected at runtime per atom-kernel §Graph-Sch
 
 |Tool|Params|Returns|
 |-|-|-|
-|`graph_start`|`graphName` (req), `args?` (graph_start args; `args.mode` short-circuits run-mode confirm)|`{runId, node, snapshot}`|
+|`graph_start`|`graphName` (req), `args?` (graph_start args; `args.mode` short-circuits run-mode confirm)|`{runId, node, snapshot, resolvedFrom, resolvedPath, description?}` — resolvedFrom: project\|builtin\|fallback; description = graph top-level identity text (absent when undeclared)|
 |`graph_advance`|`runId`, `nodeId`, `durationMs`, `branchTo?`, `endRun?`|`{snapshot, node}`; node null = complete|
 |`graph_status`|`runId`|Full run snapshot|
 |`graph_list`|—|Runs, newest first|
@@ -327,4 +329,4 @@ Examples:
 - jump: `{"runId": "6e51a7a1", "targetPhaseId": "loop-entry"}`
 - clean_completed: `{"before": "2026-08-01T00:00:00Z"}`
 
-Output stays in session — never passed to graph_advance. Approval/gate decisions persist to `.taskflow/outputs/<nodeId>.output.txt`.
+Output stays in session — never passed to graph_advance. Approval/gate decisions persist to `.taskflow/outputs/<runId>/<nodeId>.output.txt` (run-scoped streams).

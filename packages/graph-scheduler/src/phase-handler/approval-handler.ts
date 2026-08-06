@@ -5,7 +5,8 @@
  * - No extra validation (task is optional — topic synthesized)
  * - NodeDetail extends: topic (from task first line), routingActions
  *   (branch-route scenario only — declared actions pass through verbatim),
- *   channels (node:-only judgment context)
+ *   channels (all entry kinds — uniform; judgment context =
+ *   dependsOn outputs + effective channels)
  * - Decision confirmation card: Accept (AI recommendation) + free input +
  *   AI-generated contextual options — the card is built agent-side
  *   (atom-phase-handler); the backend never invents written actions.

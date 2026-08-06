@@ -12,11 +12,36 @@
 
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { fileChannelCoveredBy, isGlobShape, parseContextContract, resolveChannels } from './resolve-channels.js';
+import {
+  fileChannelCoveredBy,
+  isGlobShape,
+  mergeChannelScopes,
+  parseContextContract,
+  resolveChannels,
+} from './resolve-channels.js';
 
 /** safe string coercion — never String(object) (schema-validated in production path) */
 function str(v: unknown, fallback: string): string {
   return typeof v === 'string' ? v : fallback;
+}
+
+/**
+ * Judgment-domain node scope — ONE formula shared by the gate condition
+ * check, task-text injection claims, and (via mergeChannelScopes) the
+ * dispatch path: direct dependsOn outputs ∪ node: targets of the effective
+ * channels (global channel = graph `context:` entries + phase `channels:`).
+ */
+function nodeScope(
+  deps: readonly string[],
+  graphContext: readonly string[] | undefined,
+  phaseChannels: readonly string[] | undefined,
+): Set<string> {
+  const out = new Set(deps);
+  const effective = mergeChannelScopes(undefined, graphContext, phaseChannels) ?? [];
+  for (const c of effective) {
+    if (typeof c === 'string' && c.startsWith('node:')) out.add(c.slice('node:'.length));
+  }
+  return out;
 }
 
 /**
@@ -54,6 +79,23 @@ const READ_OUTPUT_CLAIM_RE = /Read\s+([\w-]+)\s+output/gi;
 /** 'injected via dependsOn …' wording refers to the implicit DAG mechanism, not a node claim */
 const IMPLICIT_MECHANISM_WORDS = new Set(['dependsOn', 'implicit', 'upstream']);
 
+/** Task Content Spec: forbidden output-contract alternate spellings — error */
+const FORBIDDEN_OUTPUT_SPELLINGS: Record<string, string> = {
+  'Output (main agent collects):': 'Output (main agent collects):',
+  'Write output (main agent collects):': 'Write output (main agent collects):',
+  'Emit:': 'Emit:',
+};
+/** Task Content Spec: canonical output-contract block prefix — required on main tasks */
+const OUTPUT_CONTRACT_RE = /Output\s+contract:/;
+/** Task Content Spec: legacy bare 'Output:' field list spelling — error */
+const LEGACY_OUTPUT_RE = /^\s*Output:/m;
+/** Task Content Spec: skill-protocol restatement patterns — heuristic warning */
+const PROTOCOL_RESTATEMENT_RE =
+  /interview\(\{ goal:|confirm\(goal\):|research:\s*Read the injected|question\(\) one question per turn|walk every decision-tree branch/;
+/** Task Content Spec: injection-mechanics wording — heuristic warning */
+const INJECTION_MECHANICS_RE =
+  /(?:read\s+[\w/-]+\s+output|output)\s+\(injected|via dependsOn implicit context|via node:\w+ channel/i;
+
 /** contract checks beyond TaskflowSchema — dispatch, routing, guard hygiene */
 export function validateGraphContracts(
   graph: Record<string, unknown>,
@@ -63,6 +105,36 @@ export function validateGraphContracts(
   const warnings: string[] = [];
   const phases = (graph.phases ?? []) as Array<Record<string, unknown>>;
   const byId = new Map(phases.map((p) => [str(p.id, ''), p]));
+
+  // Graph-level context (top-level `context:`) — the global channel's
+  // graph layer, ambient scope inherited by every flattened phase. Entry
+  // rules: explicit skill:/node: prefix or file-glob shape; bare names are
+  // errors (no execution-skill contract exists at graph scope). node:
+  // targets must exist in the flattened node set (run-scope membership is
+  // enforced at dispatch; the static membership check catches dangling refs
+  // at load).
+  const graphContext = (graph.context ?? []) as string[];
+  for (const c of graphContext) {
+    if (typeof c !== 'string') {
+      errors.push(`${filePath}: graph-level context entry must be a string — '${String(c)}'`);
+      continue;
+    }
+    if (c.startsWith('skill:') || c.startsWith('node:')) {
+      if (c.startsWith('node:')) {
+        const target = c.slice('node:'.length);
+        if (!byId.has(target)) {
+          errors.push(
+            `${filePath}: graph-level node: context entry "${c}" targets missing phase '${target}' — graph-level entries resolve against the flattened node set`,
+          );
+        }
+      }
+      continue;
+    }
+    if (isGlobShape(c)) continue;
+    errors.push(
+      `${filePath}: graph-level context entry "${c}" is a bare name — graph-level entries require an explicit skill:/node: prefix or a file glob (no execution-skill contract exists at graph scope)`,
+    );
+  }
 
   for (const phase of phases) {
     const id = str(phase.id, '?');
@@ -101,10 +173,7 @@ export function validateGraphContracts(
         `${prefix} — task text hardcodes runtime output path '.taskflow/outputs/'; reference the upstream node output by nodeId name instead (declared inputs)`,
       );
     }
-    const effectiveInputs = new Set<string>(deps);
-    for (const c of (phase.channels ?? []) as string[]) {
-      if (typeof c === 'string' && c.startsWith('node:')) effectiveInputs.add(c.slice('node:'.length));
-    }
+    const effectiveInputs = nodeScope(deps, graphContext, phase.channels as readonly string[] | undefined);
     if (taskText) {
       const claimed: string[] = [];
       for (const m of taskText.matchAll(INJECTION_CLAIM_RE)) claimed.push(m[1]);
@@ -119,6 +188,40 @@ export function validateGraphContracts(
           `${prefix} — task text claims injection of '${nodeId}' not declared in dependsOn or node: channels; declare the channel or remove the claim (declared inputs)`,
         );
       }
+    }
+
+    // Task Content Spec: deterministic spelling rules — error.
+    // Canonical `Output contract:` required on every main task; alternate
+    // spellings and legacy bare `Output:` forbidden everywhere.
+    if (taskText) {
+      for (const spelling of Object.keys(FORBIDDEN_OUTPUT_SPELLINGS)) {
+        if (taskText.includes(spelling)) {
+          errors.push(
+            `${prefix} — task text uses non-canonical output-contract spelling '${spelling}'; use the canonical 'Output contract:' block (Task Content Spec)`,
+          );
+        }
+      }
+      if (LEGACY_OUTPUT_RE.test(taskText)) {
+        errors.push(
+          `${prefix} — task text uses legacy 'Output:' spelling; use the canonical 'Output contract:' block (Task Content Spec)`,
+        );
+      }
+    }
+    if (type === 'main' && taskText && taskText.trim().length >= 30 && !OUTPUT_CONTRACT_RE.test(taskText)) {
+      warnings.push(
+        `${prefix} — main task text lacks the canonical 'Output contract:' block; production main phases emit a machine-parseable output contract (Task Content Spec)`,
+      );
+    }
+    // Task Content Spec: heuristic content rules — warning.
+    if (taskText && PROTOCOL_RESTATEMENT_RE.test(taskText)) {
+      warnings.push(
+        `${prefix} — task text restates dispatched-skill protocol (interview()/openspec CLI steps); the skill is the protocol home — delete the restatement (Task Content Spec dedup rule)`,
+      );
+    }
+    if (taskText && INJECTION_MECHANICS_RE.test(taskText)) {
+      warnings.push(
+        `${prefix} — task text spells injection mechanics; name consumed fields, not files/mechanisms — upstream availability is handler-injected (Task Content Spec)`,
+      );
     }
 
     // 2.2 — approval: declared branch-route/retry targets resolvable; retry/jump
@@ -210,16 +313,18 @@ export function validateGraphContracts(
     }
 
     // 2.3 — gate jump conditions reference observable declared-context fields
-    // only. Scope = direct dependsOn ∪ channels node: targets ∪ jump targets
-    // (the rework target's retryCount bound is part of the condition contract).
+    // only. Scope = the judgment-domain formula (direct dependsOn ∪ node:
+    // targets of graph context + phase channels). Jump targets are in scope
+    // for their retryCount bound ONLY (snapshot data, always present) —
+    // output-field references to a jump target require a channel declaration
+    // (dispatch injects dependsOn + channels + global streams, never jump
+    // targets). One formula shared with dispatch (nodeScope helper).
     if (type === 'gate') {
-      const contextScope = new Set<string>(deps);
-      for (const ch of (phase.channels ?? []) as string[]) {
-        if (ch.startsWith('node:')) contextScope.add(ch.slice('node:'.length));
-      }
+      const contextScope = nodeScope(deps, graphContext, phase.channels as readonly string[] | undefined);
+      const jumpTargets = new Set(
+        ((phase.jumps ?? []) as Array<Record<string, unknown>>).map((j) => str(j.to, '')).filter((t) => t !== ''),
+      );
       for (const jump of (phase.jumps ?? []) as Array<Record<string, unknown>>) {
-        const jumpTarget = str(jump.to, '');
-        if (jumpTarget) contextScope.add(jumpTarget);
         const jumpWhen = str(jump.when, '');
         if (jumpWhen) {
           if (HARDCODED_OUTPUT_PATH_RE.test(jumpWhen)) {
@@ -229,32 +334,29 @@ export function validateGraphContracts(
           }
           if (SIBLING_OUTPUT_EXISTENCE_RE.test(jumpWhen)) {
             errors.push(
-              `${prefix} — gate jump condition depends on sibling output existence ('no … output present'); conditions must reference observable fields of the declared judgment context (direct dependsOn ∪ channels node: targets ∪ jump targets).`,
+              `${prefix} — gate jump condition depends on sibling output existence ('no … output present'); conditions must reference observable fields of the declared judgment context (direct dependsOn ∪ channels node: targets ∪ global-context node: streams).`,
             );
           }
           for (const id of byId.keys()) {
             const esc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const mentioned = new RegExp(`(?<![\\w/-])${esc}(?![\\w/-])`).test(jumpWhen);
-            if (mentioned && !contextScope.has(id)) {
-              errors.push(
-                `${prefix} — gate jump condition references '${id}' which is outside the declared judgment context (direct dependsOn ∪ channels node: targets ∪ jump targets); declare it via channels: [node:${id}] or drop the reference`,
-              );
+            if (!mentioned) continue;
+            if (contextScope.has(id)) continue;
+            if (jumpTargets.has(id)) {
+              // Jump targets are snapshot data (retryCount) — an output-field
+              // reference would validate but never inject; require the bound.
+              const boundMention = new RegExp(`(?<![\\w/-])${esc}\\s+retryCount`).test(jumpWhen);
+              if (!boundMention) {
+                errors.push(
+                  `${prefix} — gate jump condition references jump target '${id}' beyond its retryCount bound; jump targets are in scope for their retryCount only — declare channels: [node:${id}] to read its output`,
+                );
+              }
+              continue;
             }
+            errors.push(
+              `${prefix} — gate jump condition references '${id}' which is outside the declared judgment context (direct dependsOn ∪ channels node: targets ∪ global-context node: streams); declare it via channels: [node:${id}] or drop the reference`,
+            );
           }
-        }
-      }
-    }
-
-    // 2.3b — gate/approval channels are node:-only judgment context. The
-    // schema enforces this per file; this post-flatten re-check catches
-    // merged flow-input channels that bypassed the per-file schema pass
-    // (flow channels propagate into entry children, which may be gates).
-    if ((type === 'gate' || type === 'approval') && phase.channels !== undefined) {
-      for (const entry of phase.channels as string[]) {
-        if (!entry.startsWith('node:')) {
-          errors.push(
-            `${prefix} — '${type}' phase channels entries must be 'node:<id>' references (judgment context = node outputs); '${entry}' is not a node: entry`,
-          );
         }
       }
     }
@@ -306,7 +408,7 @@ export function validateGraphContracts(
 }
 
 // ---------------------------------------------------------------------------
-// D6 — entry skill contract alignment (bidirectional channel validation)
+// Entry skill contract alignment (bidirectional channel validation)
 // ---------------------------------------------------------------------------
 
 /** parsed entry skill contract — frontmatter name + Context Requirements three subsections */
@@ -356,7 +458,9 @@ export async function validateEntrySkillContracts(
   try {
     skillDirs = (await readdir(skillsDir, { withFileTypes: true })).filter((e) => e.isDirectory()).map((e) => e.name);
   } catch {
-    warnings.push(`${skillsDir}: skills directory unreadable — D6 contract checks skipped silently (permissions?)`);
+    warnings.push(
+      `${skillsDir}: skills directory unreadable — entry-skill contract checks skipped silently (permissions?)`,
+    );
     return { errors, warnings };
   }
 
@@ -389,7 +493,7 @@ export async function validateEntrySkillContracts(
   for (const { filePath, graph } of graphs) {
     const phases = (graph.phases ?? []) as Array<Record<string, unknown>>;
     checkUpstreamCoverage(phases, skills, filePath, errors);
-    checkPhaseChannels(phases, skills, filePath, errors, warnings);
+    checkPhaseChannels(phases, skills, filePath, errors, warnings, (graph.context ?? []) as string[]);
   }
 
   return { errors, warnings };
@@ -469,22 +573,37 @@ function checkPhaseChannels(
   filePath: string,
   errors: string[],
   warnings: string[],
+  graphContext?: readonly string[],
 ): void {
   const nodeIds = new Set(phases.map((p) => str(p.id, '')));
   for (const phase of phases) {
     const type = str(phase.type, '');
     const skillName = str(phase.skill, '');
-    // Channel validation covers main phases. Approval/gate channels are
-    // node:-only judgment context — enforced by the schema superRefine and
-    // re-checked post-flatten below (merged flow channels must not bypass it).
-    if (type !== 'main') continue;
     const prefix = `${filePath}: phases.${str(phase.id, '?')}`;
     const channels = (phase.channels ?? []) as string[];
     const dependsOn = (phase.dependsOn ?? []) as string[];
+    // Effective channels — global channel (graph top-level `context:`) merges
+    // into every phase (two-scope context model). Forward coverage evaluates
+    // the effective list: a contract entry satisfied at graph level is not
+    // reported missing on the phase.
+    const effective = [...(mergeChannelScopes(undefined, graphContext, channels) ?? [])];
+
+    // Graph-level node: target existence — graph-scope entries are validated
+    // against the flattened set at graph level (validateGraphContracts);
+    // phase-declared node: entries keep run-scope semantics (out-of-run refs
+    // warn + strip at dispatch — legal cross-run composition references).
+    // Child graph-level entries merged into phases by flatten follow the
+    // phase-entry path (dispatch-strip) — composition is their run scope.
+
+    // Per-skill contract checks apply to main phases (the only type with an
+    // execution skill contract); approval/gate judgment context is node
+    // outputs + inherited entries — no skill contract to resolve against.
+    if (type !== 'main') continue;
 
     if (!skillName) {
-      // Contract-less phase — dual-track rule: every channels entry must be an
-      // explicit skill:/node: prefix or a file glob; bare name → error.
+      // Contract-less phase — dual-track rule: every phase-declared channel
+      // entry must be an explicit skill:/node: prefix or a file glob; bare
+      // name → error (graph-level entries are validated at graph scope).
       for (const c of channels) {
         if (c.startsWith('skill:') || c.startsWith('node:') || isGlobShape(c)) continue;
         errors.push(
@@ -497,7 +616,7 @@ function checkPhaseChannels(
     const skill = skills.find((s) => s.name === skillName);
     if (!skill) {
       // Skill not in package, or contract-less (review-type — contract graph-decided):
-      // every channels entry must be an explicit skill:/node: prefix or a file glob; bare name → error.
+      // every phase-declared channel entry must be an explicit skill:/node: prefix or a file glob; bare name → error.
       for (const c of channels) {
         if (c.startsWith('skill:') || c.startsWith('node:') || isGlobShape(c)) continue;
         errors.push(
@@ -507,7 +626,7 @@ function checkPhaseChannels(
       continue;
     }
 
-    checkForwardCoverage(skill, channels, prefix, errors);
+    checkForwardCoverage(skill, effective, prefix, errors);
     checkReverseResolution(skill, channels, dependsOn, nodeIds, prefix, errors, warnings);
   }
 }
@@ -569,13 +688,8 @@ function checkReverseResolution(
   for (const w of resolved.warnings) {
     warnings.push(`${prefix} — ${w}`);
   }
-  // `node:` target existence — cross-level target must exist in graph
-  for (const c of channels) {
-    if (c.startsWith('node:')) {
-      const target = c.slice('node:'.length);
-      if (!nodeIds.has(target)) {
-        errors.push(`${prefix} — node: channel "${c}" targets missing phase '${target}'`);
-      }
-    }
-  }
+  // Phase-declared node: targets are NOT membership-checked at load — run-scope
+  // semantics: an out-of-run target warns + strips at dispatch (legal
+  // cross-run composition references). Graph-level node: targets ARE
+  // membership-checked at load (validateGraphContracts, flattened set).
 }

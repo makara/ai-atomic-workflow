@@ -1,6 +1,6 @@
 ---
 name: atom-graph-design
-description: 'Entry skill for graph topology design — loads atom-graph-spec, analyzes requirements, designs phase list with dependsOn/when/channels. Trigger: graph-design phase in graph-generate graph.'
+description: 'Entry skill for graph topology design — loads atom-graph-spec, analyzes requirements, designs phase list with dependsOn/when/channels. Trigger: spec phase in graph-generate graph.'
 user-invocable: false
 version: 1.2.0
 last_updated: '2026-08-03'
@@ -16,7 +16,7 @@ Entry skill for graph topology design. Uses atom-kernel interview() solve mode �
 
 ### From upstream
 
-- scope-confirm
+- entry
 
 ### Reference skills
 
@@ -24,7 +24,7 @@ Entry skill for graph topology design. Uses atom-kernel interview() solve mode �
 
 ## Entry
 
-**MUST INTERVIEW** — when dispatched by atom-phase-handler for graph-design phase node. Execute interview() solve mode per atom-kernel §interview() behavior contract.
+**MUST INTERVIEW** — when dispatched by atom-phase-handler for the spec phase node in the graph-generate maker journey. Execute interview() solve mode per atom-kernel §interview() behavior contract.
 
 ## Flow
 
@@ -38,7 +38,7 @@ interview({ goal: "design graph topology for <scope>", research: true, context }
 
 #### confirm(goal)
 
-Confirm design goal with user via interview(). Read upstream outputs for scope. Confirm:
+Confirm design goal with user via interview(). Read the entry output for scope. Confirm:
 
 - Graph name and purpose — what workflow it orchestrates
 - Phase count estimate — start-to-end phases needed
@@ -102,7 +102,7 @@ User rejects any decision → return to think. Revise. Re-interview affected dec
 
 #### Output
 
-When all decisions confirmed — write design to graph-design output (main agent collects):
+When all decisions confirmed — write design to the spec output (main agent collects):
 
 ```
 graph_name: <name>

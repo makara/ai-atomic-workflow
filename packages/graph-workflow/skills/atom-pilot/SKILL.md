@@ -33,8 +33,14 @@ Execution flow:
 4. **Run Mode flags** (the mode is a per-activation decision made by the built-in `$run-mode-confirm` prologue node — the pilot never asks):
    - `--auto` flag → `args: { mode: 'auto' }`; `--manual` flag → `args: { mode: 'manual' }`; neither → pass NO mode arg — the confirm node asks the user on first dispatch (Manual recommended — absence never means auto).
    - Direct MCP callers (no pilot) pass `args.mode` explicitly or leave it unset — absence never means auto.
-5. Call graph_start { graphName, args? } → get { runId, node }
-6. Enter execute→advance loop per Loop Mechanics — the first dispatched node is the activation prefix (`$run-mode-confirm` when the graph has approvals, `$load-constraints` always); execute it like any main node.
+5. Call graph_start { graphName, args? } → get { runId, node, resolvedFrom, resolvedPath, description?, snapshot }
+6. **Identity banner (before first node)** — display the run identity so the executed graph is explicit from the start:
+   ```
+   Executing <graphName> (<resolvedFrom>) — <description>
+   from: <resolvedPath>
+   ```
+   When the graph produces artifacts (maker journey, e.g. `graph-generate`), state the two-level model: the graph being EXECUTED vs the artifact being PRODUCED (the produced artifact name comes from the entry scope interview — the pilot never guesses it). `resolvedFrom` (`project` | `builtin` | `fallback`) makes same-name shadowing explicit — never let the agent discover the resolution source post-hoc.
+7. Enter execute→advance loop per Loop Mechanics — the first dispatched node is the activation prefix (`$run-mode-confirm` when the graph has approvals, `$load-constraints` always); execute it like any main node.
 
 Verbosity: `--verbose` show MCP call summaries + judgment details. `--debug` add raw MCP JSON. Default quiet.
 
@@ -45,10 +51,10 @@ Verbosity: `--verbose` show MCP call summaries + judgment details. `--debug` add
 Detect graph-scheduler MCP tools at runtime — 9-tool substring matching rules live in atom-kernel §Graph-Scheduler Tool Detection (platform primitives, loaded with the kernel). Tool parameter and return value schemas unchanged (see §MCP Tool Reference).
 
 ```
-graph_start { graphName, args? } → { runId, node: NodeDetail | null, snapshot: GraphSnapshot }
+graph_start { graphName, args? } → { runId, node: NodeDetail | null, snapshot: GraphSnapshot, resolvedFrom: project|builtin|fallback, resolvedPath: string, description?: string }
 ```
 
-Scheduler resolve graph name via merged registry. Return `runId` + first `node` (NodeDetail | null) + run `snapshot` (per-node states — jump navigation + progress display; the activation prefix nodes appear in `nodes` like any run member). Agent hold `runId` for all subsequent calls.
+Scheduler resolve graph name via merged registry — project entries override builtin (project-first). Return `runId` + first `node` (NodeDetail | null) + run `snapshot` (per-node states — jump navigation + progress display; the activation prefix nodes appear in `nodes` like any run member) + resolution identity (`resolvedFrom` + `resolvedPath` + graph `description`). Agent hold `runId` for all subsequent calls.
 
 ---
 
@@ -269,5 +275,7 @@ After loop exit, report per Display Rules. Table:
 Status icons: ✅ = done, ⚠️ = failed.
 
 Also: total wall-clock time, approval decisions, retry counts.
+
+**Approval decisions** — list every approval with its chosen action + label; for auto-executed decisions, show the `rationale` (the recommendation basis — makes auto approvals auditable, F6). E.g. `spec-accept → continue (accept) — auto, rationale: design complete + user confirmed in interview`. Manual choices show the chosen option; `rationale` absent (the human IS the basis).
 
 ---

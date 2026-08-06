@@ -1,0 +1,76 @@
+name: adopt-with-docs
+# Graph-level ambient context — project glossary + ADR decisions + domain
+# modeling vocabulary for the adoption conversation; declared once. CONTEXT.md
+# also satisfies the atom-scope-interview contract coverage statically.
+context:
+  - ./CONTEXT.md
+  - docs/adr/*.md
+  - skill:domain-modeling
+phases:
+  # Adoption stage — conversation then spec production.
+  - id: adopt-scope
+    type: main
+    dependsOn: []
+    skill: atom-scope-interview
+    task: |
+      Execute scope interview per atom-scope-interview.
+
+      Topics: idea_goal (raw, unfogged), doc_trace_intent.
+
+      Input document resolution: composed → input_document = upstream report
+      path; standalone (raw-idea) → input_document: none.
+
+      Output contract: scope_complete, idea_goal, doc_trace_intent,
+      input_document (path | none).
+
+  # Adoption conversation — grilling adopts the produced requirements.
+  - id: adopting
+    type: main
+    dependsOn: [adopt-scope]
+    skill: grilling
+    task: |
+      Execute grilling graph mode per grilling skill.
+
+      Input document (from adopt-scope output): present → record appends to it
+      (appended_to set); absent → record_path grilling-derived — never asked.
+      No-content rule: adopt-scope output shows idea_goal: none (user confirmed
+      nothing to adopt) → append NO record (no appendix section), change_name
+      empty, doc_updates empty, adr_created false — zero side effects.
+      Domain-modeling side effects (user-confirmed, never autonomous):
+      CONTEXT.md term updates; ADR decision — always asked, three-condition
+      test shapes the recommendation, never the decision.
+
+      Output contract: consensus, change_name, doc_updates, adr_created,
+      adr_path, input_document, appended_to, record_path.
+
+  # Adoption approval — Continue → spec production; re-adopt/restart dynamic.
+  - id: adopt-accept
+    type: approval
+    dependsOn: [adopting]
+    task: |
+      Adoption consensus accepted?
+
+      Review the adoption record (record_path) before deciding. Continue —
+      adopted requirements materialize as the OpenSpec change (spec-propose),
+      then implementation (spec-implement). No-content rule: adopting output
+      change_name empty (nothing to adopt) → recommend end (end action
+      completes the run — auto mode ends automatically).
+  # Spec production — openspec-propose (headless). Reads the adoption record
+  # (change_name / adr_created / decisions) via the adopting stream — declared
+  # read edge (composition: sibling phase; standalone: stripped at dispatch).
+  - id: spec-propose
+    type: main
+    dependsOn: [adopt-accept]
+    skill: openspec-propose
+    channels:
+      - node:adopting
+    task: |
+      Generate delta spec change per openspec-propose (headless — change
+      resolution per skill Headless Mode).
+
+      Change name from adopting output change_name (echo); change exists →
+      update the existing change in place (no duplicates). Echo
+      adr_created + decisions (track gate + pipeline-done consume).
+
+      Output contract: change_name, domains, file_paths, validation_result,
+      spec_status, adr_created (echo), decisions (echo).

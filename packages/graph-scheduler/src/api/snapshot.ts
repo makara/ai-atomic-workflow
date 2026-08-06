@@ -9,7 +9,7 @@
  */
 
 import { Effect } from 'effect';
-import { stripCrossRunChannels } from '../context/resolve-channels.js';
+import { mergeChannelScopes, stripCrossRunChannels } from '../context/resolve-channels.js';
 import { debugLog } from '../debug.js';
 import { resolveArgs } from '../flow-flatten.js';
 import type { FsmNodeState } from '../fsm/effects.js';
@@ -24,7 +24,7 @@ import { DispatchConfigError, type NodeDetailInput } from '../types.js';
 /** Constant handler skill — dispatch types main/approval share it. */
 const HANDLER_SKILL = 'atom-phase-handler';
 
-/** per-node state entry in snapshots — status + retry + timing (M2) */
+/** per-node state entry in snapshots — status + retry + timing */
 export interface ISnapshotNode {
   readonly nodeId: string;
   readonly status: string;
@@ -51,7 +51,7 @@ export interface IGraphSnapshot {
   readonly completedCount: number;
   readonly createdAt: string;
   readonly updatedAt: string;
-  /** per-node execution states — enables jump-target enumeration without graph_status (M2) */
+  /** per-node execution states — enables jump-target enumeration without graph_status */
   readonly nodes: ReadonlyArray<ISnapshotNode>;
 }
 
@@ -126,11 +126,29 @@ export function buildNodeDetail(input: NodeDetailInput): Effect.Effect<INodeDeta
       const phase = allPhases.find((p) => p.id === input.phaseId);
       if (!phase) return null;
 
+      // Global-channel merge — two-scope context model: the default layer
+      // (config.json `context`) merged with the graph's top-level `context:`,
+      // prepended to the phase's own channels (dedup, config first). The
+      // merge is deterministic per graph — no per-phase inheritance logic.
+      // Phase channels get an identity-preserving fast path: when no outer
+      // scope exists, mergeChannelScopes returns the phase's own array
+      // reference, so the strip/dedup identity check below still
+      // short-circuits.
+      const mergedChannels = mergeChannelScopes(input.projectContext, input.graph.context, phase.channels);
+
+      // Promotion self-skip — a node never receives its own promoted stream
+      // (`node:<ownId>` from the global channel): self-read is undefined and
+      // would inject the node's own stale output from a previous round.
+      const selfSkipped =
+        mergedChannels && mergedChannels.includes(`node:${input.phaseId}`)
+          ? mergedChannels.filter((c) => c !== `node:${input.phaseId}`)
+          : mergedChannels;
+
       // Dispatch-time run-scope gate — strip cross-run `node:` targets before
       // they reach the agent (the agent can no longer see out-of-run references).
       // Run node set = author phases + prologue (prologue is in every run).
       const runNodeIds = new Set(allPhases.map((p) => p.id));
-      const { channels, warnings } = stripCrossRunChannels(phase.channels, runNodeIds);
+      const { channels, warnings } = stripCrossRunChannels(selfSkipped, runNodeIds);
       for (const w of warnings) {
         debugLog('runtime', { event: 'cross_run_channel_stripped', nodeId: input.phaseId, warning: w });
       }

@@ -17,7 +17,6 @@
         "atom-pilot",
         "atom-scope-interview",
         "atom-skill-spec",
-        "atom-skill-writer",
         "setup-atomic-workflow"
       ]
     }

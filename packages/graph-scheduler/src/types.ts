@@ -42,7 +42,8 @@ export class FlowPhaseError extends Error {
   readonly _tag = 'FlowPhaseError' as const;
   constructor(
     readonly phaseId: string,
-    readonly code: 'DYNAMIC_EXPRESSION' | 'MAX_DEPTH_EXCEEDED' | 'NAME_CONFLICT' | 'GRAPH_NOT_FOUND',
+    readonly code:
+      'DYNAMIC_EXPRESSION' | 'MAX_DEPTH_EXCEEDED' | 'NAME_CONFLICT' | 'GRAPH_NOT_FOUND' | 'BARE_GRAPH_CHANNEL',
     message: string,
   ) {
     super(message);
@@ -86,6 +87,12 @@ export interface NodeDetailInput {
   readonly nodeState: FsmNodeState;
   readonly graph: TaskflowGraph;
   readonly args: Record<string, unknown> | null;
+  /**
+   * Project-level ambient context (config.json `context`) — default layer of
+   * the global channel, merged with the graph's `context:` at dispatch.
+   * Absent → empty project scope.
+   */
+  readonly projectContext?: readonly string[];
 }
 
 /** Next-node construction input — single object, all fields required; args matches GraphRun (null when absent). */

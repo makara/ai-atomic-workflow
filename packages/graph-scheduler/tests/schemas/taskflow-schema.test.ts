@@ -239,4 +239,37 @@ describe('TaskflowSchema — flow type phases', () => {
     const result = TaskflowSchema.safeParse(raw);
     expect(result.success).toBe(true);
   });
+
+  it('accepts top-level context — graph-level ambient scope (global channel)', () => {
+    const raw = {
+      name: 'with-graph-context',
+      context: ['skill:atom-graph-spec', './CONTEXT.md', 'node:requirement/arch-review'],
+      phases: [{ id: 'p1', type: 'main', task: 'run' }],
+    };
+    const result = TaskflowSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.context).toEqual(['skill:atom-graph-spec', './CONTEXT.md', 'node:requirement/arch-review']);
+    }
+  });
+
+  it('rejects legacy top-level channels key — loud rename hint, no silent strip', () => {
+    const raw = {
+      channels: ['skill:atom-graph-spec'],
+      phases: [{ id: 'p1', type: 'main', task: 'run' }],
+    };
+    const result = TaskflowSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    const messages = result.error!.issues.map((i) => i.message).join('\n');
+    expect(messages).toContain('context');
+  });
+
+  it('rejects non-array top-level context', () => {
+    const raw = {
+      context: 'skill:atom-graph-spec',
+      phases: [{ id: 'p1', type: 'main', task: 'run' }],
+    };
+    const result = TaskflowSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+  });
 });

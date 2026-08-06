@@ -175,6 +175,7 @@ describe('gate jump transport seam', () => {
     expect(r3.snapshot.nodes.find((n) => n.nodeId === 'writer')?.retryCount).toBe(1);
     expect(nodeStatus(r3.snapshot, 'review')).toBe('pending');
     expect(nodeStatus(r3.snapshot, 'gate')).toBe('pending');
+    // Gate-only graph: no approval → no $run-mode-confirm (approval-only synthesis)
     expect(r3.node!.nodeId).toBe('$load-constraints');
     expect(r3.node!.retryAttempt).toBe(1);
 
@@ -213,7 +214,7 @@ describe('gate jump transport seam', () => {
     await rt.graphAdvance(runId, 'writer', 10);
     await rt.graphAdvance(runId, 'review', 10);
     await rt.graphAdvance(runId, 'gate', 10, 'writer'); // JUMP reset — retryCount 1
-    await rt.graphAdvance(runId, '$load-constraints', 0); // P prefix re-run
+    await rt.graphAdvance(runId, '$load-constraints', 0); // P prefix re-run (gate-only: no confirm)
     expect(nodeStatus(await rt.graphStatus(runId), 'writer')).toBe('active');
 
     // Round 2 — gate no-match (pass-through) → accept → drain complete

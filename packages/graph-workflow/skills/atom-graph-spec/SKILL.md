@@ -3,8 +3,8 @@ name: atom-graph-spec
 description: Reference for .taskflow.yaml graph format specification — PhaseSchema, topology, gate rework jumps, join modes, channels, approval decision confirmation, branch routes, Run Mode. Use when writing or reviewing taskflow graphs, mentions graph format, graph definition, PhaseSchema.
 argument-hint: none (reference skill)
 user-invocable: true
-version: 1.4.0
-last_updated: '2026-08-04'
+version: 1.5.0
+last_updated: '2026-08-06'
 ---
 
 > **Runtime constraints** — load `atom-phase-handler` for PhaseSchema reference.
@@ -26,6 +26,7 @@ Intended consumers: `atom-graph-design`, `code-review`, `atom-graph-writer`.
 |Field|Type|Required|Purpose|
 |-|-|-|-|
 |`name`|string|yes|Graph identifier — resolved by scheduler registry. Kebab-case.|
+|`description`|string|no|Purpose-focused free text — states what the graph does/produces (identity metadata, displayed in the pilot banner before the first node; carried by `graph_start`). Optional, non-enumerated, zero behavior branching — a description is identity for humans, never a machine-consumed directive.|
 |`version`|number|no|Schema version. Defaults to 1 — omit.|
 |`phases`|Phase[]|yes|Phase list. Declaration order cosmetic — execution order resolved exclusively by dependsOn DAG. List in dependency order for readability.|
 
@@ -42,7 +43,7 @@ YAML field names shown below. Scheduler resolves to internal NodeDetail fields a
 ||`agent`|`agent`|string[]?|`main`|Agent hints — priority-ordered sub-agent type preferences (e.g. `[reviewer, task]`). Advisory: skills pick the first available type when they dispatch; absent → platform default. Arrays may carry multi-platform spellings (e.g. `[reviewer, explore, task, general]`) — availability and the platform default resolve per atom-kernel §Platform Spellings. Injected as `## Agent hints:` block by atom-phase-handler.|
 |`use`|—|string|`flow` type|Referenced graph name. Static constant — merge-at-load flattens. `{...}` dynamic expression → error (Phase 2 deferred). Required for flow — the only flow field (def/with/maxDepth removed).|
 |`task`|`task`|string?|`main`, `approval`|Task instruction — executed inline (main) / full card prompt (approval — first line = header ≤30 chars, remaining lines = card body; handler truncates as fallback and appends the generic "Free input overrides." sentence). Use block scalar `|` per §YAML Format Rules.|
-||`channels`|`channels`|string[]?|all|Channel entries — main: derived from the dispatched skill's `## Context Requirements` contract (`skill:<name>` reference, `node:<id>` cross-level upstream, bare contract-table match, or file glob); gate/approval: `node:`-only entries (judgment context — schema-level restriction). Contract source dual-track: phase declares `skill` → that skill's contract; no `skill` → explicit `skill:`/`node:`/glob only, bare name errors. Resolved deterministically by the shared resolver (validate + runtime same implementation). Replaces legacy `context`.|
+||`channels`|`channels`|string[]?|all|Phase-level context additions — uniform across main/approval/gate (all entry kinds legal, no per-type rules). Entry type derived from the dispatched skill's `## Context Requirements` contract when one exists (`skill:<name>` reference, `node:<id>` read edge to a node stream, bare contract-table match, or file glob); no `skill` → explicit `skill:`/`node:`/glob only, bare name errors. `node:<id>` entries are read edges to non-`dependsOn` node streams. Flow phases SHALL NOT declare `channels` (loud rejection). Ambient context lives in the graph top-level `context:` (global channel). Resolved deterministically by the shared resolver (validate + runtime same implementation). See §YAML channels Field.|
 ||`route`|`route`|string?|all|Route membership — declared route id. Flows propagate their id to children (flatten); absent = implicit default route (always active). See §Routes.|
 ||`jumps`|`jumps`|Jump[]?|`gate`|Rework jumps — `[{when, to}]`: `when` is a natural-language condition (agent-judged), `to` an explicit BACKWARD target node id (upstream terminal — validator-enforced). Required non-empty on gate; forbidden on all other types (loud rejection).|
 ||`routing`|`routingActions`|Route[]?|`approval`|Decision routing with nested `actions` array — declared ONLY in branch-route scenarios; each action declares `target` (node or route id) + `value` (stable machine id) + label/description. See §Approval Routing. Approval card header derives from `task`'s first line (fallback `Decision Required`) — no separate topic field.|
@@ -122,7 +123,7 @@ YAML format uses `routing` with nested `actions` array. Each action maps to one 
 |`label`|`label`|string|Option label displayed in question()|
 |`description`|`description`|string|Option description displayed in question()|
 
-No static default field exists — Run Mode auto executes the AI recommendation (agent-judged from the judgment context — direct dependsOn outputs + `channels` `node:` targets — plus snapshot + run mode), never a declared action.
+No static default field exists — Run Mode auto executes the AI recommendation (agent-judged from the judgment context — direct dependsOn outputs + `channels` `node:` targets + global-context `node:` streams — plus snapshot + run mode), never a declared action.
 
 ---
 
@@ -132,7 +133,7 @@ No static default field exists — Run Mode auto executes the AI recommendation 
 
 1. **Acyclic** — NO dependency cycles. `A → B → A` invalid. Cycle detection: check transitive closure.
 2. **Minimal** — declare only direct dependencies. Transitive deps resolved implicitly.
-3. **Redundancy check** — `dependsOn: [A, B]` where `B` depends on `A` → drop `A`. Only leaf deps needed. Judgment context is NOT a dependsOn concern — gate jump conditions and approval recommendations reference the judgment context (direct dependsOn outputs + `channels` `node:` targets), never implicit dependsOn edges (§Gate Type; dependsOn stays purely topological).
+3. **Redundancy check** — `dependsOn: [A, B]` where `B` depends on `A` → drop `A`. Only leaf deps needed. Judgment context is NOT a dependsOn concern — gate jump conditions and approval recommendations reference the judgment context (direct dependsOn outputs + `channels` `node:` targets + global-context `node:` streams), never implicit dependsOn edges (§Gate Type; dependsOn stays purely topological).
 4. **Entry nodes** — exactly one phase with `dependsOn: []`. Single entry point. Exception — orchestrators with multiple entry roots (entry-rooted flows) declare several zero-in-degree phases; dispatch follows declaration order (load-bearing).
 
 ## Join Mode Rules
@@ -162,7 +163,7 @@ Natural-language rework conditions — LLM-evaluated by the agent at gate dispat
 1. **Observable facts** — reference concrete output contract fields: `review/arch-review output shows top_rec_remaining: false`
 2. **Decision values** — approval decisions reference the chosen action's stable `value`, never its display label: `review-accept output shows decision value: implement` (label is pure display — reorder-safe)
 3. **retryCount bounds** — bounded conditions reference the target node's `retryCount` (single counter — JUMP increments, never zeroes): `apply-change retryCount < 2` (bounded rework), `loop-entry retryCount >= 8` (bound exhausted → condition false → pass through, end recommended downstream)
-4. **Scope-bounded** — reference outputs of direct `dependsOn` ∪ `channels` `node:` targets ∪ jump targets exclusively. NEVER sibling output existence (`no … output present`) or hardcoded `.taskflow/outputs/` paths.
+4. **Scope-bounded** — reference outputs of direct `dependsOn` ∪ `channels` `node:` targets ∪ global-context `node:` streams exclusively; jump targets are in scope for their retryCount bound only. NEVER sibling output existence (`no … output present`) or hardcoded `.taskflow/outputs/` paths.
 5. **Conservative** — ambiguous judgment → no match → pass through. Do NOT fabricate a jump.
 
 ## Anti-Patterns
@@ -174,7 +175,7 @@ Natural-language rework conditions — LLM-evaluated by the agent at gate dispat
 |`"user said yes"`|`"plan-accept output shows decision value: proceed"`|
 |`"no sibling output present"`|`"scope-confirm output shows save_location and no skill_path"`|
 
-Referenced outputs must sit in the gate's judgment scope (direct dependsOn / `channels` `node:` / jump targets) — a referenced node outside the scope declares `channels: [node:<id>]`.
+Referenced outputs must sit in the gate's judgment scope (direct `dependsOn` / `channels` `node:` / global-context `node:` streams) — a referenced node outside the scope declares `channels: [node:<id>]`; a jump target's own outputs need a channel too (its retryCount bound is snapshot data, always in scope).
 
 ---
 
@@ -206,9 +207,18 @@ Entry skills declare:
 - **Reference skills** — skill names loaded by plain name. Handler resolves and injects as `## Reference: <skill-name>`.
 - **Files** — project file globs. Handler resolves before dispatch. Injected as `## File: <path>`.
 
-## YAML channels Field
+## YAML channels Field — two-scope context model
 
-Graph YAML `channels` field derives from the dispatched skill's contract — type comes from the contract tables, never guessed (main); gate/approval declare `node:`-only entries (judgment context, schema-level restriction):
+Context delivery has two concepts, one field each:
+
+- **Global channel** — graph top-level `context:` (plus `.graph-scheduler/config.json` `context:` as the project default layer). Ambient bundle injected into EVERY phase. One deterministic merge (config entries first, exact-string dedup), identical for every phase, materialized at dispatch.
+- **Node channels** — every node's output is a stream named `<nodeId>`. Phase-level `channels:` declares the phase's own context additions; `node:<id>` entries are read edges to non-`dependsOn` streams (dependsOn remains the scheduling edge and auto-injects direct outputs).
+
+```
+effective = [config `context:` defaults, graph `context:`, phase `channels:`] — dedup, order preserved
+```
+
+A phase-level `channels` entry type derives from the dispatched skill's contract — type comes from the contract tables, never guessed (main; the same resolution path serves approval/gate — uniform, no per-type rules):
 
 |YAML channel entry|Type|Example|
 |-|-|-|
@@ -220,7 +230,21 @@ Graph YAML `channels` field derives from the dispatched skill's contract — typ
 |entry duplicating a `dependsOn` node|redundant declaration → warning|—|
 |entry matching nothing|error — no fallback search|—|
 
-Approval and gate phases declare `channels` with `node:`-only entries (judgment context). Main phases declare `channels` (inline context assembly — contract source is the `skill` field when present, else explicit `skill:`/`node:`/glob entries only). The removed `preText`/`reads` fields (schema field convergence) are rejected globally — the approval card = `task` full text (first line header) + recommendation + options + free input; cross-level judgment references migrate to `channels: [node:<id>]`.
+**Graph/config-level entries** (`context:`) require an explicit `skill:`/`node:` prefix or a file-glob shape — a bare name is a load-time error (no execution-skill contract exists at those scopes). `node:` targets validate against the flattened node set at load; run-scope gating still applies at dispatch. A `node:` entry in `context:` **promotes** the named node's output stream into the global channel — every phase receives it as an ambient upstream block; the owning node skips its own promoted stream (self-read undefined). Flow phases SHALL NOT declare `channels` (schema rejection — move ambient entries to graph `context:`, data reads to the consuming phase). A child graph's `context:` applies to its own flattened phases; the parent's global channel reaches child phases via the dispatch merge — no flow-level propagation exists.
+
+The removed `preText`/`reads` fields (schema field convergence) are rejected globally — the approval card = `task` full text (first line header) + recommendation + options + free input; cross-level judgment references migrate to `channels: [node:<id>]`.
+
+## Skill-Contract Channel Derivation
+
+Phases whose work consumes a spec skill SHALL declare the executing `skill:` (e.g. graph production: spec → `atom-graph-design`, implement → `atom-graph-writer`); the skill's `## Context Requirements` reference tables derive the phase's spec channels (`skill:atom-graph-spec`) deterministically — same shared resolver, no per-phase channel declaration needed. Graph-level `context:` remains the ambient fallback layer (dual-track: skill contract + graph context). This is the systematic replacement for per-graph hand-declared spec channels — a phase with a declared skill keeps its task text to Directive + output contract (see §Task Content Spec Skill Dedup Deletion Test).
+
+## Sub-Agent Reference Inheritance
+
+When a main phase dispatches sub-agents (e.g. code-review axis agents), the injected `## Reference:` blocks SHALL be forwarded into each sub-agent's context (task() context text or a local:// handoff file). Reference skills are resolved ONCE at the phase level and shared down the tree — sub-agents SHALL NOT self-discover reference skills the parent phase already received (a reviewer re-reading atom-graph-spec is a defect, not diligence).
+
+## Output Stream Isolation (run-scoped)
+
+Node output streams SHALL be scoped per run: `.taskflow/outputs/<runId>/<nodeId>.output.txt`. A run's dispatches read/write within its own directory — stale outputs from other runs are invisible by construction. `<runId>` comes from the dispatch snapshot; missing snapshot (standalone dispatch) → un-scoped fallback with a warning. Graph tasks SHALL NOT hardcode output paths (validation error — the path is a runtime convention, see §Language Constraints).
 
 ## Constraints
 
@@ -251,15 +275,15 @@ Gate phase (`type: gate`) is the **pure rework node** — the machine counterpar
 
 ### Field Closure
 
-Gate SHALL declare exactly: `id`, `type`, `dependsOn`, `route?`, `jumps` (required, non-empty), `channels` (`node:`-only entries), `join?`. Forbidden fields (`task`/`preText`/`routing`/`agent`/`skill`/`use`) SHALL be rejected by schema (loud rejection — superRefine pattern). `preText` and `reads` are rejected globally (removed fields — schema field convergence): approval card text lives in `task`; judgment references migrate to `channels: [node:<id>]`. `jumps` required and non-empty — a gate without rework jumps is a silent pass-through; delete the gate or declare when/to pairs.
+Gate SHALL declare exactly: `id`, `type`, `dependsOn`, `route?`, `jumps` (required, non-empty), `channels` (all entry kinds — uniform, same rule as every type; judgment context = dependsOn outputs + effective channels), `join?`. Forbidden fields (`task`/`preText`/`routing`/`agent`/`skill`/`use`) SHALL be rejected by schema (loud rejection — superRefine pattern). `preText` and `reads` are rejected globally (removed fields — schema field convergence): approval card text lives in `task`; judgment references migrate to `channels: [node:<id>]`. `jumps` required and non-empty — a gate without rework jumps is a silent pass-through; delete the gate or declare when/to pairs.
 
 ### Jump Semantics
 
-1. **jumps** — `[{when, to}]`: `when` is a natural-language condition (agent-judged against the judgment context — direct dependsOn outputs + `channels` `node:` targets — plus snapshot + run mode), `to` an explicit BACKWARD target node id — an upstream terminal node (validator-enforced) (§Gate Jump Conditions).
+1. **jumps** — `[{when, to}]`: `when` is a natural-language condition (agent-judged against the judgment context — direct dependsOn outputs + effective channels — plus snapshot + run mode), `to` an explicit BACKWARD target node id — an upstream terminal node (validator-enforced) (§Gate Jump Conditions).
 2. **Evaluation** — conditions evaluated in declaration order; the first match selects its jump — stop. No match = pass through.
 3. **Hit → backward jump** — the target plus its downstream terminal nodes reset to `pending` (JUMP closure); the target's `retryCount` increments (never zeroed — bounds reference the counter); upstream nodes are KEPT (their outputs stay — the rework reuses them).
 4. **No hit → pass through** — zero forward routing: the gate activates nothing, routes nothing forward, blocks nothing. Downstream readiness resolves topologically as usual.
-5. **Judgment context** — direct dependsOn outputs (auto-injected, main parity) + `channels` `node:` targets; handler assembles exactly those outputs + current snapshot (per-node states incl. retryCount) + run mode for evaluation. `dependsOn` stays purely topological. Removed `reads` (schema field convergence) — cross-level references declare `channels: [node:<id>]`.
+5. **Judgment context** — direct dependsOn outputs (auto-injected, main parity) + effective channels (`node:` targets, reference skills, files — uniform entry kinds for every type); handler assembles exactly those outputs + current snapshot (per-node states incl. retryCount) + run mode for evaluation. `dependsOn` stays purely topological. Removed `reads` (schema field convergence) — cross-level references declare `channels: [node:<id>]`.
 
 ### Gate+Approval Pair Pattern
 
@@ -291,7 +315,7 @@ A gate may act as a **loop router** — machine-iterating NEW artifacts instead 
 - The jump condition references the reviewer's **affirmative continuation signal** (`review/arch-review` output `top_rec_remaining: true`) — the loop re-runs while it affirms progress, not while it reports failure — AND the round bound (`loop-entry retryCount < 8`).
 - The re-round target is the **round origin `loop-entry`** — the loop re-asks scope (user-confirmed/adjusted every round) and re-runs the whole round. Round reset is structural: `review` flow `dependsOn: [loop-entry]` + `implement` flow `dependsOn: [review-accept]` — the JUMP closure resets scope → review → accept → implement in one hop.
 - **Termination is never a node** — the round-end approval recommends `end` (no Top Rec remains OR bound exhausted) or loop again (Top Rec remains AND bound not exhausted); auto mode executes the recommendation, ending automatically when end IS the recommendation. Completion is an end action or natural drain.
-- The judgment context covers every output a condition references: direct dependsOn outputs + `channels` `node:` targets (the round worker's flattened id, the entry decision node) — evaluation context is explicit, never implicit.
+- The judgment context covers every output a condition references: direct dependsOn outputs + `channels` `node:` targets + global-context `node:` streams (the round worker's flattened id, the entry decision node) — evaluation context is explicit, never implicit.
 
 ```yaml
 # arch-review-loop tail — loop-gate jump + loop-accept (decision confirmation)
@@ -338,7 +362,7 @@ platform injection < node-level task/context < skill-level `## Rules`
 
 # Approval Decision Confirmation
 
-Approval phase (`type: approval`) is the decision-confirmation node — it accepts the AI recommendation, takes free input, and routes. The default card = **Accept** (the AI recommendation) + **system free input** (question() custom:true) + **AI-generated contextual options** (retry/jump/end/branch-route — judged at execution from the judgment context (direct dependsOn outputs + `channels` `node:` targets) + snapshot + run mode, never written). Written routing actions exist ONLY for explicit branch-route selection (the sole system-wide scenario: openspec-pipeline minimal/detailed tracks).
+Approval phase (`type: approval`) is the decision-confirmation node — it accepts the AI recommendation, takes free input, and routes. The default card = **Accept** (the AI recommendation) + **system free input** (question() custom:true) + **AI-generated contextual options** (retry/jump/end/branch-route — judged at execution from the judgment context (direct dependsOn outputs + `channels` `node:` targets + global-context `node:` streams) + snapshot + run mode, never written). Written routing actions exist ONLY for explicit branch-route selection (the sole system-wide scenario: openspec-pipeline minimal/detailed tracks).
 
 ## Branch-Route Actions
 
@@ -508,7 +532,7 @@ Run Mode = auto-approve convention driven by the `$run-mode-confirm` activation 
 
 atom-phase-handler approval branch reads the `$run-mode-confirm` output:
 
-- `'auto'` → the handler judges the AI recommendation from the judgment context (direct dependsOn outputs + `channels` `node:` targets) + snapshot + run mode. A recommendation exists → auto-execute it: `IApprovalDecision { action, target?, value, label, note: 'run mode: auto' }`, decision file persisted WITH the value + label — downstream gate jump conditions consume the decision `value` exactly as the human path. When ending IS the recommendation, auto mode ends automatically (`graph_advance` `endRun`). No recommendation (judgment fails / context insufficient) → human card even in auto — never guess an action.
+- `'auto'` → the handler judges the AI recommendation from the judgment context (direct dependsOn outputs + `channels` `node:` targets + global-context `node:` streams) + snapshot + run mode. A recommendation exists → auto-execute it: `IApprovalDecision { action, target?, value, label, note: 'run mode: auto', rationale }`, decision file persisted WITH the value + label + `rationale` (one-line recommendation basis — observable output fields / decision values that drove the judgment; the auditable why). Downstream gate jump conditions consume the decision `value` exactly as the human path. When ending IS the recommendation, auto mode ends automatically (`graph_advance` `endRun`). No recommendation (judgment fails / context insufficient) → human card even in auto — never guess an action.
 - `'manual'` (or missing confirm output) → human card. No output scans, no parse/conflict fail-safe matrix — the confirm output is the single source of truth.
 
 ## Context injection
@@ -583,3 +607,41 @@ Register new graphs in the scheduler's graph registry. Without registration, `gr
    - **No hardcoded paths** — task text must not contain `.taskflow/outputs/` (validation error, mirroring the gate-condition rule).
    - **Claims match declarations** — «injected» wording must correspond to an actual declared channel or dependsOn edge (undeclared claims warn).
 3. **Gate jump conditions and approval recommendation criteria** — English, referencing observable facts in phase outputs (output contract fields, approval decision values, target-node retryCount).
+
+# Task Content Spec
+
+Normative content rules for `task` text and graph comments — the structure a task SHALL have and what it SHALL NOT repeat. Consumers: graph authors, code-review, graph-contracts validation. Rationale: the dispatched skill is the deep module holding protocol; task text is the graph-local interface.
+
+## Mandatory Task Structure
+
+Main phase tasks SHALL contain exactly three content classes, in order:
+
+1. **Directive** — what to execute/produce, referencing the phase `skill`. One line suffices: `Execute <skill> graph mode per <skill> skill` or the produce-verb for skill-less phases.
+2. **Phase-local invariants** — facts the dispatched skill cannot know: consumed output fields by name, routing/route semantics, retry bounds, phase MUST/NEVER rules (e.g. pipeline-done's incomplete-judgment check).
+3. **Output contract** — machine-parseable emission fields. Exactly one block, canonical spelling:
+
+```yaml
+Output contract: field_a, field_b (meaning)
+```
+
+Approval tasks SHALL contain: header line (≤30 chars, card topic) + decision topic + phase-local criteria only. Gate tasks SHALL have no task (schema-enforced).
+
+## Skill Dedup Deletion Test
+
+Task text SHALL NOT contain content present in the dispatched skill, the handler defaults, or atom-graph-spec conventions. Delete the sentence — nothing lost? Delete it. Prohibited content classes:
+
+- **Skill protocol steps** — interview() mechanics (confirm/research/think/interview), grilling rules (one question per turn, recommendation first), openspec CLI resolution (change-name 1-2-3), archive flows (Step 0-3), doc-maintenance pipelines.
+- **Handler-default card mechanics** — "free input overrides", "dynamic options include", "recommendation follows X" (the handler judges recommendations from judgment context itself).
+- **Injection mechanics** — "read X output (injected)", "via dependsOn implicit context", "via node:X channel". Upstream availability is handler-injected (`## Upstream:` blocks); tasks name consumed FIELDS, never files or mechanisms.
+
+## Comment Rule
+
+Graph YAML comments SHALL declare topology intent only — one line per phase block, stating structural purpose (stage role, why a gate/route exists). Prose narration of phase behavior, DAG flow, or task content SHALL NOT appear; ADR/doc references are prohibited (mirrors the why-only comment policy).
+
+## Output Contract Spelling
+
+Exactly one canonical `Output contract:` prefix per main task. The spellings `Output:`, `Emit:`, `Output (main agent collects):`, `Write output (main agent collects):` SHALL NOT appear — all four converged onto the canonical form (deterministic validation error).
+
+## Enforcement
+
+Deterministic rules (forbidden alternate spellings, legacy `Output:` form) → validation errors. Heuristic rules (output-contract presence on substantive tasks, protocol restatement, injection-mechanics wording) → validation warnings. Same scan layer as the declared-inputs task-text checks. Comment terseness is enforced by review, not scan — YAML comments are dropped at parse, unavailable to validation.

@@ -15,10 +15,41 @@ export const TaskflowSchema = z
   .object({
     /** graph name — display and reference identifier */
     name: z.string().optional(),
+    /**
+     * Purpose-focused free text describing what the graph does/produces.
+     * Identity metadata for display (surfaced in graph_start + pilot banner) —
+     * no enum, no behavior branching.
+     */
+    description: z.string().optional(),
     /** schema version */
     version: z.union([z.string(), z.number()]).optional(),
+    /**
+     * Graph-level ambient context — the global channel. Merged once at load
+     * with the config default layer (config first, dedup) and injected into
+     * every flattened phase. Entries follow graph-level rules: explicit
+     * `skill:`/`node:` prefix or file-glob shape; bare names are load-time
+     * errors (no execution-skill contract exists at this scope). `node:`
+     * entries promote the named node's output stream into the global channel
+     * (the owning node skips its own promoted stream).
+     */
+    context: z.array(z.string()).optional(),
+    /**
+     * Removed field — renamed to `context` (two-scope context model). Declared
+     * so legacy graphs fail loudly with a rename hint instead of silent
+     * strip. Never consumed.
+     */
+    channels: z.unknown().optional(),
     /** phase/node definitions — at least one required */
     phases: z.array(PhaseSchema),
+  })
+  .superRefine((data, ctx) => {
+    if (data.channels !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['channels'],
+        message: `top-level 'channels' is renamed to 'context' (two-scope context model) — rename the key in this graph definition`,
+      });
+    }
   })
   .passthrough();
 

@@ -72,18 +72,51 @@ describe('registry.json — built-in graph completeness', () => {
     }
   });
 
-  it('openspec-create is registered', () => {
+  it('artifact-workflow is NOT registered — skeleton deleted', () => {
     const registry = loadRegistry();
-    const entry = registry.find((item) => item.name === 'openspec-create');
-    expect(entry).toBeDefined();
-    expect(entry?.path).toBe('openspec-create.taskflow.yaml');
+    const entry = registry.find((item) => item.name === 'artifact-workflow');
+    expect(entry).toBeUndefined();
   });
 
-  it('openspec-pipeline is registered', () => {
+  it('skill-workflow is NOT registered — skill production folds into the improver journey', () => {
     const registry = loadRegistry();
-    const entry = registry.find((item) => item.name === 'openspec-pipeline');
+    const entry = registry.find((item) => item.name === 'skill-workflow');
+    expect(entry).toBeUndefined();
+  });
+
+  it('graph-generate is registered — the concrete maker journey graph', () => {
+    const registry = loadRegistry();
+    const entry = registry.find((item) => item.name === 'graph-generate');
     expect(entry).toBeDefined();
-    expect(entry?.path).toBe('openspec-pipeline.taskflow.yaml');
+    expect(entry?.path).toBe('graph-generate.taskflow.yaml');
+    expect(entry?.description).toMatch(/maker journey|concrete/i);
+    expect(entry?.description).toMatch(/\.graph-scheduler\/docs\//);
+  });
+
+  it('graph-workflow is NOT registered — retired name (identity redesign)', () => {
+    const registry = loadRegistry();
+    const entry = registry.find((item) => item.name === 'graph-workflow');
+    expect(entry).toBeUndefined();
+  });
+
+  it('deleted graphs are NOT registered — scenario-split clean cutover', () => {
+    const registry = loadRegistry();
+    const registered = new Set(registry.map((entry) => entry.name));
+    for (const gone of [
+      'skill-author',
+      'skill-delete',
+      'skill-change-workflow',
+      'graph-workflow',
+      'openspec-create',
+      'openspec-pipeline',
+      'spec-entry-sharpened',
+      'plan-generate',
+      'review-machinery',
+      'artifact-workflow',
+      'skill-workflow',
+    ]) {
+      expect(registered.has(gone), `${gone} must not be registered`).toBe(false);
+    }
   });
 
   it('openspec-engineer is registered', () => {
@@ -107,12 +140,18 @@ describe('registry.json — built-in graph completeness', () => {
     expect(entry).toBeUndefined();
   });
 
-  it('grill-with-docs is registered — two-track shared idea entry', () => {
+  it('adopt-with-docs is registered — requirement adoption + spec production', () => {
+    const registry = loadRegistry();
+    const entry = registry.find((item) => item.name === 'adopt-with-docs');
+    expect(entry).toBeDefined();
+    expect(entry?.path).toBe('adopt-with-docs.taskflow.yaml');
+    expect(entry?.description).toMatch(/raw idea/i);
+  });
+
+  it('grill-with-docs is NOT registered — renamed to adopt-with-docs', () => {
     const registry = loadRegistry();
     const entry = registry.find((item) => item.name === 'grill-with-docs');
-    expect(entry).toBeDefined();
-    expect(entry?.path).toBe('grill-with-docs.taskflow.yaml');
-    expect(entry?.description).toMatch(/raw idea/i);
+    expect(entry).toBeUndefined();
   });
 });
 

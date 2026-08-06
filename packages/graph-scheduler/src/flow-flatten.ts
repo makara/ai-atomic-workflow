@@ -112,10 +112,6 @@ export function flattenFlowPhases(
     const allExistingIds = new Set<string>();
     for (const np of newPhases) allExistingIds.add(np.id);
     for (const rp of phases) allExistingIds.add(rp.id);
-    // Parent-level IDs — a child `node:` channel targeting a parent node stays
-    // unprefixed (cross-level reference); anything else is a child-sibling
-    // target and must be prefixed to match the flattened graph's node IDs.
-    const parentIds = new Set(phases.map((p) => p.id));
 
     // Prefix child phase IDs — EXCEPT activation prologue reserved ids
     // (graph-global by contract: an author-declared $load-constraints inside
@@ -187,25 +183,45 @@ export function flattenFlowPhases(
         dependsOn: rewiredDependsOn,
         // when propagation removed (branch-routing redesign) — flow entry guards express
         // as preceding gate branches in the parent graph.
-        // Prefix child channels: node: targets pointing at child-sibling nodes
-        // get prefixed; parent-level targets stay unprefixed (cross-level ref).
-        // Flow input interface — flow-phase channels are the flow's
-        // input contract: propagate to ENTRY children only, merged with the
-        // child's own channels (flow-first, dedup by string). Non-entry
-        // children keep only their own channels. Never silently dropped.
+        // Channels — two sources (two-scope context model), merged dedup:
+        // 1. child graph-level context (top-level `context:` of the child
+        //    graph — its ambient layer; applies to ALL child phases;
+        //    node: targets rewritten like phase entries: child-sibling →
+        //    prefixed, parent-level stays unprefixed). Entry rules enforced
+        //    here (composition bypasses the child's standalone contract
+        //    pass): explicit skill:/node: prefix or glob shape — bare name
+        //    fails load (graph-level bare name SHALL be a load error).
+        // 2. the child phase's own channels
+        // node: targets follow the childRef rule (same as jump targets):
+        // prefix ONLY targets inside the child's own flattened set; parent-
+        // level and cross-flow flattened refs (e.g. spec-extract reading
+        // adopt/spec-propose) stay unprefixed — the composed graph's run
+        // scope resolves them.
         channels: (() => {
+          const childGraphContext = (flatChild.context ?? []).map((c) => {
+            if (c.startsWith('skill:') || c.startsWith('node:')) {
+              if (c.startsWith('node:')) {
+                const target = c.slice('node:'.length);
+                if (childIds.has(target)) return `node:${prefix}${target}`;
+              }
+              return c;
+            }
+            if (c.includes('/') || c.includes('*') || c.includes('?') || c.includes('[')) return c;
+            throw new FlowPhaseError(
+              phase.id,
+              'BARE_GRAPH_CHANNEL',
+              `child graph '${useName}' top-level context entry "${c}" is a bare name — graph-level entries require an explicit skill:/node: prefix or a file glob`,
+            );
+          });
           const childChannels = (cp.channels ?? []).map((c) => {
             if (c.startsWith('node:')) {
               const target = c.slice('node:'.length);
-              if (!parentIds.has(target)) return `node:${prefix}${target}`;
+              if (childIds.has(target)) return `node:${prefix}${target}`;
             }
             return c;
           });
-          const flowChannels = phase.channels ?? [];
-          if (isEntryInChild && flowChannels.length > 0) {
-            return [...new Set([...flowChannels, ...childChannels])];
-          }
-          return childChannels.length > 0 ? childChannels : undefined;
+          const merged = [...new Set([...childGraphContext, ...childChannels])];
+          return merged.length > 0 ? merged : undefined;
         })(),
         routing: prefixedRouting,
         jumps: prefixedJumps,

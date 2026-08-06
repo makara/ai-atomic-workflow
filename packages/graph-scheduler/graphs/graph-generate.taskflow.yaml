@@ -1,114 +1,121 @@
 name: graph-generate
+# Maker journey — produces .taskflow.yaml graphs (name states the operation).
+description: Maker journey — produces .taskflow.yaml graph artifacts for end-user projects.
+# Graph-level ambient context — phases consume atom-graph-spec without
+# per-node declaration; entry skips its own CONTEXT.md declaration (project
+# glossary via config default layer). CONTEXT.md also satisfies the
+# atom-scope-interview contract coverage statically.
+context:
+  - skill:atom-graph-spec
+  - ./CONTEXT.md
 phases:
-  - id: scope-confirm
+  # Maker journey — concrete graph production (single kind=graph, single
+  # operation=create). No skeleton, no kind switch, no skill co-production.
+  - id: entry
     type: main
     dependsOn: []
     skill: atom-scope-interview
-    channels:
-      - ./CONTEXT.md
     task: |
-      Execute scope interview per atom-scope-interview.
+      Execute scope interview per atom-scope-interview (maker journey —
+      kind=graph, operation=create; no kind switch, no skill co-production).
 
-      Topics: graph name and purpose; scope (start-to-end phases, user interactions, agent tasks); skill dependencies (entry skills for main phases); dependencies (other graphs or skills to reference); save location.
+      Mandatory confirmation — SHALL run on EVERY activation: confirm graph
+      name, topology scope (purpose, phases, skill dependencies), save
+      location (default .graph-scheduler/graphs/). NEVER auto-skip.
 
-      Output: confirmed graph name and purpose, full phase topology (ids, types, dependsOn edges, gate branches, join modes, channels), skill dependencies, scope_complete: true, save_location.
+      Foreign-project degradation: ./CONTEXT.md may be absent (end-user
+      project without the repo domain glossary) — skip the domain-model
+      lookup and interview scope directly; absence is NOT a failure.
 
-  - id: graph-design
+      Output contract: graph_name, scope, save_location, scope_complete.
+
+  # Spec — design the phase topology per atom-graph-design (solve mode);
+  # the skill contract derives the atom-graph-spec reference channel.
+  - id: spec
     type: main
-    dependsOn: [scope-confirm]
+    dependsOn: [entry]
     skill: atom-graph-design
-    channels:
-      - skill:atom-graph-spec
     task: |
-      Design graph topology using atom-kernel interview() solve mode — confirm goal → research specs → think topology → interview decisions → repeat until confirmed.
+      Execute atom-graph-design graph mode per atom-graph-design skill —
+      entry scope is the design input; interview solve mode, present design
+      decisions one at a time.
 
-      Read scope-confirm output (injected).
+      Output contract: design, graph_name (echo), save_location (echo),
+      scope_complete (echo).
 
-      Execute interview({ goal: "design graph topology for confirmed scope", research: true, context }) per atom-kernel §interview() solve mode:
+  # Spec accept — design confirmed before any write (spec-first).
+  - id: spec-accept
+    type: approval
+    dependsOn: [spec]
+    channels:
+      - node:spec
+    task: |
+      Accept the graph design?
 
-      confirm(goal): Confirm design goal with user via interview(). Confirm graph name, purpose, phase count estimate, flow-type sub-graph calls, save location. Never skip — goal consensus required.
+      Decision: design per atom-graph-spec — accept when complete; revise
+      otherwise.
 
-      research: Load atom-graph-spec. Look up PhaseSchema fields, topology constraints (acyclic, minimal deps, single entry), gate branch rules (natural-language conditions referencing observable facts), flow phase constraints (use/def, depth cap), approval routing patterns. Scan existing graphs for patterns.
-
-      think: Design complete phase topology — ids (kebab-case), types (main/approval/flow), dependsOn edges (DAG, no cycles), gate branches (conditions referencing upstream outputs / decision values), join modes (all/any), channels. Validate per atom-graph-spec §Topology Constraints: no cycles, all reachable, branch conditions observable, flow phases have use or def.
-
-      interview(details): Present design decisions one at a time via question() — graph name, phase count/types, dependsOn edges, gate branches, approval routing. Recommendation first. User rejects → return to think, revise, re-interview affected decisions only.
-
-      Output: When all confirmed, write design (main agent collects) per atom-graph-design output format.
-
-  - id: graph-write
+  # Implement — write artifact + registry entry + attached doc (one write
+  # node = one rework target).
+  - id: implement
     type: main
-    dependsOn: [graph-design]
+    dependsOn: [spec-accept]
     skill: atom-graph-writer
-    task: |
-      Generate valid .taskflow.yaml from graph design.
-
-      Read graph-design output (injected).
-      Read scope-confirm output (injected).
-      Generate complete .taskflow.yaml per atom-graph-spec format rules:
-      - Top-level name/version/phases
-      - Block scalar | for task fields
-      - Flow sequences for dependsOn
-      - Block sequences for channels
-      - routing.actions for approval phases
-      Validate against PhaseSchema constraints.
-      Write .taskflow.yaml to path specified in scope-confirm output.
-      Write output path and summary (main agent collects).
     channels:
-      - node:scope-confirm
-      - skill:atom-graph-spec
+      - node:spec
+      - node:entry
+    task: |
+      Execute atom-graph-writer graph mode per atom-graph-writer skill —
+      produce the graph artifact per the confirmed design + atom-graph-spec.
 
-  - id: graph-review
+      Three-path bundle (project convention, writer skill cannot know it):
+      graph file at .graph-scheduler/graphs/<name>.taskflow.yaml (default
+      save_location), registry entry in .graph-scheduler/graphs/registry.json,
+      attached usage doc at .graph-scheduler/docs/<name>.md.
+
+      Load-probe validation: graph_start the produced graph → expect a node
+      return + 0 contractWarnings → then graph_force_end the probe run.
+      Report the probe result; deviations from design SHALL be reported, not
+      negotiated.
+
+      Output contract: artifact_path, registry_path, doc_path, validation
+      (passed | failed + details), graph_name (echo), summary.
+
+  # Review — kind standards injected; one review phase.
+  - id: review
     type: main
-    dependsOn: [graph-write]
+    dependsOn: [implement]
     skill: code-review
     agent: [reviewer, explore, task, general]
+    channels:
+      - node:entry
+      - node:spec
     task: |
-      Review generated .taskflow.yaml per code-review (use ## Agent hints for axis sub-agents).
+      Review the produced graph per code-review (use ## Agent hints for
+      axis sub-agents; forward the injected ## Reference blocks — axis
+      agents SHALL NOT re-discover atom-graph-spec). Standards:
+      atom-graph-spec (graph definitions) + repo-documented coding
+      standards. Spec: artifact matches the confirmed design.
 
-      Artifact: graph-write output (injected); graph-design + scope-confirm outputs (injected).
-      Standards: atom-graph-spec (injected) — schema compliance, topology safety, branch condition observability, join mode validity.
-      Spec: graph matches design — same topology, same branches, same types.
+      Output contract: report (machine-parseable YAML, overall:
+      pass | fail).
 
-      Output structured YAML report with overall: pass | fail. Write report (main agent collects).
-    channels:
-      - node:graph-design
-      - node:scope-confirm
-      - skill:atom-graph-spec
-
-  # Gate — bounded backward rework on FAIL (route-first: pure backward jump)
-  - id: graph-gate
+  # Gate — bounded rework on FAIL (backward jump to implement).
+  - id: gate
     type: gate
-    dependsOn: [graph-review]
+    dependsOn: [review]
     jumps:
-      - when: 'graph-review output shows overall: fail AND graph-write retryCount < 2'
-        to: graph-write
+      - when: 'review output shows overall: fail AND implement retryCount < 2'
+        to: implement
 
-  # Accept — decision confirmation (route-first: no written actions).
-  # Recommendation follows the review verdict; revise/redesign are AI-generated
-  # dynamic options, not written.
-  - id: graph-accept
+  # Accept — final artifact approval.
+  - id: accept
     type: approval
-    dependsOn: [graph-gate]
+    dependsOn: [gate]
     channels:
-      - node:graph-review
+      - node:review
     task: |
       Accept the graph?
 
-      graph-review reported the graph definition review verdict. Recommendation
-      follows the review verdict and the rework bound: accept when the graph
-      passes (usage examples follow); otherwise revise (re-run graph-write with
-      review feedback) or redesign (re-run graph-design).
-
-  - id: output-examples
-    type: main
-    dependsOn: [graph-accept]
-    task: |
-      Generate usage examples for the new graph.
-
-      Read graph-write / graph-review upstream output files.
-      Produce 2-3 concrete invocation examples:
-      - How to start the graph (graph_start payload)
-      - Expected phase flow (which phases run in what order)
-      - Sample approval decision
-      Write examples (main agent collects).
+      Decision: accept when the artifact passes review; revise/redesign
+      otherwise.

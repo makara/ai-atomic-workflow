@@ -73,7 +73,7 @@ export interface INodeDetail {
   readonly topic?: string;
   /** Approval phase — decision routing actions (replaces deprecated routes) */
   readonly routingActions?: ReadonlyArray<IApprovalAction>;
-  /** All types — channel patterns (main: skill names/file globs/node:<id> against the skill contract; gate/approval: node:<id> judgment context only) */
+  /** All types — effective channel patterns (scheduler-side scope merge: project → graph → flow → phase; main: skill names/file globs/node:<id> against the skill contract; gate/approval: all entry kinds — full-type inheritance) */
   readonly channels?: string[];
   /** Gate phase — rework jumps (route-first): agent evaluates when against judgment context; hit → backward jump target */
   readonly jumps?: ReadonlyArray<IJumpCondition>;

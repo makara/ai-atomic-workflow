@@ -27,7 +27,6 @@
         "./skills/atom-pilot",
         "./skills/atom-scope-interview",
         "./skills/atom-skill-spec",
-        "./skills/atom-skill-writer",
         "./skills/setup-atomic-workflow"
       ]
     }

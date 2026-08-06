@@ -3,7 +3,10 @@ phases:
   - id: agent-echo
     type: main
     dependsOn: []
-    task: say hello in a random language.
+    task: |
+      Say hello in a random language.
+
+      Output contract: greeting (random-language hello text).
 
   - id: approval-review
     type: approval
@@ -11,6 +14,5 @@ phases:
     task: |
       Approval Review
 
-      Agent output produced. Accept → proceed. Recommendation: accept when the
-      output is correct; free input overrides; dynamic option regenerate
-      re-runs agent-echo with feedback.
+      Decision: accept when the agent output is correct; regenerate
+      otherwise.

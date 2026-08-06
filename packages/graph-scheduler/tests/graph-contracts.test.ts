@@ -39,16 +39,10 @@ const BUILTIN_GRAPHS = [
   'doc-update.taskflow.yaml',
   'e2e-minimal.taskflow.yaml',
   'graph-generate.taskflow.yaml',
-  'grill-with-docs.taskflow.yaml',
-  'implement.taskflow.yaml',
+  'adopt-with-docs.taskflow.yaml',
   'openspec-apply.taskflow.yaml',
-  'openspec-create.taskflow.yaml',
   'openspec-engineer.taskflow.yaml',
-  'openspec-pipeline.taskflow.yaml',
-  'plan-generate.taskflow.yaml',
-  'skill-author.taskflow.yaml',
-  'skill-change-workflow.taskflow.yaml',
-  'skill-delete.taskflow.yaml',
+  'spec-implement.taskflow.yaml',
 ] as const;
 
 function loadGraph(name: string): Record<string, unknown> {
@@ -460,7 +454,7 @@ describe('2.2 route-first contract', () => {
       name: 'test',
       version: 1,
       phases: [
-        { id: 'create', type: 'flow', use: 'openspec-create', dependsOn: [] },
+        { id: 'create', type: 'flow', use: 'spec-implement', dependsOn: [] },
         {
           id: 'ap',
           type: 'approval',
@@ -468,7 +462,7 @@ describe('2.2 route-first contract', () => {
           routing: {
             actions: [
               { action: 'retry', target: 'create', label: 'Re-run flow', description: 'x' },
-              { action: 'jump', target: 'create/spec-generate', label: 'Regen', description: 'x' },
+              { action: 'jump', target: 'create/minimal-track/apply-change', label: 'Regen', description: 'x' },
             ],
           },
         },
@@ -512,12 +506,15 @@ describe('route-first fleet contract', () => {
         const actions = ((p.routing as Record<string, unknown> | undefined)?.actions ?? []) as Array<
           Record<string, unknown>
         >;
-        if (name === 'openspec-pipeline.taskflow.yaml' && p.id === 'pipeline-accept') {
-          // the ONLY branch-route scenario — two continue actions, no default
+        if (
+          (name === 'spec-implement.taskflow.yaml' && p.id === 'pipeline-accept') ||
+          (name === 'arch-review-loop.taskflow.yaml' && p.id === 'round-continue')
+        ) {
+          // the ONLY branch-route scenarios — pipeline track selection and the
+          // loop content gate (continue → proceed route + declared end); no default
           expect(actions.length, `${name}/${String(p.id)} branch-route actions`).toBe(2);
           for (const a of actions) {
             expect(a.default, `${name}/${String(p.id)} no default:true`).toBeUndefined();
-            expect(a.action).toBe('continue');
           }
         } else {
           expect(actions.length, `${name}/${String(p.id)} no written actions`).toBe(0);
@@ -538,7 +535,13 @@ describe('route-first fleet contract', () => {
         const gateUpstream = upstreamClosureOf(id, byId);
         for (const jump of jumps) {
           const target = String(jump.to);
-          expect(gateUpstream.has(target), `${name}/${id} jump ${target} upstream`).toBe(true);
+          // flow-qualified target (flowId/nodeId) is upstream when the flow is
+          // in the closure and the node lives inside it — jumps target the
+          // flow's entry node, e.g. requirement/scope-entry in arch-review-loop
+          const [flowId, nodeId] = target.split('/');
+          const isUpstream =
+            gateUpstream.has(target) || (nodeId !== undefined && byId.has(flowId) && gateUpstream.has(flowId));
+          expect(isUpstream, `${name}/${id} jump ${target} upstream`).toBe(true);
           expect(String(jump.when), `${name}/${id} jump bound`).toMatch(/retryCount/);
         }
       }
@@ -645,55 +648,15 @@ describe('2.6 approval readiness depends on review node only', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2.7 — skill-author migrated topology (route-first): mode-gate deleted,
-// linear writers with case-5 self-judgment, approval card without routing.
+// 2.14 — graph-generate concrete maker graph (identity redesign):
+// entry → spec → spec-accept → implement → review → gate → accept. Single
+// kind (graph), single operation (create); no skeleton, no kind switch, no
+// skill co-production. Implement writes .taskflow.yaml + registry entry +
+// attached doc at .graph-scheduler/docs/<name>.md.
 // ---------------------------------------------------------------------------
 
-describe('2.7 skill-author migrated topology', () => {
-  const graph = loadGraph('skill-author.taskflow.yaml');
-  const phases = graph.phases as Array<Record<string, unknown>>;
-  const depsOf = (id: string): unknown => phases.find((p) => p.id === id)?.dependsOn;
-
-  it('eight linear phases — mode-gate deleted, no end marker', () => {
-    expect(phases.map((p) => p.id)).toEqual([
-      'scope-confirm',
-      'skill-write',
-      'skill-select',
-      'edit-scope-confirm',
-      'skill-edit-write',
-      'skill-review',
-      'skill-accept',
-      'output-examples',
-    ]);
-    expect(phases.map((p) => p.id)).not.toContain('mode-gate');
-    expect(phases.some((p) => p.type === 'end')).toBe(false);
-  });
-
-  it('linear dependsOn chain — no forward gates', () => {
-    expect(depsOf('scope-confirm')).toEqual([]);
-    expect(depsOf('skill-write')).toEqual(['scope-confirm']);
-    expect(depsOf('skill-select')).toEqual(['scope-confirm']);
-    expect(depsOf('edit-scope-confirm')).toEqual(['skill-select']);
-    expect(depsOf('skill-edit-write')).toEqual(['edit-scope-confirm']);
-    expect(depsOf('skill-review')).toEqual(['skill-write', 'skill-edit-write']);
-    expect(depsOf('skill-accept')).toEqual(['skill-review']);
-    expect(depsOf('output-examples')).toEqual(['skill-accept']);
-    expect(phases.filter((p) => p.type === 'gate')).toHaveLength(0);
-  });
-
-  it('skill-accept is a decision card with no written routing', () => {
-    const accept = phases.find((p) => p.id === 'skill-accept');
-    expect(accept?.type).toBe('approval');
-    expect(accept?.routing).toBeUndefined();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 2.9 — implement graph: input-source-aware topology, finalize self-judgment
-// ---------------------------------------------------------------------------
-
-describe('2.9 implement graph topology', () => {
-  const graph = loadGraph('implement.taskflow.yaml');
+describe('2.14 graph-generate concrete maker graph topology', () => {
+  const graph = loadGraph('graph-generate.taskflow.yaml');
   const phases = graph.phases as Array<Record<string, unknown>>;
   const phaseOf = (id: string): Record<string, unknown> => {
     const p = phases.find((ph) => ph.id === id);
@@ -701,36 +664,30 @@ describe('2.9 implement graph topology', () => {
     return p!;
   };
 
-  it('six phases in dependency order with single entry and no end marker', () => {
-    expect(phases.map((p) => p.id)).toEqual([
-      'work-input',
-      'implement',
-      'implement-review',
-      'implement-gate',
-      'implement-accept',
-      'openspec-finalize',
-    ]);
-    const entries = phases.filter((p) => ((p.dependsOn ?? []) as unknown[]).length === 0);
-    expect(entries.map((p) => p.id)).toEqual(['work-input']);
+  it('seven phases in dependency order — entry node, no end marker, no flow composition', () => {
+    expect(phases.map((p) => p.id)).toEqual(['entry', 'spec', 'spec-accept', 'implement', 'review', 'gate', 'accept']);
+    expect(phases.some((p) => p.type === 'flow')).toBe(false);
+    expect(phaseOf('entry').skill).toBe('atom-scope-interview');
     expect(phases.some((p) => p.type === 'end')).toBe(false);
   });
 
-  it('implement chain depends linearly', () => {
-    expect(phaseOf('implement').dependsOn).toEqual(['work-input']);
-    expect(phaseOf('implement-review').dependsOn).toEqual(['implement']);
-    expect(phaseOf('implement-gate').dependsOn).toEqual(['implement-review']);
-    expect(phaseOf('implement-accept').dependsOn).toEqual(['implement-gate']);
-    expect(phaseOf('openspec-finalize').dependsOn).toEqual(['implement-accept']);
+  it('linear chain — spec before implement (spec-first), gate after review, bounded to implement', () => {
+    expect(phaseOf('spec').dependsOn).toEqual(['entry']);
+    expect(phaseOf('spec-accept').dependsOn).toEqual(['spec']);
+    expect(phaseOf('implement').dependsOn).toEqual(['spec-accept']);
+    expect(phaseOf('review').dependsOn).toEqual(['implement']);
+    expect(phaseOf('gate').dependsOn).toEqual(['review']);
+    expect(phaseOf('accept').dependsOn).toEqual(['gate']);
   });
 
-  it('gate auto-rework is bounded and writer-targeted — no default', () => {
-    const gate = phaseOf('implement-gate');
+  it('two approval layers — spec-accept + final accept, nothing more', () => {
+    const approvals = phases.filter((p) => p.type === 'approval');
+    expect(approvals.map((p) => p.id)).toEqual(['spec-accept', 'accept']);
+  });
+
+  it('gate is a pure backward rework jump to the writer phase, bounded, no default', () => {
+    const gate = phaseOf('gate');
     expect(gate.type).toBe('gate');
-    expect(gate.dependsOn).toEqual(['implement-review']);
-    // reads removed (schema field convergence) — reads == dependsOn, so the
-    // judgment context auto-injects; nothing migrated to channels
-    expect(gate.reads).toBeUndefined();
-    expect(gate.channels).toBeUndefined();
     const jumps = gate.jumps as Array<Record<string, unknown>>;
     expect(jumps).toHaveLength(1);
     expect(String(jumps[0].when)).toMatch(/overall: fail AND implement retryCount < 2/);
@@ -738,29 +695,210 @@ describe('2.9 implement graph topology', () => {
     expect(gate.default).toBeUndefined();
   });
 
-  it('openspec-finalize self-judges case-5 — no finalize-gate, no end marker', () => {
-    const finalize = phaseOf('openspec-finalize');
-    expect(finalize.skill).toBe('atom-openspec-archive');
-    expect(finalize.type).toBe('main');
-    // case-5 self-judgment — input not change-bound → NO WORK, archive_status: none
-    expect(String(finalize.task)).toMatch(/input_source: openspec-change/);
-    expect(String(finalize.task)).toMatch(/archive_status: none/);
+  it('entry declares foreign-project degradation + no skill co-production', () => {
+    const entry = phaseOf('entry');
+    // CONTEXT.md lives in the config default layer (global channel) —
+    // entry no longer declares per-phase channels
+    expect(entry.channels).toBeUndefined();
+    expect(graph.context).toEqual(expect.arrayContaining(['skill:atom-graph-spec']));
+    const task = String(entry.task);
+    expect(task).toMatch(/may be absent|not a failure/i);
+    expect(task).toMatch(/no skill co-production/i);
+    expect(task).not.toMatch(/kind=skill/);
+    expect(task).not.toMatch(/operation.*(edit|delete)/);
   });
 
-  it('implement-accept is pure human card — no routing, judgment context via node: channel', () => {
-    const accept = phaseOf('implement-accept');
+  it('implement output contract covers the three-path bundle + load-probe validation', () => {
+    const implement = phaseOf('implement');
+    const task = String(implement.task);
+    expect(task).toMatch(/artifact_path/);
+    expect(task).toMatch(/registry_path/);
+    expect(task).toMatch(/doc_path/);
+    expect(task).toMatch(/graph_start/);
+    expect(task).toMatch(/graph_force_end/);
+    expect(task).not.toMatch(/graph_init/);
+    expect(task).toMatch(/\.graph-scheduler\/docs\//);
+  });
+
+  it('spec/implement declare production skills — contract-driven spec injection', () => {
+    expect(phaseOf('spec').skill).toBe('atom-graph-design');
+    expect(phaseOf('implement').skill).toBe('atom-graph-writer');
+  });
+
+  it('review declares code-review with node inputs; atom-graph-spec inherited at graph level', () => {
+    const review = phaseOf('review');
+    expect(review.skill).toBe('code-review');
+    expect(review.channels).toEqual(expect.arrayContaining(['node:entry', 'node:spec']));
+    // atom-graph-spec moved to graph-level ambient scope — no per-node repeat
+    expect(review.channels).not.toContain('skill:atom-graph-spec');
+    expect(review.channels).not.toContain('node:implement');
+  });
+
+  it('no kind switch, no skill co-production — no spec_skill enum anywhere', () => {
+    for (const p of phases) {
+      const task = String(p.task ?? '');
+      expect(task).not.toMatch(/spec_skill/);
+      expect(task).not.toMatch(/atom-skill-spec/);
+      expect(task).not.toMatch(/operation \(create \| edit/);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2.15 — openspec-apply / openspec-engineer spec-skill loading rule
+// (scenario split): implementation + review nodes declare the deterministic
+// domain → spec-skill mapping rule (graph → atom-graph-spec, skill →
+// atom-skill-spec, doc → atom-doc-maintenance); no static single-kind
+// skill:atom-graph-spec channel remains.
+// ---------------------------------------------------------------------------
+
+describe('2.15 openspec-apply / openspec-engineer spec-skill rule', () => {
+  const RULE = /atom-skill-spec.*atom-doc-maintenance|graph → atom-graph-spec/s;
+
+  it('openspec-apply: apply-change + change-review declare the mapping rule', () => {
+    const graph = loadGraph('openspec-apply.taskflow.yaml');
+    const phases = graph.phases as Array<Record<string, unknown>>;
+    for (const id of ['apply-change', 'change-review']) {
+      const p = phases.find((ph) => ph.id === id);
+      expect(p, `phase ${id} present`).toBeDefined();
+      expect(String(p?.task ?? '')).toMatch(RULE);
+      expect(String(p?.task ?? '')).toMatch(/atom-doc-maintenance/);
+    }
+  });
+
+  it('openspec-engineer: implement + implement-review declare the mapping rule', () => {
+    const graph = loadGraph('openspec-engineer.taskflow.yaml');
+    const phases = graph.phases as Array<Record<string, unknown>>;
+    for (const id of ['implement', 'implement-review']) {
+      const p = phases.find((ph) => ph.id === id);
+      expect(p, `phase ${id} present`).toBeDefined();
+      expect(String(p?.task ?? '')).toMatch(RULE);
+      expect(String(p?.task ?? '')).toMatch(/atom-doc-maintenance/);
+    }
+  });
+
+  it('no static skill:atom-graph-spec channel in either implementation graph', () => {
+    for (const name of ['openspec-apply.taskflow.yaml', 'openspec-engineer.taskflow.yaml']) {
+      const graph = loadGraph(name);
+      const phases = graph.phases as Array<Record<string, unknown>>;
+      for (const p of phases) {
+        const channels = (p.channels as Array<string> | undefined) ?? [];
+        expect(channels, `${name} ${String(p.id)} channels`).not.toContain('skill:atom-graph-spec');
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2.9 — spec-implement graph (pure implementation machinery): entry extract →
+// track gate → archive → doc maintenance → terminal. No spec generation, no
+// auto-loop gate — the change comes from the adopt stage (adopt-with-docs
+// spec-propose); rework is the single loop in arch-review-loop.
+// ---------------------------------------------------------------------------
+
+describe('2.9 spec-implement graph topology', () => {
+  const graph = loadGraph('spec-implement.taskflow.yaml');
+  const phases = graph.phases as Array<Record<string, unknown>>;
+  const phaseOf = (id: string): Record<string, unknown> => {
+    const p = phases.find((ph) => ph.id === id);
+    expect(p, `phase ${id} present`).toBeDefined();
+    return p!;
+  };
+
+  it('five phases in dependency order with single entry and no end marker', () => {
+    expect(phases.map((p) => p.id)).toEqual([
+      'spec-extract',
+      'pipeline-accept',
+      'minimal-track',
+      'detailed-track',
+      'pipeline-done',
+    ]);
+    const entries = phases.filter((p) => ((p.dependsOn ?? []) as unknown[]).length === 0);
+    expect(entries.map((p) => p.id)).toEqual(['spec-extract']);
+    expect(phases.some((p) => p.type === 'end')).toBe(false);
+    // no spec production, no auto-loop gate — the single loop lives in
+    // arch-review-loop
+    expect(phases.some((p) => p.id === 'spec-generate')).toBe(false);
+    expect(phases.some((p) => p.id === 'implement-loop-gate')).toBe(false);
+  });
+
+  it('machinery chain depends linearly — twin tracks any-join to terminal; no doc-maintenance stage', () => {
+    expect(phaseOf('pipeline-accept').dependsOn).toEqual(['spec-extract']);
+    expect(phaseOf('minimal-track').dependsOn).toEqual(['pipeline-accept']);
+    expect(phaseOf('detailed-track').dependsOn).toEqual(['pipeline-accept']);
+    expect(phaseOf('pipeline-done').dependsOn).toEqual(['minimal-track', 'detailed-track']);
+    expect(phaseOf('pipeline-done').join).toBe('any');
+    // pipeline-done is the terminal — no gate after it (single loop in the
+    // composition); tracks own post-archive doc-update
+  });
+
+  it('spec-extract is extraction-only — change resolution, no generation skill', () => {
+    const extract = phaseOf('spec-extract');
+    expect(extract.type).toBe('main');
+    expect(extract.skill).toBeUndefined();
+    const task = String(extract.task);
+    expect(task).toMatch(/upstream channel when composed/);
+    expect(task).toMatch(/\{args\.changeName\}/);
+    expect(task).not.toMatch(/reportPath/);
+    expect(task).not.toMatch(/openspec-propose/);
+    expect(task).toMatch(/adr_created ECHOES the adoption record/);
+  });
+
+  it('pipeline-accept is the branch-route approval — two continue actions, no default', () => {
+    const accept = phaseOf('pipeline-accept');
     expect(accept.type).toBe('approval');
-    expect(accept.routing).toBeUndefined();
-    // reads removed (schema field convergence) — approval reads migrate to
-    // node: channels (review output not covered by direct dependsOn)
-    expect(accept.reads).toBeUndefined();
-    expect(accept.channels).toEqual(['node:implement-review']);
+    const routing = accept.routing as Record<string, unknown>;
+    const actions = (routing.actions ?? []) as Array<Record<string, unknown>>;
+    expect(actions).toHaveLength(2);
+    expect(actions.map((a) => a.action)).toEqual(['continue', 'continue']);
+    expect(actions.map((a) => a.target)).toEqual(['minimal-track', 'detailed-track']);
+    expect(actions.every((a) => a.default === undefined)).toBe(true);
   });
 
-  it('skill declarations match upstream contract reuse', () => {
-    expect(phaseOf('implement').skill).toBe('implement');
-    expect(phaseOf('implement-review').skill).toBe('code-review');
-    expect(phaseOf('openspec-finalize').skill).toBe('atom-openspec-archive');
+  it('no auto-loop gate — pipeline-done is the terminal (single loop in arch-review-loop)', () => {
+    expect(phases.some((p) => p.type === 'gate')).toBe(false);
+    expect(phaseOf('pipeline-done').channels).toEqual(
+      expect.arrayContaining([
+        'node:spec-extract',
+        'node:minimal-track/archive',
+        'node:detailed-track/openspec-archive',
+      ]),
+    );
+  });
+
+  it('track flows declare routes — post-archive doc maintenance owned by the tracks', () => {
+    expect(phaseOf('minimal-track').type).toBe('flow');
+    expect(phaseOf('minimal-track').use).toBe('openspec-apply');
+    expect(phaseOf('minimal-track').route).toBe('minimal-track');
+    expect(phaseOf('detailed-track').type).toBe('flow');
+    expect(phaseOf('detailed-track').use).toBe('openspec-engineer');
+    expect(phaseOf('detailed-track').route).toBe('detailed-track');
+    // openspec-apply / openspec-engineer run doc-update after their own
+    // archive — spec-implement declares no doc-update flow (single
+    // doc-maintenance execution per archive event)
+    expect(phases.filter((p) => p.type === 'flow' && p.use === 'doc-update')).toHaveLength(0);
+  });
+
+  it('entry/terminal channels carry the composition read edges + archive echoes', () => {
+    // spec-extract declares the composition read edges (produced change +
+    // adoption record from the adopt stage); stripped at dispatch in
+    // standalone runs (run-scope gate)
+    expect(phaseOf('spec-extract').channels).toEqual(['node:adopt/spec-propose', 'node:adopt/adopting']);
+    expect(phaseOf('pipeline-done').channels).toEqual([
+      'node:spec-extract',
+      'node:minimal-track/archive',
+      'node:detailed-track/openspec-archive',
+    ]);
+  });
+
+  it('skill declarations — no generation skill in spec-implement; openspec-propose lives in the adopt stage', () => {
+    expect(phaseOf('spec-extract').skill).toBeUndefined();
+    expect(phases.some((p) => p.skill === 'openspec-propose')).toBe(false);
+    const adopt = loadGraph('adopt-with-docs.taskflow.yaml');
+    const adoptPhases = adopt.phases as Array<Record<string, unknown>>;
+    const propose = adoptPhases.find((p) => p.id === 'spec-propose');
+    expect(propose?.skill).toBe('openspec-propose');
+    expect(propose?.dependsOn).toEqual(['adopt-accept']);
   });
 });
 
@@ -777,7 +915,7 @@ describe('2.10 openspec-engineer graph topology', () => {
     return p!;
   };
 
-  it('seven phases in dependency order with single entry and no end marker', () => {
+  it('eight phases in dependency order with single entry and no end marker', () => {
     expect(phases.map((p) => p.id)).toEqual([
       'to-spec',
       'to-tickets',
@@ -786,6 +924,7 @@ describe('2.10 openspec-engineer graph topology', () => {
       'implement-gate',
       'implement-accept',
       'openspec-archive',
+      'doc-maintenance',
     ]);
     const entries = phases.filter((p) => ((p.dependsOn ?? []) as unknown[]).length === 0);
     expect(entries.map((p) => p.id)).toEqual(['to-spec']);
@@ -799,6 +938,18 @@ describe('2.10 openspec-engineer graph topology', () => {
     expect(phaseOf('implement-gate').dependsOn).toEqual(['implement-review']);
     expect(phaseOf('implement-accept').dependsOn).toEqual(['implement-gate']);
     expect(phaseOf('openspec-archive').dependsOn).toEqual(['implement-accept']);
+    expect(phaseOf('doc-maintenance').dependsOn).toEqual(['openspec-archive']);
+  });
+
+  it('to-spec is the decided entry — single in-degree-0 entry, no interview node', () => {
+    const toSpec = phaseOf('to-spec');
+    // decided journey entry: the decision is already recorded — no
+    // interview skill, no input-source detection; the machinery track is
+    // entered raw with the recorded decision
+    expect(toSpec.dependsOn).toEqual([]);
+    expect(toSpec.skill).toBeUndefined();
+    expect(toSpec.input).toBeUndefined();
+    expect(String(toSpec.task)).toMatch(/No interview/);
   });
 
   it('gate auto-rework is bounded, contract-field, writer-targeted', () => {
@@ -832,157 +983,18 @@ describe('2.10 openspec-engineer graph topology', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2.11 — openspec-pipeline v3 lifecycle topology (route-first branch-route):
-// grill → create → branch-route approval → twin flow tracks → terminal
+// 2.13 — arch-review-loop three-stage partition topology (route-first):
+// requirement flow = arch-review production graph (scope-entry entry node →
+// report machinery → review-accept 'Requirement ready?' terminal) + adopt
+// flow = adopt-with-docs adoption graph (receives the report as input
+// document, appends dated appendix, produces the OpenSpec change) + implement
+// flow = spec-implement implementation graph (consumes the produced change →
+// track machinery → terminal, no internal auto-iteration gate) + loop-gate
+// bounded backward jump (THE single loop) to requirement/scope-entry +
+// round-end approval (no written routing).
 // ---------------------------------------------------------------------------
 
-describe('2.11 openspec-pipeline v3 lifecycle topology', () => {
-  const graph = loadGraph('openspec-pipeline.taskflow.yaml');
-  const phases = graph.phases as Array<Record<string, unknown>>;
-  const phaseOf = (id: string): Record<string, unknown> => {
-    const p = phases.find((ph) => ph.id === id);
-    expect(p, `phase ${id} present`).toBeDefined();
-    return p!;
-  };
-
-  it('six phases: idea entry → create flow → branch-route approval → twin flow tracks → terminal', () => {
-    expect(phases.map((p) => p.id)).toEqual([
-      'grill',
-      'create',
-      'pipeline-accept',
-      'minimal-track',
-      'detailed-track',
-      'pipeline-done',
-    ]);
-    // track-gate deleted — forward routing is the approval branch-route decision
-    expect(phases.map((p) => p.id)).not.toContain('track-gate');
-    const entries = phases.filter((p) => ((p.dependsOn ?? []) as unknown[]).length === 0);
-    expect(entries.map((p) => p.id)).toEqual(['grill']);
-    expect(phases.some((p) => p.type === 'end')).toBe(false);
-  });
-
-  it('composition chain: grill → create → pipeline-accept → tracks → terminal', () => {
-    expect(phaseOf('create').dependsOn).toEqual(['grill']);
-    expect(phaseOf('pipeline-accept').dependsOn).toEqual(['create']);
-    expect(phaseOf('minimal-track').dependsOn).toEqual(['pipeline-accept']);
-    expect(phaseOf('detailed-track').dependsOn).toEqual(['pipeline-accept']);
-    expect(phaseOf('pipeline-done').dependsOn).toEqual(['minimal-track', 'detailed-track']);
-  });
-
-  it('create flow declares input interface — grill consensus channel', () => {
-    const create = phaseOf('create');
-    expect(create.type).toBe('flow');
-    expect(create.channels).toEqual(expect.arrayContaining(['node:grill/grilling']));
-  });
-
-  it('entry and create are flows; tracks are flows with declared branch routes', () => {
-    expect(phaseOf('grill').type).toBe('flow');
-    expect(phaseOf('grill').use).toBe('grill-with-docs');
-    expect(phaseOf('create').type).toBe('flow');
-    expect(phaseOf('create').use).toBe('openspec-create');
-    expect(phaseOf('minimal-track').type).toBe('flow');
-    expect(phaseOf('minimal-track').use).toBe('openspec-apply');
-    expect(phaseOf('minimal-track').route).toBe('minimal-track');
-    expect(phaseOf('detailed-track').type).toBe('flow');
-    expect(phaseOf('detailed-track').use).toBe('openspec-engineer');
-    expect(phaseOf('detailed-track').route).toBe('detailed-track');
-  });
-
-  it('pipeline-accept is the ONLY branch-route approval — continue actions target the route flows, no default:true', () => {
-    const accept = phaseOf('pipeline-accept');
-    expect(accept.type).toBe('approval');
-    // reads removed — the flattened create terminal (create/spec-generate) is
-    // the direct dependsOn output, so judgment context auto-injects; no channels
-    expect(accept.reads).toBeUndefined();
-    expect(accept.channels).toBeUndefined();
-    const actions = (accept.routing as { actions: Array<Record<string, unknown>> }).actions;
-    expect(actions.map((a) => a.action)).toEqual(['continue', 'continue']);
-    expect(actions.map((a) => a.target)).toEqual(['minimal-track', 'detailed-track']);
-    for (const a of actions) {
-      expect(a.default).toBeUndefined();
-      expect(String(a.label)).toMatch(/track/);
-    }
-  });
-
-  it('terminal receives flattened grill consensus + create terminal outputs via channels', () => {
-    const done = phaseOf('pipeline-done');
-    expect(done.type).toBe('main');
-    expect(done.channels).toEqual(expect.arrayContaining(['node:grill/grilling', 'node:create/spec-generate']));
-    expect(String(done.task)).toMatch(/decisions \(echo from grill\)/);
-    expect(String(done.task)).toMatch(/candidates \(echo from spec-generate when blocked\)/);
-    // terminal flags incomplete ADR judgment — no silent no-op completion
-    expect(String(done.task)).toMatch(/judgment_incomplete: true/);
-    expect(String(done.task)).toMatch(/graph_jump back to create/);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 2.12 — openspec-create v3 inline ADR topology (spec-done end marker deleted)
-// ---------------------------------------------------------------------------
-
-describe('2.12 openspec-create v3 inline ADR topology', () => {
-  const graph = loadGraph('openspec-create.taskflow.yaml');
-  const phases = graph.phases as Array<Record<string, unknown>>;
-  const phaseOf = (id: string): Record<string, unknown> => {
-    const p = phases.find((ph) => ph.id === id);
-    expect(p, `phase ${id} present`).toBeDefined();
-    return p!;
-  };
-
-  it('three phases — spec-done end marker deleted, no arch-decision', () => {
-    expect(phases.map((p) => p.id)).toEqual(['spec-scope', 'spec-gate', 'spec-generate']);
-    expect(phases.map((p) => p.id)).not.toEqual(
-      expect.arrayContaining(['arch-decision', 'spec-accept-scope', 'spec-done']),
-    );
-    expect(phases.some((p) => p.type === 'end')).toBe(false);
-  });
-
-  it('spec-scope carries ADR judgment — adr_created mandatory in output contract', () => {
-    const scope = phaseOf('spec-scope');
-    expect(scope.skill).toBe('atom-scope-interview');
-    expect(scope.channels).toEqual(expect.arrayContaining(['./CONTEXT.md', 'docs/adr/*.md']));
-    const task = String(scope.task);
-    // four input sources incl. grill-consensus (reportA E2)
-    expect(task).toMatch(/wayfinder-map/);
-    expect(task).toMatch(/arch-review/);
-    expect(task).toMatch(/grill-consensus/);
-    expect(task).toMatch(/direct/);
-    // ADR judgment is a conversation side effect — user-confirmed offers, never autonomous
-    expect(task).toMatch(/user confirmation/);
-    expect(task).toMatch(/adr_created MUST always be present/);
-  });
-
-  it('spec-gate bounded rework covers missing ADR judgment', () => {
-    const gate = phaseOf('spec-gate');
-    expect(gate.type).toBe('gate');
-    expect(gate.dependsOn).toEqual(['spec-scope']);
-    // reads removed — reads == dependsOn, judgment context auto-injects
-    expect(gate.reads).toBeUndefined();
-    expect(gate.channels).toBeUndefined();
-    const jumps = gate.jumps as Array<Record<string, unknown>>;
-    expect(jumps).toHaveLength(1);
-    expect(String(jumps[0].when)).toMatch(
-      /\(scope_complete: false or missing OR adr_created: missing\) AND spec-scope retryCount < 2/,
-    );
-    expect(jumps[0].to).toBe('spec-scope');
-    expect(gate.default).toBeUndefined();
-  });
-
-  it('spec-generate echoes adr_created for downstream track-route carrier', () => {
-    const gen = phaseOf('spec-generate');
-    expect(String(gen.task)).toMatch(/adr_created \(echo\)/);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 2.13 — arch-review-loop v6 round-origin topology (route-first): loop-entry
-// (per-round scope re-confirm, round origin) + review flow dependsOn
-// [loop-entry] + implement plain composition flow (no route — sequencing by
-// dependsOn, end by endRun) + loop-gate bounded backward jump to loop-entry
-// + round-end approval (no written routing).
-// ---------------------------------------------------------------------------
-
-describe('2.13 arch-review-loop v6 round-origin topology', () => {
+describe('2.13 arch-review-loop three-stage partition topology (requirement + adopt + implement flows)', () => {
   const graph = loadGraph('arch-review-loop.taskflow.yaml');
   const phases = graph.phases as Array<Record<string, unknown>>;
   const phaseOf = (id: string): Record<string, unknown> => {
@@ -991,42 +1003,68 @@ describe('2.13 arch-review-loop v6 round-origin topology', () => {
     return p!;
   };
 
-  it('six phases — loop-entry FIRST, no end marker', () => {
+  it('six root phases — requirement + round-continue + adopt + implement flows, loop-gate, loop-accept; no end marker', () => {
     // Declaration order is load-bearing: findActiveNode dispatches the first
-    // active node — loop-entry (entry interview) must precede review/implement.
+    // active node — the requirement flow precedes round-continue (content
+    // gate), which precedes adopt, which precedes implement. No top-level
+    // grill — adoption is the adopt stage (adopt-with-docs), NOT composed
+    // into arch-review.
     expect(phases.map((p) => p.id)).toEqual([
-      'loop-entry',
-      'review',
-      'review-accept',
+      'requirement',
+      'round-continue',
+      'adopt',
       'implement',
       'loop-gate',
       'loop-accept',
     ]);
-    expect(phaseOf('loop-entry').type).toBe('main');
-    expect(phaseOf('loop-entry').dependsOn).toEqual([]);
-    expect(phaseOf('review').type).toBe('flow');
-    expect(phaseOf('review-accept').type).toBe('approval');
+    expect(phaseOf('requirement').type).toBe('flow');
+    expect(phaseOf('round-continue').type).toBe('approval');
+    expect(phaseOf('adopt').type).toBe('flow');
     expect(phaseOf('implement').type).toBe('flow');
     expect(phaseOf('loop-gate').type).toBe('gate');
     expect(phaseOf('loop-accept').type).toBe('approval');
-    // deleted: verify, review-accept-gate (forward gate), loop-done end marker
-    expect(phases.map((p) => p.id)).not.toEqual(expect.arrayContaining(['verify', 'review-accept-gate', 'loop-done']));
+    // deleted: loop-entry (per-round input absorbed into the requirement
+    // flow's scope-entry), root review-accept / spec-extract (both moved into
+    // their flows), verify, review-accept-gate (forward gate), loop-done end
+    // marker, top-level grill, refine stage id (renamed adopt), any
+    // implement-loop-gate anywhere in the composition
+    expect(phases.map((p) => p.id)).not.toEqual(
+      expect.arrayContaining([
+        'loop-entry',
+        'review',
+        'review-accept',
+        'spec-extract',
+        'verify',
+        'review-accept-gate',
+        'loop-done',
+        'grill',
+        'refine',
+      ]),
+    );
     expect(phases.some((p) => p.type === 'end')).toBe(false);
   });
 
-  it('loop-entry carries the scope interview contract — no Run Mode topic', () => {
-    const task = String(phaseOf('loop-entry').task);
-    expect(phaseOf('loop-entry').skill).toBe('atom-scope-interview');
-    // Run Mode is a run field (graph_start mode param) — graphs declare nothing
+  it('review/scope-entry carries the scope interview contract — no Run Mode topic', () => {
+    // the per-round entry node lives inside the arch-review flow — composed as
+    // review/scope-entry in the loop
+    const arch = loadGraph('arch-review.taskflow.yaml');
+    const archPhases = arch.phases as Array<Record<string, unknown>>;
+    const entry = archPhases.find((p) => p.id === 'scope-entry');
+    expect(entry).toBeDefined();
+    const task = String(entry?.task);
+    expect(entry?.skill).toBe('atom-scope-interview');
+    // Run Mode is a per-activation decision by the built-in $run-mode-confirm prologue node
+    // (args.mode or a question) — graphs declare nothing
     expect(task).not.toMatch(/Auto-approve mode|auto_approve/);
     expect(task).not.toMatch(/routingActions\[0\]/);
     // report input — existing report path (true closed loop) vs fresh review
     expect(task).toMatch(/report_input/);
-    expect(task).toMatch(/existing report path/);
+    expect(task).toMatch(/existing/);
     expect(task).toMatch(/scope_complete/);
-    // per-round mandatory scope re-confirmation — round origin, never auto-skipped
-    expect(task).toMatch(/Mandatory per-round scope confirmation/);
-    expect(task).toMatch(/MUST be confirmed or\n.*adjusted by the user each run/);
+    // per-round mandatory scope re-confirmation — every activation re-acquires
+    // (loop jump-backs target this node), never auto-skipped
+    expect(task).toMatch(/Mandatory scope confirmation/);
+    expect(task).toMatch(/NEVER auto-skip/);
     expect(task).not.toMatch(/never re-asked/);
   });
 
@@ -1038,89 +1076,164 @@ describe('2.13 arch-review-loop v6 round-origin topology', () => {
     }
   });
 
-  it('review is a flow on loop-entry; implement is plain composition entered mechanically after review-accept', () => {
-    expect(phaseOf('review').use).toBe('arch-review');
-    // round origin — a jump to loop-entry resets the whole review segment
-    expect(phaseOf('review').dependsOn).toEqual(['loop-entry']);
-    expect(phaseOf('review').channels).toBeUndefined();
-    expect(phaseOf('implement').use).toBe('openspec-pipeline');
-    // no route — a single-path route would make activation depend on the agent
-    // emitting branchTo (missed target silently drains the run); sequencing is
-    // dependsOn + endRun
-    expect(phaseOf('implement').route).toBeUndefined();
-    expect(phaseOf('implement').dependsOn).toEqual(['review-accept']);
-    expect(phaseOf('implement').channels).toEqual(
-      expect.arrayContaining(['node:review/arch-review', 'node:loop-entry']),
-    );
+  it('requirement = arch-review flow; adopt = adopt-with-docs flow (report input); implement = spec-implement flow', () => {
+    expect(phaseOf('requirement').use).toBe('arch-review');
+    // requirement is the loop's entry stage — in-degree 0 via the composition;
+    // its entry (scope-entry) is the per-round entry node inside arch-review;
+    // adoption is NOT inside arch-review — it is the adopt stage
+    expect(phaseOf('requirement').dependsOn).toEqual([]);
+    expect(phaseOf('requirement').channels).toBeUndefined();
+    // adopt = the adoption stage — adopt-with-docs receives the produced
+    // report as input document via the global channel
+    // (two-scope model — node:requirement/arch-review promoted, all phases)
+    expect(phaseOf('adopt').use).toBe('adopt-with-docs');
+    expect(phaseOf('adopt').dependsOn).toEqual(['requirement']);
+    expect(phaseOf('adopt').channels).toBeUndefined();
+    expect(graph.context).toEqual(['node:requirement/arch-review']);
+    // adopt sits on the proceed route — activated only by round-continue
+    // continue (empty-round structural short-circuit: unselected route members
+    // never activate)
+    expect(phaseOf('adopt').route).toBe('proceed');
+    // implement = the shared spec-implement machinery — on the proceed route
+    // like adopt (sequenced after it by dependsOn [adopt]); the produced
+    // change + adoption record arrive via composition read edges declared on
+    // spec-implement's entry (spec-extract) — no flow channels
+    expect(phaseOf('implement').use).toBe('spec-implement');
+    expect(phaseOf('implement').route).toBe('proceed');
+    expect(phaseOf('implement').dependsOn).toEqual(['adopt']);
+    expect(phaseOf('implement').channels).toBeUndefined();
   });
 
-  it('review-accept is a decision card — no written routing, judgment context via node: channel', () => {
-    const accept = phaseOf('review-accept');
-    expect(accept.type).toBe('approval');
-    expect(accept.routing).toBeUndefined();
+  it('review-accept is the Requirement-ready terminal — no written routing, judgment context via node: channels', () => {
+    // the requirement accept terminal lives inside the arch-review flow —
+    // composed as review/review-accept in the loop
+    const arch = loadGraph('arch-review.taskflow.yaml');
+    const archPhases = arch.phases as Array<Record<string, unknown>>;
+    const accept = archPhases.find((p) => p.id === 'review-accept');
+    expect(accept).toBeDefined();
+    expect(accept?.type).toBe('approval');
+    expect(accept?.routing).toBeUndefined();
     // reads removed (schema field convergence) — review/arch-review is covered
     // by the direct dependsOn (flow review → flattened terminal); only the
-    // cross-level loop-entry ref migrates to channels
-    expect(accept.reads).toBeUndefined();
-    expect(accept.channels).toEqual(['node:loop-entry']);
+    // cross-level scope-entry ref migrates to channels (no redundant node: for
+    // the direct dependsOn — declaration surface = effective surface)
+    expect(accept?.reads).toBeUndefined();
+    expect(accept?.channels).toEqual(['node:scope-entry']);
+    // requirement-ready terminal card — Continue = requirement ready (activates
+    // the implement part in the loop composition), Loop again = retry
+    // scope-entry, End = no requirement
+    expect(String(accept?.task)).toMatch(/Requirement ready\?/);
   });
 
-  it('loop-gate — auto loop router: bounded backward jump to loop-entry', () => {
+  it('round-continue — content gate: explicit branch-route routing [continue→proceed, end]; adopt/implement on proceed', () => {
+    const gate = phaseOf('round-continue');
+    expect(gate.type).toBe('approval');
+    // sequenced after the requirement flow — judges the report state
+    expect(gate.dependsOn).toEqual(['requirement']);
+    // judgment context — the round worker's top_rec_remaining field via
+    // graph-level ambient channel (inherited, no per-node declaration)
+    expect(gate.channels).toBeUndefined();
+    // branch-route scenario: declared routing with explicit target + value
+    const actions = (gate.routing as { actions: Array<Record<string, unknown>> }).actions;
+    expect(actions).toHaveLength(2);
+    const cont = actions.find((a) => a.action === 'continue');
+    expect(cont?.target).toBe('proceed');
+    expect(cont?.value).toBe('continue');
+    const end = actions.find((a) => a.action === 'end');
+    expect(end).toBeDefined();
+    expect(end?.value).toBe('end');
+    // recommendation rules encoded in the card — single structured field
+    expect(String(gate.task)).toMatch(/top_rec_remaining: true/);
+    expect(String(gate.task)).toMatch(/end when nothing remains/);
+    // loop-gate is the only gate — round-continue is a decision, not a gate
+    expect(gate.jumps).toBeUndefined();
+  });
+
+  it('loop-gate — auto loop router: bounded backward jump to requirement/scope-entry (requirement entry node)', () => {
     const gate = phaseOf('loop-gate');
     expect(gate.type).toBe('gate');
     // dependsOn [implement] only — the implement flow's terminal transitively
-    // includes review-accept (sequencing preserved); leaf-deps rule (2.2b) now
-    // applies to gates too
+    // includes the adopt flow's terminal (sequencing preserved); leaf-deps
+    // rule (2.2b) now applies to gates too
     expect(gate.dependsOn).toEqual(['implement']);
-    // reads removed — cross-level judgment refs migrate to node: channels
+    // reads removed — cross-level judgment refs migrate to node: channels;
+    // requirement/arch-review arrives via the graph-level ambient channel;
+    // scope-entry is covered by the jump target (declared judgment scope)
     expect(gate.reads).toBeUndefined();
-    expect(gate.channels).toEqual(['node:review/arch-review', 'node:loop-entry']);
+    expect(gate.channels).toBeUndefined();
     const jumps = gate.jumps as Array<Record<string, unknown>>;
     expect(jumps).toHaveLength(1);
-    expect(jumps[0].to).toBe('loop-entry');
+    expect(jumps[0].to).toBe('requirement/scope-entry');
     const cond = String(jumps[0].when);
     expect(cond).toMatch(/run mode is auto/);
     expect(cond).toMatch(/top_rec_remaining: true/);
     // bounded by the round counter (hygiene — not a termination mechanism;
     // ending the loop is always a human decision)
-    expect(cond).toMatch(/loop-entry retryCount < 8/);
+    expect(cond).toMatch(/requirement\/scope-entry retryCount < 8/);
     expect(gate.default).toBeUndefined();
+  });
+
+  it('implement flow carries NO internal auto-iteration gate — the loop is single (loop-gate only)', () => {
+    // the machinery has no internal gate — flattened composition contains no
+    // implement/implement-loop-gate; rework is the single loop-gate
+    const machinery = loadGraph('spec-implement.taskflow.yaml');
+    const machineryPhases = machinery.phases as Array<Record<string, unknown>>;
+    expect(machineryPhases.some((p) => p.id === 'implement-loop-gate')).toBe(false);
+    expect(machineryPhases.some((p) => p.type === 'gate')).toBe(false);
+    // and the composition's only gate is loop-gate
+    expect(phases.filter((p) => p.type === 'gate').map((p) => p.id)).toEqual(['loop-gate']);
   });
 
   it('loop-accept — round-end decision card, no written routing', () => {
     const accept = phaseOf('loop-accept');
     expect(accept.type).toBe('approval');
     expect(accept.routing).toBeUndefined();
-    // reads removed — approval reads migrate to node: channels
+    // reads removed — approval reads migrate to node: channels; the report
+    // arrives via the graph-level ambient channel (inherited)
     expect(accept.reads).toBeUndefined();
-    expect(accept.channels).toEqual(['node:review/arch-review']);
+    expect(accept.channels).toBeUndefined();
   });
 
-  it('arch-review node task is dual-mode — report_input branch + unified output contract', () => {
+  it('arch-review = standalone requirement production: scope-entry → arch-review → review-accept; no grill flow', () => {
     const arch = loadGraph('arch-review.taskflow.yaml');
     const phases2 = arch.phases as Array<Record<string, unknown>>;
-    // flat two-phase graph — scope-detect-interview entry, arch-review follows
-    expect(phases2.map((p) => p.id)).toEqual(['scope-detect-interview', 'arch-review']);
+    // three-phase requirement production graph — scope-entry entry node,
+    // arch-review main (improve-codebase-architecture — producer #1),
+    // review-accept approval terminal; adoption is NOT composed here (the
+    // loop's adopt stage owns adoption, keeping both graphs standalone)
+    expect(phases2.map((p) => p.id)).toEqual(['scope-entry', 'arch-review', 'review-accept']);
     expect(phases2.some((p) => p.type === 'end')).toBe(false);
+    const entry = phases2.find((p) => p.id === 'scope-entry');
+    expect(entry?.type).toBe('main');
+    expect(entry?.dependsOn).toEqual([]);
+    expect(entry?.skill).toBe('atom-scope-interview');
+    // no flow phase references adopt-with-docs — adoption is external
+    expect(phases2.some((p) => p.type === 'flow' && p.use === 'adopt-with-docs')).toBe(false);
     const reviewNode = phases2.find((p) => p.id === 'arch-review');
-    expect(reviewNode).toBeDefined();
-    expect(reviewNode?.dependsOn).toEqual(['scope-detect-interview']);
+    expect(reviewNode?.type).toBe('main');
+    expect(reviewNode?.skill).toBe('improve-codebase-architecture');
+    expect(reviewNode?.dependsOn).toEqual(['scope-entry']);
+    const accept = phases2.find((p) => p.id === 'review-accept');
+    expect(accept?.type).toBe('approval');
+    expect(accept?.dependsOn).toEqual(['arch-review']);
+    expect(accept?.channels).toEqual(['node:scope-entry']);
+
+    // the machinery node lives INLINE in arch-review — no review-machinery
+    // child graph exists
     const task = String(reviewNode?.task);
     // dual mode — fresh writes new report, existing re-reviews in place
-    expect(task).toMatch(/report_input: fresh/);
-    expect(task).toMatch(/report_input: existing/);
-    expect(task).toMatch(/closed-loop re-review mode/);
+    expect(task).toMatch(/report_input fresh/);
+    expect(task).toMatch(/re-review/);
+    expect(task).toMatch(/single source of truth/);
     expect(task).toMatch(/NO path re-confirmation/);
     // unified structured output contract (both modes) — gate jump source
     expect(task).toMatch(/top_rec_remaining/);
-    expect(task).toMatch(/round \(increment\)/);
-    expect(task).toMatch(/implemented \(list\)/);
-    expect(task).toMatch(/new_findings \(count\)/);
+    expect(task).toMatch(/round/);
+    expect(task).toMatch(/implemented/);
+    expect(task).toMatch(/new_findings/);
     // fresh-origin transition (D19) — fresh + existing report file (round ≥ 2)
     // switches to re-review semantics; the loop closure promise holds for both origins
-    expect(task).toMatch(/report_input: fresh AND the report file at report_path already exists/);
     expect(task).toMatch(/round ≥ 2/);
-    expect(task).toMatch(/transition to re-review semantics/);
   });
 });
 
@@ -1702,5 +1815,237 @@ describe('4.7 task text contract', () => {
     };
     const { warnings } = validateGraphContracts(graph, 't.yaml');
     expect(warnings.some((w) => w.includes('claims injection'))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4.8 — Task Content Spec: canonical output contract + dedup rules
+// ---------------------------------------------------------------------------
+
+describe('4.8 task content spec', () => {
+  it('rejects non-canonical output-contract spellings — error', () => {
+    const graph = {
+      name: 't',
+      version: 1,
+      phases: [{ id: 'm', type: 'main', dependsOn: [], task: 'Work.\nOutput (main agent collects): a, b' }],
+    };
+    const { errors } = validateGraphContracts(graph, 't.yaml');
+    expect(
+      errors.some((e) => e.includes("non-canonical output-contract spelling 'Output (main agent collects):'")),
+    ).toBe(true);
+  });
+
+  it('rejects legacy bare Output: spelling — error', () => {
+    const graph = {
+      name: 't',
+      version: 1,
+      phases: [{ id: 'm', type: 'main', dependsOn: [], task: 'Work.\nOutput: a, b' }],
+    };
+    const { errors } = validateGraphContracts(graph, 't.yaml');
+    expect(errors.some((e) => e.includes("legacy 'Output:' spelling"))).toBe(true);
+  });
+
+  it('warns on substantive main task without canonical Output contract block', () => {
+    const graph = {
+      name: 't',
+      version: 1,
+      phases: [
+        {
+          id: 'm',
+          type: 'main',
+          dependsOn: [],
+          task: 'Produce the artifact per the confirmed design and write it out.',
+        },
+      ],
+    };
+    const { warnings } = validateGraphContracts(graph, 't.yaml');
+    expect(warnings.some((w) => w.includes("lacks the canonical 'Output contract:'"))).toBe(true);
+  });
+
+  it('accepts canonical Output contract block — clean', () => {
+    const graph = {
+      name: 't',
+      version: 1,
+      phases: [{ id: 'm', type: 'main', dependsOn: [], task: 'Work.\n\nOutput contract: a, b (fields).' }],
+    };
+    const { errors, warnings } = validateGraphContracts(graph, 't.yaml');
+    expect(errors).toHaveLength(0);
+    expect(warnings.some((w) => w.includes('Output contract'))).toBe(false);
+  });
+
+  it('warns on skill-protocol restatement in task text', () => {
+    const graph = {
+      name: 't',
+      version: 1,
+      phases: [
+        {
+          id: 'm',
+          type: 'main',
+          dependsOn: [],
+          task: 'Execute interview({ goal: "design" }) per atom-kernel.\n\nOutput contract: design, scope_complete.',
+        },
+      ],
+    };
+    const { warnings } = validateGraphContracts(graph, 't.yaml');
+    expect(warnings.some((w) => w.includes('restates dispatched-skill protocol'))).toBe(true);
+  });
+
+  it('warns on injection-mechanics wording in task text', () => {
+    const graph = {
+      name: 't',
+      version: 1,
+      phases: [
+        {
+          id: 'm',
+          type: 'main',
+          dependsOn: ['up'],
+          task: 'Read up output (injected via node:up channel).\n\nOutput contract: x.',
+        },
+        { id: 'up', type: 'main', dependsOn: [], task: 'x' },
+      ],
+    };
+    const { warnings } = validateGraphContracts(graph, 't.yaml');
+    expect(warnings.some((w) => w.includes('spells injection mechanics'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Graph-level context — global channel entry rules (load-time validation)
+// ---------------------------------------------------------------------------
+
+describe('graph-level context', () => {
+  function makeSkillsDir(): { dir: string; cleanup: () => void } {
+    const dir = mkdtempSync(join(tmpdir(), 'skills-'));
+    return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+
+  it('rejects bare-name graph-level entry — explicit prefix/glob required', () => {
+    const graph = {
+      name: 'g',
+      version: 1,
+      context: ['atom-graph-spec'],
+      phases: [{ id: 'm', type: 'main', task: 'x' }],
+    };
+    const { errors } = validateGraphContracts(graph, 'g.yaml');
+    expect(errors.some((e) => e.includes('atom-graph-spec') && e.includes('bare name'))).toBe(true);
+  });
+
+  it('accepts prefixed and glob graph-level entries', () => {
+    const graph = {
+      name: 'g',
+      version: 1,
+      context: ['skill:atom-graph-spec', './CONTEXT.md', 'node:m'],
+      phases: [{ id: 'm', type: 'main', task: 'x' }],
+    };
+    const { errors } = validateGraphContracts(graph, 'g.yaml');
+    expect(errors).toEqual([]);
+  });
+
+  it('rejects graph-level node: entry targeting a missing phase', () => {
+    const graph = {
+      name: 'g',
+      version: 1,
+      context: ['node:ghost'],
+      phases: [{ id: 'm', type: 'main', task: 'x' }],
+    };
+    const { errors } = validateGraphContracts(graph, 'g.yaml');
+    expect(errors.some((e) => e.includes('node:ghost') && e.includes('missing phase'))).toBe(true);
+  });
+
+  it('accepts graph-level node: entry targeting a flattened child id', () => {
+    const graph = {
+      name: 'g',
+      version: 1,
+      context: ['node:requirement/arch-review'],
+      phases: [
+        { id: 'm', type: 'main', task: 'x' },
+        { id: 'requirement/arch-review', type: 'main', task: 'y' },
+      ],
+    };
+    const { errors } = validateGraphContracts(graph, 'g.yaml');
+    expect(errors).toEqual([]);
+  });
+
+  it('forward coverage satisfied at graph level — no per-phase declaration needed', async () => {
+    const { dir, cleanup } = makeSkillsDir();
+    try {
+      mkdirSync(join(dir, 'writer-skill'));
+      writeFileSync(
+        join(dir, 'writer-skill', 'SKILL.md'),
+        `---\nname: writer-skill\ndescription: x\n---\n\n## Context Requirements\n\n### Reference skills\n\n- atom-skill-spec\n\n### Files\n\n- CONTEXT.md\n`,
+      );
+      const { errors } = await validateEntrySkillContracts(
+        [
+          {
+            filePath: 'g.yaml',
+            graph: {
+              name: 'g',
+              version: 1,
+              context: ['skill:atom-skill-spec', './CONTEXT.md'],
+              phases: [{ id: 'w', type: 'main', skill: 'writer-skill', dependsOn: [], task: 'x' }],
+            },
+          },
+        ],
+        dir,
+      );
+      expect(errors).toEqual([]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('graph-level entry cannot mask a phase-specific contract gap', async () => {
+    const { dir, cleanup } = makeSkillsDir();
+    try {
+      mkdirSync(join(dir, 'writer-skill'));
+      writeFileSync(
+        join(dir, 'writer-skill', 'SKILL.md'),
+        `---\nname: writer-skill\ndescription: x\n---\n\n## Context Requirements\n\n### Reference skills\n\n- atom-skill-spec\n`,
+      );
+      // graph-level declares the reference; phase declares nothing — still covered
+      const covered = await validateEntrySkillContracts(
+        [
+          {
+            filePath: 'g.yaml',
+            graph: {
+              name: 'g',
+              version: 1,
+              context: ['skill:atom-skill-spec'],
+              phases: [{ id: 'w', type: 'main', skill: 'writer-skill', dependsOn: [], task: 'x' }],
+            },
+          },
+        ],
+        dir,
+      );
+      expect(covered.errors).toEqual([]);
+      // graph-level removed → deletion never silent: forward gap surfaces
+      const uncovered = await validateEntrySkillContracts(
+        [
+          {
+            filePath: 'g.yaml',
+            graph: {
+              name: 'g',
+              version: 1,
+              phases: [{ id: 'w', type: 'main', skill: 'writer-skill', dependsOn: [], task: 'x' }],
+            },
+          },
+        ],
+        dir,
+      );
+      expect(uncovered.errors.some((e) => e.includes('atom-skill-spec') && e.includes('channels'))).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('rejects non-string graph-level entry', () => {
+    const graph = {
+      name: 'g',
+      version: 1,
+      context: [42],
+      phases: [{ id: 'm', type: 'main', task: 'x' }],
+    };
+    const { errors } = validateGraphContracts(graph, 'g.yaml');
+    expect(errors.some((e) => e.includes('graph-level context entry must be a string'))).toBe(true);
   });
 });

@@ -278,13 +278,10 @@ describe('field-type contract — mis-typed fields rejected at parse time', () =
     expect(result.success).toBe(true);
   });
 
-  it('rejects approval phase with non-node channel entry', () => {
-    const phase = { id: 'a', type: 'approval', task: 'Decide', channels: ['some-node'] };
+  it('accepts approval phase with non-node channel entries — full-type inheritance', () => {
+    const phase = { id: 'a', type: 'approval', task: 'Decide', channels: ['skill:atom-graph-spec', './notes.md'] };
     const result = PhaseSchema.safeParse(phase);
-    expect(result.success).toBe(false);
-    const messages = result.error!.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('\n');
-    expect(messages).toContain('approval');
-    expect(messages).toContain("must be 'node:<id>'");
+    expect(result.success).toBe(true);
   });
 
   it('rejects any phase declaring preText — removed field (schema field convergence)', () => {

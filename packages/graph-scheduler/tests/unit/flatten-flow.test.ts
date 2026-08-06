@@ -60,6 +60,57 @@ describe('flattenFlowPhases — single-level use', () => {
     expect(review?.dependsOn).not.toContain('skill-ops');
   });
 });
+describe('flattenFlowPhases — route propagation', () => {
+  /** Child graph mirroring spec-implement: un-routed members + own-route tracks. */
+  function routedChild(): Taskflow {
+    return {
+      name: 'routed-child',
+      phases: [
+        { id: 'extract', type: 'main', dependsOn: [], task: 'x' },
+        { id: 'minimal', type: 'main', dependsOn: ['extract'], route: 'minimal-track', task: 'x' },
+        { id: 'detailed', type: 'main', dependsOn: ['extract'], route: 'detailed-track', task: 'x' },
+        { id: 'done', type: 'main', dependsOn: ['minimal', 'detailed'], join: 'any', task: 'x' },
+      ],
+    };
+  }
+  const routedLoader = (name: string): Taskflow | null => (name === 'routed-child' ? routedChild() : null);
+
+  it('propagates the flow route to children without their own route; own routes win', () => {
+    const parent: Taskflow = {
+      name: 'test',
+      phases: [
+        { id: 'ops', type: 'flow', use: 'routed-child', dependsOn: [], route: 'proceed' },
+        { id: 'tail', type: 'main', dependsOn: ['ops'] },
+      ],
+    };
+    const result = flattenFlowPhases(parent, routedLoader, 1, 5);
+    const routeOf = (id: string): string | undefined =>
+      (result.phases.find((p) => p.id === id) as { route?: string } | undefined)?.route;
+    // un-routed children inherit the flow's route — the empty-round guarantee
+    // (unselected proceed → extract/done never activate)
+    expect(routeOf('ops/extract')).toBe('proceed');
+    expect(routeOf('ops/done')).toBe('proceed');
+    // children with their own route keep it — track coexistence (cp.route ?? phase.route)
+    expect(routeOf('ops/minimal')).toBe('minimal-track');
+    expect(routeOf('ops/detailed')).toBe('detailed-track');
+    // parent-level phases untouched
+    expect(routeOf('tail')).toBeUndefined();
+  });
+
+  it('flow without route leaves children on the implicit default route', () => {
+    const parent: Taskflow = {
+      name: 'test',
+      phases: [{ id: 'ops', type: 'flow', use: 'routed-child', dependsOn: [] }],
+    };
+    const result = flattenFlowPhases(parent, routedLoader, 1, 5);
+    const extract = result.phases.find((p) => p.id === 'ops/extract') as { route?: string };
+    expect(extract.route).toBeUndefined();
+    // own-route children keep theirs regardless
+    const minimal = result.phases.find((p) => p.id === 'ops/minimal') as { route?: string };
+    expect(minimal.route).toBe('minimal-track');
+  });
+});
+
 describe('flattenFlowPhases — reserved prologue ids', () => {
   it('keeps reserved ids unprefixed inside flows — author override preserved', () => {
     const reservedChild = (): Taskflow => ({
@@ -549,8 +600,8 @@ describe('flattenFlowPhases — node: channel prefixing', () => {
     expect(writer?.channels).toEqual(['node:seed']);
   });
 });
-describe('flattenFlowPhases — flow input interface channel propagation', () => {
-  it('propagates flow channels to every entry child, merged with child channels', () => {
+describe('flattenFlowPhases — flow channels rejected (no input interface)', () => {
+  it('does NOT propagate flow channels to entry children — schema rejects them at load', () => {
     const child: Taskflow = {
       name: 'sub-graph',
       phases: [
@@ -569,6 +620,7 @@ describe('flattenFlowPhases — flow input interface channel propagation', () =>
           mode: 'exclusive',
           use: 'sub-graph',
           dependsOn: [],
+          // Legacy declaration — schema rejects; flatten must not resurrect propagation.
           channels: ['node:grill/grilling'],
         },
       ],
@@ -577,58 +629,10 @@ describe('flattenFlowPhases — flow input interface channel propagation', () =>
     const a = result.phases.find((p) => p.id === 'ops/a');
     const b = result.phases.find((p) => p.id === 'ops/b');
     const c = result.phases.find((p) => p.id === 'ops/c');
-    // entry children get flow channels first + own channels preserved
-    expect(a?.channels).toEqual(['node:grill/grilling', './CONTEXT.md']);
-    expect(b?.channels).toEqual(['node:grill/grilling']);
-    // non-entry child untouched
+    // entry children keep ONLY their own channels — no flow-level entries merged
+    expect(a?.channels).toEqual(['./CONTEXT.md']);
+    expect(b?.channels).toBeUndefined();
     expect(c?.channels).toBeUndefined();
-  });
-  it('dedups identical entries — flow-first, string equality', () => {
-    const child: Taskflow = {
-      name: 'sub-graph',
-      phases: [{ id: 'entry', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['./CONTEXT.md'] }],
-    };
-    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
-    const parent: Taskflow = {
-      name: 'parent',
-      phases: [
-        {
-          id: 'ops',
-          type: 'flow',
-          mode: 'exclusive',
-          use: 'sub-graph',
-          dependsOn: [],
-          channels: ['./CONTEXT.md', 'node:grill/grilling'],
-        },
-      ],
-    };
-    const result = flattenFlowPhases(parent, loader, 1, 5);
-    const entry = result.phases.find((p) => p.id === 'ops/entry');
-    expect(entry?.channels).toEqual(['./CONTEXT.md', 'node:grill/grilling']);
-  });
-  it('child node: channel to non-parent id still prefixed — distinct from flow-level entry', () => {
-    const child: Taskflow = {
-      name: 'sub-graph',
-      phases: [{ id: 'entry', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['node:grill/grilling'] }],
-    };
-    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
-    const parent: Taskflow = {
-      name: 'parent',
-      phases: [
-        {
-          id: 'ops',
-          type: 'flow',
-          mode: 'exclusive',
-          use: 'sub-graph',
-          dependsOn: [],
-          channels: ['node:grill/grilling'],
-        },
-      ],
-    };
-    const result = flattenFlowPhases(parent, loader, 1, 5);
-    const entry = result.phases.find((p) => p.id === 'ops/entry');
-    // child ref is a child-sibling target (prefixed ops/grill/grilling); flow ref targets the composed graph — both kept
-    expect(entry?.channels).toEqual(['node:grill/grilling', 'node:ops/grill/grilling']);
   });
   it('flow without channels — child behavior unchanged', () => {
     const child: Taskflow = {
@@ -648,28 +652,126 @@ describe('flattenFlowPhases — flow input interface channel propagation', () =>
     // parent-level target stays unprefixed; no flow channels to merge
     expect(entry?.channels).toEqual(['node:seed']);
   });
-  it('flow channels never silently dropped — entries always carry them', () => {
+  it('child node: channel to non-child id stays unprefixed — cross-flow read edge (spec-extract pattern)', () => {
     const child: Taskflow = {
       name: 'sub-graph',
-      phases: [{ id: 'entry', type: 'main', mode: 'exclusive', dependsOn: [] }],
+      phases: [{ id: 'entry', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['node:adopt/spec-propose'] }],
     };
     const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
     const parent: Taskflow = {
       name: 'parent',
       phases: [
-        {
-          id: 'ops',
-          type: 'flow',
-          mode: 'exclusive',
-          use: 'sub-graph',
-          dependsOn: [],
-          channels: ['node:grill/grilling'],
-        },
+        { id: 'adopt', type: 'flow', mode: 'exclusive', use: 'other-graph', dependsOn: [] },
+        { id: 'ops', type: 'flow', mode: 'exclusive', use: 'sub-graph', dependsOn: [] },
       ],
+    };
+    const loader2 = (name: string): Taskflow | null =>
+      name === 'sub-graph'
+        ? child
+        : name === 'other-graph'
+          ? ({
+              name: 'other-graph',
+              phases: [{ id: 'spec-propose', type: 'main', mode: 'exclusive', dependsOn: [] }],
+            } as Taskflow)
+          : null;
+    const result = flattenFlowPhases(parent, loader2, 1, 5);
+    const entry = result.phases.find((p) => p.id === 'ops/entry');
+    // sibling-flow flattened id (adopt/spec-propose) resolves in the composed
+    // run scope — kept unprefixed; child-internal refs get the flow prefix
+    expect(entry?.channels).toEqual(['node:adopt/spec-propose']);
+  });
+  it('child node: channel to child-internal id prefixed', () => {
+    const child: Taskflow = {
+      name: 'sub-graph',
+      phases: [
+        { id: 'entry', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['node:sibling'] },
+        { id: 'sibling', type: 'main', mode: 'exclusive', dependsOn: [] },
+      ],
+    };
+    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
+    const parent: Taskflow = {
+      name: 'parent',
+      phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'sub-graph', dependsOn: [] }],
     };
     const result = flattenFlowPhases(parent, loader, 1, 5);
     const entry = result.phases.find((p) => p.id === 'ops/entry');
-    expect(entry?.channels).toEqual(['node:grill/grilling']);
+    // child-internal target prefixed to match the flattened child id
+    expect(entry?.channels).toEqual(['node:ops/sibling']);
+  });
+});
+
+describe('flattenFlowPhases — child graph-level context inheritance', () => {
+  it('merges child top-level context into ALL child phases (ambient layer)', () => {
+    const child: Taskflow = {
+      name: 'sub-graph',
+      context: ['./CONTEXT.md', 'skill:atom-graph-spec'],
+      phases: [
+        { id: 'a', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['node:x'] },
+        { id: 'b', type: 'main', mode: 'exclusive', dependsOn: [], channels: [] },
+        { id: 'c', type: 'main', mode: 'exclusive', dependsOn: ['a'] },
+      ],
+    };
+    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
+    const parent: Taskflow = {
+      name: 'parent',
+      phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'sub-graph', dependsOn: [] }],
+    };
+    const result = flattenFlowPhases(parent, loader, 1, 5);
+    const a = result.phases.find((p) => p.id === 'ops/a');
+    const b = result.phases.find((p) => p.id === 'ops/b');
+    const c = result.phases.find((p) => p.id === 'ops/c');
+    // every child phase gets the child graph's ambient layer, own channels preserved after;
+    // node:x is not a child phase — kept unprefixed (resolves against the composed run scope)
+    expect(a?.channels).toEqual(['./CONTEXT.md', 'skill:atom-graph-spec', 'node:x']);
+    expect(b?.channels).toEqual(['./CONTEXT.md', 'skill:atom-graph-spec']);
+    expect(c?.channels).toEqual(['./CONTEXT.md', 'skill:atom-graph-spec']);
+  });
+
+  it('merges child graph context < phase channels with dedup', () => {
+    const child: Taskflow = {
+      name: 'sub-graph',
+      context: ['./CONTEXT.md'],
+      phases: [{ id: 'entry', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['./CONTEXT.md', 'node:own'] }],
+    };
+    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
+    const parent: Taskflow = {
+      name: 'parent',
+      phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'sub-graph', dependsOn: [] }],
+    };
+    const result = flattenFlowPhases(parent, loader, 1, 5);
+    const entry = result.phases.find((p) => p.id === 'ops/entry');
+    // node:own is not a child phase — kept unprefixed (childRef rule)
+    expect(entry?.channels).toEqual(['./CONTEXT.md', 'node:own']);
+  });
+
+  it('rewrites child graph-level node: targets like phase entries (child-sibling prefixed, parent-level kept)', () => {
+    const child: Taskflow = {
+      name: 'sub-graph',
+      context: ['node:sibling'],
+      phases: [{ id: 'sibling', type: 'main', mode: 'exclusive', dependsOn: [] }],
+    };
+    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
+    const parent: Taskflow = {
+      name: 'parent',
+      phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'sub-graph', dependsOn: [] }],
+    };
+    const result = flattenFlowPhases(parent, loader, 1, 5);
+    const entry = result.phases.find((p) => p.id === 'ops/sibling');
+    expect(entry?.channels).toEqual(['node:ops/sibling']);
+  });
+
+  it('fails composed load on child graph-level bare-name entry — entry rules not bypassed', () => {
+    const child: Taskflow = {
+      name: 'sub-graph',
+      context: ['atom-graph-spec'],
+      phases: [{ id: 'sibling', type: 'main', mode: 'exclusive', dependsOn: [] }],
+    };
+    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
+    const parent: Taskflow = {
+      name: 'parent',
+      phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'sub-graph', dependsOn: [] }],
+    };
+    expect(() => flattenFlowPhases(parent, loader, 1, 5)).toThrow(/bare name/);
   });
 });
 describe('flattenFlowPhases — parent routing/eval target remap', () => {
@@ -778,53 +880,55 @@ describe('flattenFlowPhases — parent routing/eval target remap', () => {
   });
 });
 // ---------------------------------------------------------------------------
-// Composition inheritance — parent graph flows the built-in implement graph
-// (G3: merge-at-load carries openspec-finalize + when guard + channels into
-// the parent; idea-to-ship not yet created — this test IS the inheritance proof)
+// Composition inheritance — parent graph flows the built-in spec-implement
+// graph (G3: merge-at-load carries phases + channels into the parent)
 // ---------------------------------------------------------------------------
-describe('flattenFlowPhases — composition inheritance of implement finalize', () => {
+describe('flattenFlowPhases — composition inheritance of spec-implement', () => {
   const { readFileSync } = require('node:fs');
   const { join } = require('node:path');
   const { parse: parseYaml } = require('yaml');
   const pkgRoot = join(__dirname, '..', '..');
   const implementGraph = parseYaml(
-    readFileSync(join(pkgRoot, 'graphs', 'implement.taskflow.yaml'), 'utf-8'),
+    readFileSync(join(pkgRoot, 'graphs', 'spec-implement.taskflow.yaml'), 'utf-8'),
   ) as Taskflow;
-  const loader = (name: string): Taskflow | null => (name === 'implement' ? implementGraph : null);
+  const graphsDir = join(pkgRoot, 'graphs');
+  const loader = (name: string): Taskflow | null => {
+    if (name === 'spec-implement') return implementGraph;
+    try {
+      return parseYaml(readFileSync(join(graphsDir, `${name}.taskflow.yaml`), 'utf-8')) as Taskflow;
+    } catch {
+      return null;
+    }
+  };
   const parent: Taskflow = {
     name: 'idea-to-ship',
-    phases: [{ id: 'implement', type: 'flow', mode: 'exclusive', use: 'implement', dependsOn: [] }],
+    phases: [{ id: 'implement', type: 'flow', mode: 'exclusive', use: 'spec-implement', dependsOn: [] }],
   };
   const result = flattenFlowPhases(parent, loader, 1, 5);
-  it('finalize channels passthrough with prefixed targets', () => {
-    const finalize = result.phases.find((p) => p.id === 'implement/openspec-finalize');
-    expect(finalize?.channels).toEqual(['node:implement/work-input']);
-  });
-  it('finalize skill + dependsOn preserved', () => {
-    const finalize = result.phases.find((p) => p.id === 'implement/openspec-finalize');
-    expect(finalize?.skill).toBe('atom-openspec-archive');
-    expect(finalize?.dependsOn).toEqual(['implement/implement-accept']);
-  });
-  it('gate jump target remapped to flattened writer', () => {
-    const gate = result.phases.find((p) => p.id === 'implement/implement-gate');
-    expect(gate?.jumps?.[0].to).toBe('implement/implement');
-  });
-  it('full child phase set inherited', () => {
-    const ids = result.phases.map((p) => p.id);
-    expect(ids).toEqual([
-      'implement/work-input',
-      'implement/implement',
-      'implement/implement-review',
-      'implement/implement-gate',
-      'implement/implement-accept',
-      'implement/openspec-finalize',
+  it('pipeline-done channels passthrough with prefixed targets', () => {
+    const done = result.phases.find((p) => p.id === 'implement/pipeline-done');
+    expect(done?.channels).toEqual([
+      'node:implement/spec-extract',
+      'node:implement/minimal-track/archive',
+      'node:implement/detailed-track/openspec-archive',
     ]);
   });
-  // NOTE: 'finalize-gate inherited with reads prefixed and branch carrying
-  // the input-source condition' and 'end marker inherited with prefixed
-  // dependsOn' DELETED — the migrated implement graph has no finalize-gate
-  // (input-source judgment moved into openspec-finalize case-5) and no end
-  // marker (route-first: no end type; completion is natural drain).
+  it('spec-extract skill + dependsOn preserved', () => {
+    const extract = result.phases.find((p) => p.id === 'implement/spec-extract');
+    expect(extract?.dependsOn).toEqual([]);
+  });
+  it('full child phase set inherited with flow prefix', () => {
+    const ids = result.phases.map((p) => p.id);
+    expect(ids).toContain('implement/spec-extract');
+    expect(ids).toContain('implement/pipeline-accept');
+    expect(ids).toContain('implement/minimal-track/apply-change');
+    expect(ids).toContain('implement/detailed-track/to-spec');
+    expect(ids).toContain('implement/pipeline-done');
+  });
+  // NOTE: the historical implement graph (work-input/openspec-finalize) is
+  // gone — spec-implement is the current implementation graph (spec-extract
+  // → track gate → minimal/detailed tracks → pipeline-done); the unselected
+  // route never completes and never blocks (route-first).
 });
 // ---------------------------------------------------------------------------
 // Entry-rooted flow — dependsOn: [] (arch-review-loop closed-loop pattern):

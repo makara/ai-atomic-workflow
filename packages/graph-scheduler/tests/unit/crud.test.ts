@@ -320,7 +320,8 @@ describe('graphAdvance branchTo', () => {
     await fix.rt.graphAdvance(runId, 'seed', 10);
 
     // Gate backward jump to the ENTRY node — the activation prefix re-runs
-    // (round restart), so the next dispatch is the prologue, not the target.
+    // (round restart). Gate-only graph: no approval → no $run-mode-confirm —
+    // only $load-constraints re-dispatches (approval-only synthesis).
     const jump = await fix.rt.graphAdvance(runId, 'gate', 10, 'seed');
     expect(jump.node?.nodeId).toBe('$load-constraints');
     expect(jump.node?.retryAttempt).toBe(1);
@@ -368,6 +369,7 @@ describe('graphAdvance branchTo', () => {
     await fix.rt.graphAdvance(runId, 'r', 10);
 
     const jump = await fix.rt.graphAdvance(runId, 'g', 10, 'w');
+    // Gate-only graph: no approval → no $run-mode-confirm (approval-only synthesis)
     expect(jump.node?.nodeId).toBe('$load-constraints');
     expect(jump.snapshot.nodes.find((n) => n.nodeId === 'w')?.retryCount).toBe(1);
     expect(jump.snapshot.nodes.find((n) => n.nodeId === 'g')?.status).toBe('pending');
@@ -375,6 +377,98 @@ describe('graphAdvance branchTo', () => {
     const after = await fix.rt.graphAdvance(runId, '$load-constraints', 10);
     expect(after.node?.nodeId).toBe('w');
     expect(after.node?.retryAttempt).toBe(1);
+  });
+
+  it('approval continue WITHOUT branchTo leaves route members unactivated — run drains (empty-round guarantee)', async () => {
+    const g = JSON.stringify({
+      name: 'route-gate',
+      version: 1,
+      phases: [
+        { id: 'entry', type: 'main', task: 'entry' },
+        {
+          id: 'decide',
+          type: 'approval',
+          dependsOn: ['entry'],
+          task: 'Proceed?\nRecommendation follows the report state.',
+          routing: {
+            actions: [
+              {
+                action: 'continue',
+                target: 'work',
+                value: 'continue',
+                label: 'Continue',
+                description: 'activate the work route',
+              },
+            ],
+          },
+        },
+        { id: 'w1', type: 'main', task: 'w1', dependsOn: ['decide'], route: 'work' },
+        { id: 'w2', type: 'main', task: 'w2', dependsOn: ['w1'], route: 'work' },
+        { id: 'tail', type: 'main', task: 'tail', dependsOn: ['w2'] },
+      ],
+    });
+    fix = await makeFixture({ 'route-gate': g });
+
+    const { runId } = await startSkippingPrologue(fix.rt, 'route-gate');
+    await fix.rt.graphAdvance(runId, 'entry', 10);
+
+    // continue WITHOUT branchTo — the work route stays unselected; its members
+    // never activate; tail depends on an unactivated node → nothing eligible
+    const drained = await fix.rt.graphAdvance(runId, 'decide', 10);
+    expect(drained.node).toBeNull();
+    expect(drained.snapshot.fsmState).toBe('completed');
+    const snap = drained.snapshot;
+    expect(snap.nodes.find((n) => n.nodeId === 'w1')?.status).toBe('pending');
+    expect(snap.nodes.find((n) => n.nodeId === 'w1')?.unactivated).toBe(true);
+    expect(snap.nodes.find((n) => n.nodeId === 'w2')?.unactivated).toBe(true);
+    // tail sits on the implicit default route — pending on an unmet dependency
+    // (w2 never activates), no unactivated annotation
+    expect(snap.nodes.find((n) => n.nodeId === 'tail')?.unactivated).toBeUndefined();
+  });
+
+  it('branchTo a route id activates every route member (content round)', async () => {
+    const g = JSON.stringify({
+      name: 'route-gate',
+      version: 1,
+      phases: [
+        { id: 'entry', type: 'main', task: 'entry' },
+        {
+          id: 'decide',
+          type: 'approval',
+          dependsOn: ['entry'],
+          task: 'Proceed?\nRecommendation follows the report state.',
+          routing: {
+            actions: [
+              {
+                action: 'continue',
+                target: 'work',
+                value: 'continue',
+                label: 'Continue',
+                description: 'activate the work route',
+              },
+            ],
+          },
+        },
+        { id: 'w1', type: 'main', task: 'w1', dependsOn: ['decide'], route: 'work' },
+        { id: 'w2', type: 'main', task: 'w2', dependsOn: ['w1'], route: 'work' },
+        { id: 'tail', type: 'main', task: 'tail', dependsOn: ['w2'] },
+      ],
+    });
+    fix = await makeFixture({ 'route-gate': g });
+
+    const { runId } = await startSkippingPrologue(fix.rt, 'route-gate');
+    await fix.rt.graphAdvance(runId, 'entry', 10);
+
+    // branchTo 'work' — the route activates; members dispatch in order
+    const activated = await fix.rt.graphAdvance(runId, 'decide', 10, 'work');
+    expect(activated.node?.nodeId).toBe('w1');
+    expect(activated.snapshot.nodes.find((n) => n.nodeId === 'w1')?.status).toBe('active');
+    expect(activated.snapshot.nodes.find((n) => n.nodeId === 'w1')?.unactivated).toBeUndefined();
+
+    await fix.rt.graphAdvance(runId, 'w1', 10);
+    await fix.rt.graphAdvance(runId, 'w2', 10);
+    const done = await fix.rt.graphAdvance(runId, 'tail', 10);
+    expect(done.snapshot.fsmState).toBe('completed');
   });
 });
 
@@ -697,5 +791,116 @@ describe('run-scope channel gate', () => {
 
     const next = await fix.rt.graphAdvance(started.runId, 'writer', 10);
     expect(next.node?.channels).toEqual(['node:writer']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Global channel — effective merge at dispatch (two-scope context model)
+// ---------------------------------------------------------------------------
+
+describe('global channel — effective merge at dispatch', () => {
+  let fix: Fixture;
+
+  afterEach(() => {
+    fix?.cleanup();
+  });
+
+  it('merges graph-level context into every phase — dedup, phase own preserved', async () => {
+    const g = JSON.stringify({
+      name: 'scoped',
+      version: 1,
+      context: ['./CONTEXT.md', 'skill:atom-graph-spec'],
+      phases: [
+        { id: 'writer', type: 'main', task: 'write', channels: ['./CONTEXT.md'] },
+        { id: 'reader', type: 'main', task: 'read', dependsOn: ['writer'], channels: ['node:writer'] },
+      ],
+    });
+    fix = await makeFixture({ scoped: g });
+    const { runId, node } = await startSkippingPrologue(fix.rt, 'scoped');
+    expect(node?.nodeId).toBe('writer');
+    // global first, phase own preserved, exact dedup
+    expect(node?.channels).toEqual(['./CONTEXT.md', 'skill:atom-graph-spec']);
+
+    const next = await fix.rt.graphAdvance(runId, 'writer', 10);
+    expect(next.node?.channels).toEqual(['./CONTEXT.md', 'skill:atom-graph-spec', 'node:writer']);
+  });
+
+  it('merges project-level context — config default layer first', async () => {
+    const g = JSON.stringify({
+      name: 'project-scoped',
+      version: 1,
+      context: ['./CONTEXT.md'],
+      phases: [{ id: 'only', type: 'main', task: 'do' }],
+    });
+    const taskflowDir = join(tmpdir(), `crud-test-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(taskflowDir, { recursive: true });
+    writeFileSync(join(taskflowDir, 'project-scoped.taskflow.yaml'), g);
+    const rt = await Effect.runPromise(
+      createRuntime({
+        dbPath: ':memory:',
+        taskflowDir,
+        context: ['docs/adr/*.md', 'skill:atom-graph-spec'],
+      }),
+    );
+    try {
+      const started = await startSkippingPrologue(rt, 'project-scoped');
+      expect(started.node?.channels).toEqual(['docs/adr/*.md', 'skill:atom-graph-spec', './CONTEXT.md']);
+    } finally {
+      rt.dispose();
+      rmSync(taskflowDir, { recursive: true, force: true });
+    }
+  });
+
+  it('approval phase receives inherited graph-level context — uniform channels', async () => {
+    const g = JSON.stringify({
+      name: 'scoped-approval',
+      version: 1,
+      context: ['./CONTEXT.md'],
+      phases: [
+        { id: 'main-a', type: 'main', task: 'do a' },
+        { id: 'approve', type: 'approval', task: 'OK?', dependsOn: ['main-a'] },
+      ],
+    });
+    fix = await makeFixture({ 'scoped-approval': g });
+    const { runId, node } = await startSkippingPrologue(fix.rt, 'scoped-approval');
+    expect(node?.nodeId).toBe('main-a');
+    expect(node?.channels).toEqual(['./CONTEXT.md']);
+
+    const next = await fix.rt.graphAdvance(runId, 'main-a', 10);
+    expect(next.node?.nodeId).toBe('approve');
+    expect(next.node?.channels).toEqual(['./CONTEXT.md']);
+  });
+
+  it('promoted stream skipped for its owning node — self-skip', async () => {
+    const g = JSON.stringify({
+      name: 'self-skip',
+      version: 1,
+      context: ['node:writer'],
+      phases: [
+        { id: 'writer', type: 'main', task: 'write' },
+        { id: 'reader', type: 'main', task: 'read', dependsOn: ['writer'] },
+      ],
+    });
+    fix = await makeFixture({ 'self-skip': g });
+    const { runId, node } = await startSkippingPrologue(fix.rt, 'self-skip');
+    // owning node does NOT receive its own promoted stream
+    expect(node?.nodeId).toBe('writer');
+    expect(node?.channels).toEqual([]);
+
+    const next = await fix.rt.graphAdvance(runId, 'writer', 10);
+    // downstream node receives the promoted stream as ambient
+    expect(next.node?.channels).toEqual(['node:writer']);
+  });
+
+  it('graph-level node: target missing from flattened set fails load', async () => {
+    const g = JSON.stringify({
+      name: 'ghost-scope',
+      version: 1,
+      context: ['node:ghost-phase'],
+      phases: [{ id: 'only', type: 'main', task: 'do' }],
+    });
+    fix = await makeFixture({ 'ghost-scope': g });
+    // load fails at contract pass — graph-level node: membership error
+    await expect(fix.rt.graphStart('ghost-scope')).rejects.toThrow();
   });
 });

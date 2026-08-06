@@ -29,6 +29,18 @@ import type { FsmEvent } from './events.js';
 /** Graph definition — name + phases + activation prologue, enough for topology and state init. */
 export interface TaskflowGraph {
   readonly name: string;
+  /**
+   * Purpose-focused free text describing what the graph does/produces —
+   * identity metadata surfaced in graph_start responses. Optional.
+   */
+  readonly description?: string;
+  /**
+   * Graph-level ambient context — top-level `context` of the taskflow
+   * definition (the global channel). Merged once with the config default
+   * layer at dispatch (config first, dedup) and prepended to every phase's
+   * effective channels. Absent → empty graph scope.
+   */
+  readonly context?: readonly string[];
   readonly phases: readonly Phase[];
   /**
    * Activation prologue — graph-external built-in nodes (reserved `$` ids,

@@ -131,13 +131,11 @@ describe('PhaseSchema — eval field removed (route-first redesign)', () => {
     }
   });
 
-  it('gate phase rejects forbidden fields (task/preText/routing/agent/skill/use + non-node channels)', () => {
+  it('gate phase rejects forbidden fields (task/preText/routing/agent/skill/use)', () => {
     for (const forbidden of [
       { task: 'x' },
       { preText: 'x' },
       { routing: { actions: [{ action: 'continue', label: 'A', description: 'd' }] } },
-      // gate channels are node:-only judgment context — a non-node entry is rejected
-      { channels: ['skill:code-review'] },
       { agent: ['reviewer'] },
       { skill: 'code-review' },
       { use: 'other-graph' },
@@ -151,5 +149,16 @@ describe('PhaseSchema — eval field removed (route-first redesign)', () => {
       const result = PhaseSchema.safeParse(raw);
       expect(result.success, `gate with ${JSON.stringify(forbidden)}`).toBe(false);
     }
+  });
+
+  it('gate phase accepts non-node channel entries — full-type inheritance (node:-only repealed)', () => {
+    const raw = {
+      id: 'open-gate',
+      type: 'gate',
+      jumps: [{ when: 'always', to: 'w' }],
+      channels: ['skill:code-review', './notes.md', 'node:w'],
+    };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(true);
   });
 });

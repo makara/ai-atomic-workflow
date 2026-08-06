@@ -1,0 +1,80 @@
+name: spec-implement
+phases:
+  # Spec extract — machinery entry: resolves the produced change, extraction
+  # only (spec production lives in the adopt stage).
+  - id: spec-extract
+    type: main
+    dependsOn: []
+    channels:
+      # Composition read edges — the produced change + adoption record arrive
+      # via these streams when composed (adopt stage); standalone runs strip
+      # them at dispatch (run-scope gate) and resolve via {args.changeName}.
+      - node:adopt/spec-propose
+      - node:adopt/adopting
+    task: |
+      Extract the implementation scope from the produced OpenSpec change.
+
+      Change resolution: upstream channel when composed; {args.changeName}
+      standalone (confirm exists); unresolvable → spec_status: blocked +
+      candidates — never fabricate. adr_created ECHOES the adoption record
+      (node:adopt/adopting), never re-derived.
+
+      Output contract: scope_complete: true, input_source, change_name,
+      affected_domains, spec_plan, adr_created, decision_summary, decisions,
+      spec_status, candidates?.
+
+  # Track gate — branch-route: minimal (no ADR) vs detailed (ADR).
+  - id: pipeline-accept
+    type: approval
+    dependsOn: [spec-extract]
+    task: |
+      Change quality gate
+
+      Track criterion (from spec-extract adr_created echo): no ADR → minimal
+      track (apply directly); ADR → detailed track (engineer).
+    routing:
+      actions:
+        - action: continue
+          target: minimal-track
+          value: minimal-track
+          label: 'Minimal track — apply directly'
+          description: 'No ADR created — implement the change without engineering ceremony'
+        - action: continue
+          target: detailed-track
+          value: detailed-track
+          label: 'Detailed track — engineer'
+          description: 'ADR created — full spec-to-tickets engineering pipeline'
+
+  # Branch routes — explicit (route-first).
+  - id: minimal-track
+    type: flow
+    use: openspec-apply
+    route: minimal-track
+    dependsOn: [pipeline-accept]
+
+  - id: detailed-track
+    type: flow
+    use: openspec-engineer
+    route: detailed-track
+    dependsOn: [pipeline-accept]
+
+  # Terminal — any-join over the tracks; unselected route never blocks.
+  - id: pipeline-done
+    type: main
+    dependsOn: [minimal-track, detailed-track]
+    join: any
+    channels:
+      - node:spec-extract
+      - node:minimal-track/archive
+      - node:detailed-track/openspec-archive
+    task: |
+      Pipeline complete.
+
+      Incomplete judgment check: spec-extract reports spec_status: blocked →
+      judgment_incomplete: true + suggest graph_jump back to the entry node;
+      never present as a completed implementation. Archive echo: archive_succeeded
+      true when either track terminal shows archive_status: success.
+
+      Output contract: track (minimal | detailed | none), adr_created,
+      change_name, candidates (echo when blocked), decisions (echo),
+      archive_succeeded, judgment_incomplete.

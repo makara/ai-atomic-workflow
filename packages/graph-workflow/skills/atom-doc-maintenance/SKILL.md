@@ -74,7 +74,7 @@ Base documents (CONTEXT.md, README.md) SHALL be checked on every `spec-archive` 
 
 ## ADR Lifecycle
 
-ADR management SHALL follow the decision-fold model (ADR 0093) — ADRs are lifecycle records, not append-only files.
+ADR management SHALL follow the decision-fold model — ADRs are lifecycle records, not append-only files.
 
 ### State machine
 
@@ -90,7 +90,7 @@ When a new record declares `supersedes` edges, the fold SHALL run in the same ma
 
 ### Index contract
 
-`docs/adr/index.md` SHALL be the generated live decision table — per domain rows (id | decision | date | supersedes). Rebuilt by every fold and by every proactive pass. Consumers (arch-review reuse checks, openspec-create emission, architecture reviews) SHALL read the index, never the flat directory.
+`docs/adr/index.md` SHALL be the generated live decision table — per domain rows (id | decision | date | supersedes). Rebuilt by every fold and by every proactive pass. Consumers (arch-review reuse checks, spec-implement emission, architecture reviews) SHALL read the index, never the flat directory.
 
 ## Consistency Gate
 

@@ -1,5 +1,5 @@
 /**
- * Scoped-context channel resolution — shared pure-function module (D1).
+ * Scoped-context channel resolution — shared pure-function module.
  *
  * Single source of truth for scoped-context semantics, consumed by BOTH:
  * - CLI validate (static bidirectional contract checks)
@@ -125,7 +125,7 @@ export function parseContextContract(content: string): IContextContract {
 
 /** Structured channel resolution result. */
 export interface IResolveResult {
-  /** upstream node IDs to read `.taskflow/outputs/<id>.output.txt` for */
+  /** upstream node IDs to read `.taskflow/outputs/<runId>/<id>.output.txt` for (run-scoped streams) */
   readonly upstream: string[];
   /** reference skill names to load per the resolution convention (plain name → <skillsDir>/<name>/SKILL.md) */
   readonly references: string[];
@@ -206,6 +206,32 @@ export function isNodeInRun(target: string, runNodeIds: ReadonlySet<string> | un
 /** Run-scope warning text — same wording everywhere. */
 export function runScopeWarning(display: string): string {
   return `"${display}" — target outside the current run's node set; cross-run output files are never injected (stale-file protection)`;
+}
+
+/**
+ * Merge context scopes into a phase's effective channel list — two-scope
+ * model: the global channel (config default layer + graph `context:`,
+ * outer-first) then the phase's own `channels:`. Additive union with
+ * exact-string dedup — no override semantics, context is additive, not
+ * keyed configuration.
+ *
+ * Returns the sole non-empty scope's reference unchanged (zero-copy fast
+ * path — identity checks at callers keep working, mirroring
+ * stripCrossRunChannels); undefined when every scope is empty.
+ */
+export function mergeChannelScopes(
+  ...scopes: ReadonlyArray<readonly string[] | undefined>
+): readonly string[] | undefined {
+  const nonEmpty = scopes.filter((s): s is readonly string[] => s !== undefined && s.length > 0);
+  if (nonEmpty.length === 0) return undefined;
+  if (nonEmpty.length === 1) return nonEmpty[0];
+  const out: string[] = [];
+  for (const scope of nonEmpty) {
+    for (const entry of scope) {
+      if (!out.includes(entry)) out.push(entry);
+    }
+  }
+  return out;
 }
 
 /**

@@ -45,6 +45,7 @@ function mockFileSystemLayer(files: Record<string, string>): Layer.Layer<FileSys
       }
       return Effect.fail(new FileSystemError(path, `File not found: ${path}`));
     },
+    resolvePath: (filePath: string) => (filePath in files ? filePath : null),
   });
 }
 

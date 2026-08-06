@@ -1,8 +1,8 @@
 ---
 name: setup-atomic-workflow
 description: 'Initialize graph-scheduler project config — setup .graph-scheduler, create config.json, scaffold constraints.md, verify existing layout. Replaces retired atom-graph-config CLI init/show. Trigger phrases: "initialize graph-scheduler project config", "setup .graph-scheduler", "create config.json", "setup-atomic-workflow".'
-version: 1.0.0
-last_updated: '2026-08-01'
+version: 1.1.0
+last_updated: '2026-08-05'
 ---
 
 > **Runtime constraints** — load `atom-kernel` for question() decision UI rules.
@@ -23,6 +23,7 @@ Detect current state. Read `.graph-scheduler/` existence:
 
 - `config.json` — exists? parses? matches ConfigFileSchema shape (dbPath/taskflowDir/registryPaths/skillsDir — no agentRegistry)?
 - `graphs/` — exists? `registry.json` present?
+- `docs/` — exists? (attached-doc home for the maker journey — graph-generate writes `.graph-scheduler/docs/<name>.md`)
 - `constraints.md` — exists? `## Rules` section present?
 - project root signals — monorepo `packages/*`? existing `.graph-scheduler` elsewhere?
 
@@ -51,6 +52,7 @@ Copy seed files. **Never overwrite existing files — fill gaps only.** Idempote
 - `.graph-scheduler/config.json` ← `./seeds/config.json` (when missing)
 - `.graph-scheduler/constraints.md` ← `./seeds/constraints.md` (when missing)
 - `.graph-scheduler/graphs/` directory — create when missing (empty)
+- `.graph-scheduler/docs/` directory — create when missing (empty; attached-doc home for the maker journey)
 
 Output inventory mirroring retired IInitReport:
 
@@ -65,6 +67,7 @@ Re-read every written file. Verify:
 
 - JSON parses (config.json)
 - `## Rules` section present (constraints.md)
+- `graphs/` and `docs/` directories exist under `.graph-scheduler/`
 - file content byte-identical to seed
 
 Parse failure → report file path + error. Failed step, not silent pass.

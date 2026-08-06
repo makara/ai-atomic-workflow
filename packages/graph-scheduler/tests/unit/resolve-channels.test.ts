@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { parseContextContract, resolveChannels } from '../../src/context/resolve-channels.js';
+import { mergeChannelScopes, parseContextContract, resolveChannels } from '../../src/context/resolve-channels.js';
 
 const SAMPLE_SKILL = `---
 name: sample-skill
@@ -306,5 +306,30 @@ describe('resolveChannels', () => {
     });
     expect(outRun.upstream).toEqual([]);
     expect(outRun.warnings.join(' ')).toContain('current run');
+  });
+});
+
+describe('mergeChannelScopes', () => {
+  it('returns undefined when every scope is empty/absent', () => {
+    expect(mergeChannelScopes()).toBeUndefined();
+    expect(mergeChannelScopes([], undefined, [])).toBeUndefined();
+  });
+
+  it('returns the sole non-empty scope by reference — zero-copy fast path', () => {
+    const phase = ['./CONTEXT.md', 'node:spec'];
+    expect(mergeChannelScopes(undefined, undefined, phase)).toBe(phase);
+  });
+
+  it('merges scopes outer-first with exact-string dedup', () => {
+    const project = ['./CONTEXT.md', 'docs/adr/*.md'];
+    const graph = ['./CONTEXT.md', 'skill:atom-graph-spec'];
+    const phase = ['node:spec', 'skill:atom-graph-spec'];
+    const merged = mergeChannelScopes(project, graph, phase);
+    expect(merged).toEqual(['./CONTEXT.md', 'docs/adr/*.md', 'skill:atom-graph-spec', 'node:spec']);
+  });
+
+  it('preserves per-scope order and skips empty middle scopes', () => {
+    const merged = mergeChannelScopes(['a', 'b'], [], undefined, ['c', 'a']);
+    expect(merged).toEqual(['a', 'b', 'c']);
   });
 });

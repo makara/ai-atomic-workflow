@@ -38,13 +38,13 @@ Handle graph-scheduler CRUD API return data — `{ node: NodeDetail | null, snap
 |Field|Type|Phase type|Purpose|
 |-|-|-|-|
 |`task`|string?|`main`, `approval`|Task instruction text (main — executed inline) / full card prompt (approval — first line = header, rest = card body; schema removed `topic`/`preText`, loud rejection)|
-|`channels`|string[]?|all|Channel patterns — main: skill names, file globs, or node IDs against the execution skill contract (deterministic — shared resolver, no fallback search); gate/approval: `node:`-only entries (judgment context)|
+|`channels`|string[]?|all|Effective channel patterns (global channel + phase channels — scheduler-side merge of config `context:` default layer + graph top-level `context:` prepended to phase `channels:`, dedup outer-first; carries the merged list, agent-side never re-merges) — main: skill names, file globs, or node IDs against the execution skill contract (deterministic — shared resolver, no fallback search); gate/approval: all entry kinds (uniform — same rule as main); node: entries are read edges to node streams, promotion self-skip already applied|
 |`topic`|string?|`approval`|Synthesized decision-card header — NOT a YAML-layer field; approval-handler builds it from the task's first line (`phase.task?.split('\n')[0] ?? 'Decision Required'`). Used as question() header|
 ||`routingActions`|IApprovalAction[]?|`approval`|Decision routing actions — declared ONLY in branch-route scenarios; drives those question() options (see §IApprovalAction). Otherwise the card is Accept (AI recommendation) + free input + AI-generated contextual options|
 ||`jumps`|IJumpCondition[]?|`gate`|Rework jumps — `[{when, to}]`; the agent evaluates conditions, a hit → backward jump to `to`, no hit → pass through. Required non-empty — a gate without rework jumps is a silent pass-through|
 ||`route`|string?|all|Route membership — declared route id (absent = implicit default route, always active)|
 
-Judgment context (gate/approval) = direct dependsOn outputs (auto-injected `## Upstream:` blocks) + `channels` `node:` targets — assembled by the same pipeline as main nodes. The `reads` field is removed (schema field convergence); cross-level references declare `channels: [node:<id>]`.
+Judgment context (gate/approval) = direct dependsOn outputs (auto-injected `## Upstream:` blocks) + effective `channels` targets (`node:` outputs, reference skills, files — full-type inheritance) — assembled by the same pipeline as main nodes. The `reads` field is removed (schema field convergence); cross-level references declare `channels: [node:<id>]`.
 
 ### IJumpCondition
 
@@ -72,6 +72,7 @@ No `default` field exists — Run Mode auto executes the AI recommendation, neve
 |`action`|`'continue' \| 'retry' \| 'jump' \| 'end'`|Chosen routing action. Gate path: hit → `'jump'` (target carries the rework target); no hit → `'continue'` (pass through, no target).|
 |`target?`|string|Target nodeId or route id. Gate hit → the matched jump's `to` — pilot passes it as `graph_advance` `branchTo` (backward reset). Approval branch-route → the chosen option's target (node or route id) — pilot passes it as `branchTo` (route activation). Approval retry/jump → selected option target — pilot routes via `graph_jump`.|
 |`note?`|string|Free-text from question() custom:true text box — semantics vary by action. Run Mode auto path sets `'run mode: auto'`.|
+|`rationale?`|string|Recommendation basis summary — the auditable why behind a decision. Run Mode auto path: one-line judgment-context basis (observable output fields / decision values that drove the recommendation). Manual choices omit it (the human IS the basis). Never replaces note/label semantics.|
 |`label?`|string|Chosen routing option label — distinguishes same-action options. Gate path: the jump's `when` text (observability). Run Mode auto path = the recommendation's label.|
 |`value?`|string|Chosen routing option `value` — stable machine identifier; downstream gate jump conditions and AI recommendations consume the decision value. Absent on gate decisions (jumps carry no value).|
 
@@ -114,10 +115,12 @@ No `default` field exists — Run Mode auto executes the AI recommendation, neve
 
 Run Mode and project constraints are USER-LAYER facts decided by the activation prologue nodes (atom-graph-spec §Activation Prologue) — NOT backend run-record fields. The scheduler carries neither: `NodeDetail` has no `runMode`/`constraints` fields. Every dispatch, the handler reads the prologue output files itself and formats the familiar context blocks.
 
+**Run-scoped output streams**: node outputs live at `.taskflow/outputs/<runId>/<nodeId>.output.txt` — `<runId>` comes from the dispatch snapshot (`snapshot.runId`; the handler receives `{ node, snapshot? }`). Every read/write in this skill resolves through the run's own directory; stale outputs from other runs are invisible by construction. Missing runId (standalone dispatch without snapshot) → use the un-scoped fallback `.taskflow/outputs/<nodeId>.output.txt` with a warning.
+
 Prologue output contract (persisted like any node output):
 
-- `$run-mode-confirm` → `.taskflow/outputs/$run-mode-confirm.output.txt` — JSON `{"mode": "manual"|"auto"}` (per-activation decision; the node emits `args.mode` when set, else asks the user — Manual default, absence NEVER auto).
-- `$load-constraints` → `.taskflow/outputs/$load-constraints.output.txt` — JSON `{"constraints": ["<rule>", ...]}` (per-activation reload of the project source — round-level freeze).
+- `$run-mode-confirm` → `.taskflow/outputs/<runId>/$run-mode-confirm.output.txt` — JSON `{"mode": "manual"|"auto"}` (per-activation decision; the node emits `args.mode` when set, else asks the user — Manual default, absence NEVER auto).
+- `$load-constraints` → `.taskflow/outputs/<runId>/$load-constraints.output.txt` — JSON `{"constraints": ["<rule>", ...]}` (per-activation reload of the project source — round-level freeze).
 
 Missing/corrupt prologue output → degrade, never block: mode → `manual` + warning; constraints → empty block + warning (absence never auto).
 
@@ -128,12 +131,12 @@ Missing/corrupt prologue output → degrade, never block: mode → `manual` + wa
 On approval dispatch, read the mode from `$run-mode-confirm` output:
 
 1. **`'auto'`** — judge the AI recommendation from the judgment context (direct dependsOn outputs + `channels` `node:` targets) + snapshot + run mode (agent judgment, NOT a declared action — no `default` field exists):
-   - Recommendation exists → auto-execute it: assemble `IApprovalDecision { action, target?, value, label, note: 'run mode: auto' }`.
-   - Persist decision to `.taskflow/outputs/<nodeId>.output.txt` — full decision JSON incl. `value` + `label` (downstream gate jump conditions consume the decision `value` exactly as the human path). Write failure → mark `[FILE MISSING: …]` in output, do not crash.
+   - Recommendation exists → auto-execute it: assemble `IApprovalDecision { action, target?, value, label, note: 'run mode: auto', rationale }`. `rationale` = one-line basis summary of the judgment context that drove the recommendation (observable output fields / decision values, e.g. `review output overall: pass; top_rec_remaining: true`) — the auditable recommendation basis (F6, arch-review round 2). `note` stays `'run mode: auto'`; `rationale` is the basis, never a substitute for note/label.
+   - Persist decision to `.taskflow/outputs/<runId>/<nodeId>.output.txt` — full decision JSON incl. `value` + `label` + `rationale` (downstream gate jump conditions consume the decision `value` exactly as the human path). Write failure → mark `[FILE MISSING: …]` in output, do not crash.
    - Return `{ status: "done", output: "<json>", durationMs }` — no question(), no decision card.
    - When end IS the recommendation → `action: "end"` — pilot completes the run (`graph_advance` `endRun`).
    - No recommendation (judgment fails / context insufficient) → fall through to the human card even in auto — card shows one line `Run mode: auto — no recommendation; decide manually`. NEVER guess an action.
-2. **`'manual'`** (or missing confirm output) — present the human decision card (question()) as usual. No auto path.
+2. **`'manual'`** (or missing confirm output) — present the human decision card (question()) as usual. No auto path. Manual choices omit `rationale` (the human IS the basis) — the field is optional.
 
 Scope rule: Run Mode controls approval presentation ONLY. Main nodes (grill/scope interviews, work nodes) are never auto-decided, never bypassed by the mode. Gate jump semantics unchanged — jump conditions may reference the injected `## Run Mode: <mode>` context block (e.g. arch-review-loop loop-gate).
 
@@ -170,7 +173,7 @@ receive { node, snapshot? }
   │     ├── Prepend `## Run Mode: <mode>` block (always) + constraints block (per §Constraints Block Format, when constraints non-empty) to task text
   │     ├── Execute task inline — full tool access, no sub-agent
   │     ├── Constraint compliance scan — output contains `Constraint check:` → count `unsatisfied` lines; > 0 → prefix `[CONSTRAINT VIOLATION: <count>]` marker
-  │     ├── Write output: .taskflow/outputs/<nodeId>.output.txt
+  │     ├── Write output: .taskflow/outputs/<runId>/<nodeId>.output.txt
   │     ├── Measure wall-clock duration
   │     ├── collect: { status, output, durationMs }
   │     └── return
@@ -182,7 +185,7 @@ receive { node, snapshot? }
   │     │           └── first "true" selects the jump — stop evaluating; no hit → pass through
   │     ├── Hit → IApprovalDecision { action: "jump", target: <jump.to>, label: <jump.when> }
   │     │     └── no hit → IApprovalDecision { action: "continue" } (no target — pass through)
-  │     ├── Persist decision: write .taskflow/outputs/<nodeId>.output.txt (gate path — decision JSON incl. target + label)
+  │     ├── Persist decision: write .taskflow/outputs/<runId>/<nodeId>.output.txt (gate path — decision JSON incl. target + label)
   │     └── return { status: "done", output: "<IApprovalDecision JSON>", durationMs }
   │
   ├── node.type = "approval"
@@ -192,19 +195,19 @@ receive { node, snapshot? }
   │     ├── Add custom:true — always present for free-text input
   │     ├── Display node.task full text as pre-call text (approval card prompt) + append generic "Free input overrides." sentence
   │     ├── Prepend `## Run Mode: <mode>` block (always) + constraints block (per §Constraints Block Format, when constraints non-empty) to pre-call text
-  │     ├── Surface upstream constraint violations — per dependsOn, read .taskflow/outputs/<dependsOn>.output.txt; any `[CONSTRAINT VIOLATION: N]` marker → append line `[CONSTRAINT VIOLATION: <nodeId> × N]` to pre-call text
+  │     ├── Surface upstream constraint violations — per dependsOn, read .taskflow/outputs/<runId>/<dependsOn>.output.txt; any `[CONSTRAINT VIOLATION: N]` marker → append line `[CONSTRAINT VIOLATION: <nodeId> × N]` to pre-call text
   │     ├── Collect user choice + custom text → IApprovalDecision JSON (incl. chosen action `value`)
   │     │     └── jump/retry + custom resolves to valid nodeId → override target
   │     │     └── else custom → note
   │     ├── Record chosen option label + value → IApprovalDecision.label / .value
-  │     ├── Persist decision: write .taskflow/outputs/<nodeId>.output.txt — decision JSON incl. value + label
+  │     ├── Persist decision: write .taskflow/outputs/<runId>/<nodeId>.output.txt — decision JSON incl. value + label
   │     └── return { status: "done", output: "<IApprovalDecision JSON>", durationMs }
   │
   └── node.type = unknown
         └── return { status: "failed", output: "Unknown phase type: <node.type>", durationMs: 0 }
 ```
 
-> **Note:** handler collects `{ status, output, durationMs }` internally for display. `graph_advance` receives `{ runId, nodeId, durationMs, branchTo?, endRun? }` — output stays in agent session, not persisted. Exception: approval/gate decisions persist to `.taskflow/outputs/<nodeId>.output.txt` (D3 — decision observability).
+> **Note:** handler collects `{ status, output, durationMs }` internally for display. `graph_advance` receives `{ runId, nodeId, durationMs, branchTo?, endRun? }` — output stays in agent session, not persisted. Exception: approval/gate decisions persist to `.taskflow/outputs/<runId>/<nodeId>.output.txt` (D3 — decision observability).
 
 ## Return
 
@@ -245,7 +248,7 @@ Any `unsatisfied` → prefix node output with `[CONSTRAINT VIOLATION: <count>]` 
 
 1. Assemble inline context blocks when `node.channels` / `node.dependsOn` present (see §Main Inline Context Assembly below), then execute `node.task` inline — full tool access, no sub-agent delegation.
 2. Inject `## Agent hints:` block when `node.agent` non-empty (see §Agent Hints).
-3. Write output to `.taskflow/outputs/<nodeId>.output.txt`.
+3. Write output to `.taskflow/outputs/<runId>/<nodeId>.output.txt`.
 4. Measure wall-clock duration via `Date.now()`.
 5. Collect result — map to `{ status, output, durationMs }`.
 
@@ -254,10 +257,11 @@ Any `unsatisfied` → prefix node output with `[CONSTRAINT VIOLATION: <count>]` 
 Main phases execute in the main agent process (no sub-agent) — context is assembled inline:
 
 1. **Resolve channels** — contract source dual-track: `node.skill` present → resolve against that skill's `## Context Requirements` three-subsection contract; `node.skill` absent → empty contract — every entry must be an explicit `skill:`/`node:` prefix or file glob, bare name → error.
-2. **Upstream blocks** — read implicit `dependsOn` outputs AND `node:` channel targets from `.taskflow/outputs/<nodeId>.output.txt` → `## Upstream: <nodeId>` blocks. **Run-scope gate is scheduler-side**: the scheduler strips `node:` targets outside the run's flattened node set at dispatch — out-of-run references never reach the agent, stale output files from other runs never inject. **Missing output → warn + continue, never fail** (first round of a retry loop is legal timing).
+2. **Upstream blocks** — read implicit `dependsOn` outputs AND `node:` channel targets from `.taskflow/outputs/<runId>/<nodeId>.output.txt` → `## Upstream: <nodeId>` blocks. **Run-scope gate is scheduler-side**: the scheduler strips `node:` targets outside the run's flattened node set at dispatch — out-of-run references never reach the agent, stale output files from other runs never inject. **Missing output → warn + continue, never fail** (first round of a retry loop is legal timing).
 3. **Reference blocks** — load `skill:<name>` entries by plain name per the resolution convention → `## Reference:` blocks.
 4. **File blocks** — expand glob entries → read matched files → `## File:` blocks.
 5. **Prepend in order** — upstream → reference → file → run-mode block → constraints block → agent hints block → task text, then execute inline. Run-mode block (`## Run Mode: <mode>`, from `$run-mode-confirm` output) and constraints block (from `$load-constraints` output) are injected for every node — main/approval/gate alike.
+6. **Sub-agent reference inheritance** — when the phase dispatches sub-agents (task()), forward the injected `## Reference:` blocks into each sub-agent's context (task() context text or a local:// handoff file). Reference skills are resolved ONCE at the phase level and shared down the tree — sub-agents SHALL NOT self-discover reference skills the parent already received (spec skills re-read by reviewers is a defect class, e.g. StandardsReview reading atom-graph-spec 3×).
 
 Injected block formats (`## Upstream:` / `## Reference:` / `## File:`). `node.channels` arrives via NodeDetail (main handler `extendNodeDetail` passes it through); `node.dependsOn` arrives via NodeDetail base fields.
 
@@ -274,8 +278,8 @@ Absent/empty `node.agent` → no block injected, platform default applies. Consu
 ### gate type
 
 0. Assemble jump evaluation context (main-style pipeline — judgment context):
-   - Direct dependsOn outputs: read `.taskflow/outputs/<dependsOnId>.output.txt` → `## Upstream: <dependsOnId>` blocks (main parity — auto-injected).
-   - `channels` `node:` targets: read `.taskflow/outputs/<nodeTarget>.output.txt` → `## Upstream: <nodeTarget>` blocks; missing → note `<nodeTarget> has no output` in the context (node pending/unactivated; a condition referencing it evaluates false).
+   - Direct dependsOn outputs: read `.taskflow/outputs/<runId>/<dependsOnId>.output.txt` → `## Upstream: <dependsOnId>` blocks (main parity — auto-injected).
+   - `channels` `node:` targets: read `.taskflow/outputs/<runId>/<nodeTarget>.output.txt` → `## Upstream: <nodeTarget>` blocks; missing → note `<nodeTarget> has no output` in the context (node pending/unactivated; a condition referencing it evaluates false).
    - Snapshot: per-node states incl. `retryCount` — jump bounds reference the TARGET node's `retryCount` (single counter, JUMP-maintained, never zeroed; every node in the jump closure — target + downstream terminals — increments, so a gate downstream of a rework target carries a non-zero retryAttempt after rework rounds).
    - Prepend `## Run Mode: <mode>` (from `$run-mode-confirm` output) + constraints blocks (from `$load-constraints` output; same layer as main/approval).
 1. Evaluate jumps in declaration order:
@@ -283,7 +287,7 @@ Absent/empty `node.agent` → no block injected, platform default applies. Consu
    - judge("Evaluate: <jump.when> against: <judgment context>. Snapshot: <node states incl. retryCount>. Run Mode: <mode>. Constraints: <constraints>. Answer ONLY 'true' or 'false'.")
 2. Hit → `IApprovalDecision { action: "jump", target: <jump.to>, label: <jump.when> }`. No hit → `{ action: "continue" }` (no target — pass through, zero forward effect).
 3. Judgment failure (ambiguous) → treat as no hit → pass through (conservative — never fabricate a jump).
-4. Persist decision: write `.taskflow/outputs/<nodeId>.output.txt` — gate path, decision JSON incl. target + label. Write failure → mark `[FILE MISSING: .taskflow/outputs/<nodeId>.output.txt]` in output, do not crash.
+4. Persist decision: write `.taskflow/outputs/<runId>/<nodeId>.output.txt` — gate path, decision JSON incl. target + label. Write failure → mark `[FILE MISSING: .taskflow/outputs/<runId>/<nodeId>.output.txt]` in output, do not crash.
 5. Return `{ status: "done", output: "<IApprovalDecision JSON>", durationMs }` — no question(), no decision card.
 
 ### approval type
@@ -306,7 +310,7 @@ Absent/empty `node.agent` → no block injected, platform default applies. Consu
    - end: `{ "action": "end", "value": "<chosen value>", "note": "<custom text if any>", "label": "<chosen option label>" }`
      - If custom text resolves to valid nodeId → override target with it, `note` unset.
      - Otherwise → custom text becomes `note`.
-5. Persist decision to `.taskflow/outputs/<nodeId>.output.txt` — full decision JSON incl. `value` + `label`. Write failure → mark `[FILE MISSING: .taskflow/outputs/<nodeId>.output.txt]` in output, do not crash.
+5. Persist decision to `.taskflow/outputs/<runId>/<nodeId>.output.txt` — full decision JSON incl. `value` + `label`. Write failure → mark `[FILE MISSING: .taskflow/outputs/<runId>/<nodeId>.output.txt]` in output, do not crash.
 6. Return `{ status: "done", output: "<json>", durationMs }`.
 
 ### unknown type

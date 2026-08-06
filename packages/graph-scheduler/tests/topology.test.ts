@@ -214,12 +214,12 @@ describe('findUpstream', () => {
 // ── Built-in graph topology validation ─────────────────────────────────────
 
 describe('built-in graph DAG validation', () => {
-  it('skill-delete.taskflow.yaml has acyclic DAG', () => {
+  it('graph-generate.taskflow.yaml has acyclic DAG and no flow refs — concrete maker graph', () => {
     const { readFileSync } = require('node:fs');
     const { join } = require('node:path');
     const { parse: parseYaml } = require('yaml');
     const pkgRoot = join(__dirname, '..');
-    const graphPath = join(pkgRoot, 'graphs', 'skill-delete.taskflow.yaml');
+    const graphPath = join(pkgRoot, 'graphs', 'graph-generate.taskflow.yaml');
     const raw = readFileSync(graphPath, 'utf-8');
     const graph = parseYaml(raw);
     const phases: Phase[] = graph.phases.map((p: Record<string, unknown>) => ({
@@ -228,198 +228,28 @@ describe('built-in graph DAG validation', () => {
       dependsOn: (p.dependsOn as string[]) ?? [],
       mode: 'exclusive' as const,
     }));
-    // topoLayers throws if cycle detected — acyclic assertion
     const layers = topoLayers(phases);
     expect(layers.length).toBeGreaterThan(0);
-    // Verify all 7 phases appear in layers (route-first: gates/end removed)
-    const allIds = layers
-      .flat()
-      .map((p) => p.id)
-      .sort();
-    const expectedIds = [
-      'delete-accept',
-      'delete-confirm',
-      'delete-gate',
-      'delete-review',
-      'impact-analysis',
-      'skill-delete-execute',
-      'skill-select',
-    ].sort();
-    expect(allIds).toEqual(expectedIds);
+    const useRefs = graph.phases
+      .map((p: Record<string, unknown>) => p.use as string | undefined)
+      .filter((u: string | undefined): u is string => u !== undefined);
+    expect(useRefs).toHaveLength(0);
   });
 
-  it('skill-delete.taskflow.yaml all dependsOn refs are valid phase ids', () => {
-    const { readFileSync } = require('node:fs');
+  it('all built-in graph dependsOn refs are valid phase ids', () => {
+    const { readFileSync, readdirSync } = require('node:fs');
     const { join } = require('node:path');
     const { parse: parseYaml } = require('yaml');
     const pkgRoot = join(__dirname, '..');
-    const graphPath = join(pkgRoot, 'graphs', 'skill-delete.taskflow.yaml');
-    const raw = readFileSync(graphPath, 'utf-8');
-    const graph = parseYaml(raw);
-    const phaseIds = new Set(graph.phases.map((p: { id: string }) => p.id));
-    for (const phase of graph.phases) {
-      for (const dep of phase.dependsOn ?? []) {
-        expect(phaseIds.has(dep)).toBe(true);
-      }
-    }
-  });
-});
-
-// ── skill-change-workflow built-in graph validation ────────────────────────
-
-describe('built-in graph DAG validation — skill-change-workflow', () => {
-  it('skill-change-workflow.taskflow.yaml has acyclic DAG', () => {
-    const { readFileSync } = require('node:fs');
-    const { join } = require('node:path');
-    const { parse: parseYaml } = require('yaml');
-    const pkgRoot = join(__dirname, '..');
-    const graphPath = join(pkgRoot, 'graphs', 'skill-change-workflow.taskflow.yaml');
-    const raw = readFileSync(graphPath, 'utf-8');
-    const graph = parseYaml(raw);
-    const phases: Phase[] = graph.phases.map((p: Record<string, unknown>) => ({
-      id: p.id as string,
-      type: p.type as Phase['type'],
-      dependsOn: (p.dependsOn as string[]) ?? [],
-      mode: 'exclusive' as const,
-    }));
-    // topoLayers throws if cycle detected — acyclic assertion
-    const layers = topoLayers(phases);
-    expect(layers.length).toBeGreaterThan(0);
-    // Verify all 9 phases appear in layers (route-first: branch-gate/end removed)
-    const allIds = layers
-      .flat()
-      .map((p) => p.id)
-      .sort();
-    const expectedIds = [
-      'archive',
-      'change-accept',
-      'cross-review',
-      'doc-update',
-      'openspec-create-foo',
-      'plan',
-      'plan-parse',
-      'skill-author-foo',
-      'skill-delete-foo',
-    ].sort();
-    expect(allIds).toEqual(expectedIds);
-  });
-
-  it('skill-change-workflow.taskflow.yaml all dependsOn refs are valid phase ids', () => {
-    const { readFileSync } = require('node:fs');
-    const { join } = require('node:path');
-    const { parse: parseYaml } = require('yaml');
-    const pkgRoot = join(__dirname, '..');
-    const graphPath = join(pkgRoot, 'graphs', 'skill-change-workflow.taskflow.yaml');
-    const raw = readFileSync(graphPath, 'utf-8');
-    const graph = parseYaml(raw);
-    const phaseIds = new Set(graph.phases.map((p: { id: string }) => p.id));
-    for (const phase of graph.phases) {
-      for (const dep of phase.dependsOn ?? []) {
-        expect(phaseIds.has(dep)).toBe(true);
-      }
-    }
-  });
-
-  it('skill-change-workflow.taskflow.yaml flow use refs are registered graph names', () => {
-    const { readFileSync } = require('node:fs');
-    const { join } = require('node:path');
-    const { parse: parseYaml } = require('yaml');
-    const pkgRoot = join(__dirname, '..');
-    const graphPath = join(pkgRoot, 'graphs', 'skill-change-workflow.taskflow.yaml');
-    const raw = readFileSync(graphPath, 'utf-8');
-    const graph = parseYaml(raw);
-
-    // Load registry to get valid graph names
-    const registryPath = join(pkgRoot, 'graphs', 'registry.json');
-    const registry = JSON.parse(readFileSync(registryPath, 'utf-8'));
-    const registeredNames = new Set(registry.graphs.map((g: { name: string }) => g.name));
-
-    for (const phase of graph.phases) {
-      if (phase.type === 'flow' && phase.use) {
-        expect(registeredNames.has(phase.use)).toBe(true);
-      }
-    }
-  });
-
-  it('skill-change-workflow.taskflow.yaml flow phases inject static key-value only', () => {
-    const { readFileSync } = require('node:fs');
-    const { join } = require('node:path');
-    const { parse: parseYaml } = require('yaml');
-    const pkgRoot = join(__dirname, '..');
-    const graphPath = join(pkgRoot, 'graphs', 'skill-change-workflow.taskflow.yaml');
-    const raw = readFileSync(graphPath, 'utf-8');
-    const graph = parseYaml(raw);
-
-    for (const phase of graph.phases) {
-      if (phase.type === 'flow' && phase.with) {
-        for (const [key, value] of Object.entries(phase.with)) {
-          // with values must be static — no {args.key} dynamic expressions
-          if (typeof value === 'string') {
-            expect(value).not.toMatch(/^\{.+\}$/);
-          }
-          // key names are kebab-case or camelCase — generic string check
-          expect(typeof key).toBe('string');
+    const graphFiles = readdirSync(join(pkgRoot, 'graphs')).filter((f: string) => f.endsWith('.taskflow.yaml'));
+    for (const f of graphFiles) {
+      const graph = parseYaml(readFileSync(join(pkgRoot, 'graphs', f), 'utf-8'));
+      const phaseIds = new Set(graph.phases.map((p: { id: string }) => p.id));
+      for (const phase of graph.phases) {
+        for (const dep of phase.dependsOn ?? []) {
+          expect(phaseIds.has(dep), `${f}: ${phase.id} depends on missing ${dep}`).toBe(true);
         }
       }
     }
-  });
-
-  it('skill-change-workflow.taskflow.yaml gate branch conditions reference observable upstream output', () => {
-    const { readFileSync } = require('node:fs');
-    const { join } = require('node:path');
-    const { parse: parseYaml } = require('yaml');
-    const pkgRoot = join(__dirname, '..');
-    const graphPath = join(pkgRoot, 'graphs', 'skill-change-workflow.taskflow.yaml');
-    const raw = readFileSync(graphPath, 'utf-8');
-    const graph = parseYaml(raw);
-
-    for (const phase of graph.phases) {
-      if (phase.type !== 'gate') continue;
-      for (const branch of phase.branches ?? []) {
-        const when = branch.when as string;
-        // branch hygiene per atom-graph-spec: reference observable upstream output fields,
-        // never sibling output existence or hardcoded runtime paths
-        expect(when).toMatch(/output shows/);
-        expect(when).not.toMatch(/\.taskflow\/outputs\//);
-        expect(when).not.toMatch(/output present/);
-        // branch targets resolve in-graph
-        const phaseIds = new Set(graph.phases.map((p: { id: string }) => p.id));
-        expect(phaseIds.has(branch.to)).toBe(true);
-      }
-      // parallel gate — no default required (all-match semantics)
-      if (phase.mode !== 'parallel') {
-        expect(phase.default).toBeDefined();
-      }
-    }
-  });
-
-  it('skill-change-workflow.taskflow.yaml cross-review uses code-review skill', () => {
-    const { readFileSync } = require('node:fs');
-    const { join } = require('node:path');
-    const { parse: parseYaml } = require('yaml');
-    const pkgRoot = join(__dirname, '..');
-    const graphPath = join(pkgRoot, 'graphs', 'skill-change-workflow.taskflow.yaml');
-    const raw = readFileSync(graphPath, 'utf-8');
-    const graph = parseYaml(raw);
-
-    const crossReview = graph.phases.find((p: { id: string }) => p.id === 'cross-review');
-    expect(crossReview).toBeDefined();
-    expect(crossReview.skill).toBe('code-review');
-  });
-
-  it('skill-change-workflow.taskflow.yaml change-accept is a decision confirmation (no written actions)', () => {
-    const { readFileSync } = require('node:fs');
-    const { join } = require('node:path');
-    const { parse: parseYaml } = require('yaml');
-    const pkgRoot = join(__dirname, '..');
-    const graphPath = join(pkgRoot, 'graphs', 'skill-change-workflow.taskflow.yaml');
-    const raw = readFileSync(graphPath, 'utf-8');
-    const graph = parseYaml(raw);
-
-    const approval = graph.phases.find((p: { id: string }) => p.id === 'change-accept');
-    expect(approval).toBeDefined();
-    // Route-first: approvals carry NO written routing actions (except the
-    // branch-route scenario) — Accept + free input + AI-generated options
-    expect(approval.routing).toBeUndefined();
   });
 });

@@ -160,6 +160,8 @@ interface LoadedNamedGraph {
   readonly tf: Taskflow;
   /** Path the graph was loaded from — for contract-pass reporting. */
   readonly filePath: string;
+  /** Resolution source — project registry, builtin registry, or file-name fallback. */
+  readonly resolvedFrom: 'project' | 'builtin' | 'fallback';
 }
 
 /**
@@ -178,9 +180,17 @@ function loadNamedGraph(
       }),
     );
     if (resolvedPath._tag === 'Right') {
-      return { tf: yield* loadGraphFromPath(resolvedPath.right, name), filePath: resolvedPath.right };
+      const { path, source } = resolvedPath.right;
+      return { tf: yield* loadGraphFromPath(path, name), filePath: path, resolvedFrom: source };
     }
-    return { tf: yield* loadGraph(name), filePath: `${name}.taskflow.yaml` };
+    // Fallback: taskflow-dir search — resolve the actual absolute path for
+    // the identity banner (never a bare filename).
+    const fallbackPath = yield* Effect.gen(function* () {
+      const fs = yield* FileSystem;
+      return fs.resolvePath(`${name}.taskflow.yaml`);
+    });
+    const filePath = fallbackPath ?? `${name}.taskflow.yaml`;
+    return { tf: yield* loadGraph(name), filePath, resolvedFrom: 'fallback' };
   });
 }
 
@@ -192,9 +202,18 @@ function isFileNotFound(err: unknown): boolean {
   return err.message.includes('ENOENT');
 }
 
+export interface GraphLoadMeta {
+  /** Resolution source of the top-level graph — project | builtin | fallback. */
+  readonly resolvedFrom: 'project' | 'builtin' | 'fallback';
+  /** Absolute path the top-level graph file was loaded from. */
+  readonly resolvedPath: string;
+  /** Graph top-level description (purpose-focused free text) — undefined when absent. */
+  readonly description?: string;
+}
+
 export function loadGraphWithRegistry(
   graphName: string,
-): Effect.Effect<Taskflow, SchedulerError | RegistryLoadError, FileSystem | RegistryLoader> {
+): Effect.Effect<Taskflow & GraphLoadMeta, SchedulerError | RegistryLoadError, FileSystem | RegistryLoader> {
   return Effect.gen(function* () {
     const loaded = yield* loadNamedGraph(graphName);
 
@@ -239,7 +258,12 @@ export function loadGraphWithRegistry(
     // Contract checks run at load: errors fail fast, warnings surface.
     const result = yield* runContractsPass(flat, loaded.filePath, graphName);
     recordContractWarnings(graphName, result.warnings);
-    return result.tf;
+    return {
+      ...result.tf,
+      resolvedFrom: loaded.resolvedFrom,
+      resolvedPath: loaded.filePath,
+      description: loaded.tf.description,
+    };
   });
 }
 /**
@@ -279,7 +303,13 @@ export function toTaskflowGraph(tf: Taskflow): Effect.Effect<TaskflowGraph, Grap
         validatedPhases.push(validatePhase(p));
       }
       const prologue = synthesizePrologue(validatedPhases).map((p) => validatePhase(p));
-      return { name: tf.name ?? 'unnamed', phases: validatedPhases, prologue };
+      return {
+        name: tf.name ?? 'unnamed',
+        description: tf.description,
+        context: tf.context ?? [],
+        phases: validatedPhases,
+        prologue,
+      };
     },
     catch: (err: unknown): GraphDefinitionError => ({
       _tag: 'GraphDefinitionError',

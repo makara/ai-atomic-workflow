@@ -215,20 +215,16 @@ describe('PhaseSchema — type semantics', () => {
     expect(result.success).toBe(true);
   });
 
-  it('rejects non-node channel entry on approval type', () => {
-    const raw = { id: 'approval-1', type: 'approval', channels: ['review'] };
+  it('accepts non-node channel entries on approval type — full-type inheritance (node:-only repealed)', () => {
+    const raw = { id: 'approval-1', type: 'approval', channels: ['skill:atom-graph-spec', './judgment.md', 'review'] };
     const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-    const issue = result.error!.issues.find((i) => i.path.join('.') === 'channels');
-    expect(issue).toBeDefined();
-    expect(issue!.message).toContain("must be 'node:<id>'");
+    expect(result.success).toBe(true);
   });
 
-  it('rejects non-node channel entry on gate type', () => {
+  it('accepts non-node channel entries on gate type — full-type inheritance (node:-only repealed)', () => {
     const raw = { id: 'g1', type: 'gate', channels: ['skill:atom-graph-spec'], jumps: [{ when: 'x', to: 'w' }] };
     const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-    expect(result.error!.issues.some((i) => i.path.join('.') === 'channels')).toBe(true);
+    expect(result.success).toBe(true);
   });
 
   it('accepts node: channels on gate type', () => {

@@ -42,6 +42,51 @@ describe('config: valid shapes', () => {
     }
   });
 
+  it('accepts project-level context array — default layer of the global channel', () => {
+    const config = baseConfig({
+      context: ['./CONTEXT.md', 'skill:atom-graph-spec'],
+    });
+
+    const result = ConfigFileSchema.safeParse(config);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.context).toEqual(['./CONTEXT.md', 'skill:atom-graph-spec']);
+    }
+  });
+
+  it('rejects bare-name project context entry — explicit prefix/glob required', () => {
+    const config = baseConfig({
+      context: ['atom-graph-spec'],
+    });
+
+    const result = ConfigFileSchema.safeParse(config);
+    expect(result.success).toBe(false);
+    const messages = result.error!.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('\n');
+    expect(messages).toContain('atom-graph-spec');
+    expect(messages).toContain('bare name');
+  });
+
+  it('accepts prefixed project context — node: and skill: entries legal', () => {
+    const config = baseConfig({
+      context: ['node:requirement/arch-review', 'skill:atom-graph-spec'],
+    });
+
+    const result = ConfigFileSchema.safeParse(config);
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects legacy channels key — loud rename hint, no silent strip', () => {
+    const config = baseConfig({
+      channels: ['./CONTEXT.md'],
+    });
+
+    const result = ConfigFileSchema.safeParse(config);
+    expect(result.success).toBe(false);
+    const messages = result.error!.issues.map((i) => i.message).join('\n');
+    expect(messages).toContain('channels');
+    expect(messages).toContain('context');
+  });
+
   it('rejects legacy agentRegistry field — loud error, no silent strip', () => {
     const config = baseConfig({
       agentRegistry: [{ type: 'main', skill: 'atom-phase-handler' }],

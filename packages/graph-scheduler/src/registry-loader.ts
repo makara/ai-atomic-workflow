@@ -19,15 +19,20 @@ import type { GraphDefinitionError, RegistryEntry, RegistryLoadError } from './t
  * RegistryLoader Context.Tag — injectable registry I/O.
  *
  * Loads and merges multiple registry.json files into a flat Map keyed by
- * graph name. Later registries override earlier for the same key.
+ * graph name. Project registries override builtin for the same key
+ * (project-first precedence — the builtin registry is the fallback layer).
  */
 export class RegistryLoader extends Context.Tag('RegistryLoader')<
   RegistryLoader,
   {
-    /** Resolve graph name → file path via merged registry. */
+    /** Resolve graph name → file path via merged registry (project wins over builtin). */
     readonly resolveGraph: (
       graphName: string,
-    ) => Effect.Effect<string, GraphDefinitionError | RegistryLoadError, FileSystem>;
+    ) => Effect.Effect<
+      { path: string; source: 'project' | 'builtin' },
+      GraphDefinitionError | RegistryLoadError,
+      FileSystem
+    >;
 
     /** The merged registry index. */
     readonly registry: Effect.Effect<Map<string, RegistryEntry>, RegistryLoadError, FileSystem>;
@@ -40,11 +45,13 @@ export class RegistryLoader extends Context.Tag('RegistryLoader')<
  * Non-existent files are skipped silently. Parse or structural errors fail
  * the effect. Registry entry paths are resolved relative to the registry
  * file's containing directory — so built-in registries and project registries
- * each resolve their graph files from their own location.
+ * each resolve their graph files from their own location. Each winning entry
+ * records its source registry (project | builtin) for resolution visibility.
  */
 function mergeOneRegistry(
-  merged: Map<string, RegistryEntry>,
+  merged: Map<string, { entry: RegistryEntry; source: 'project' | 'builtin' }>,
   registryPath: string,
+  builtinPath: string,
 ): Effect.Effect<void, RegistryLoadError, FileSystem> {
   return Effect.gen(function* () {
     const fs = yield* FileSystem;
@@ -93,6 +100,7 @@ function mergeOneRegistry(
       });
     }
 
+    const source: 'project' | 'builtin' = registryPath === builtinPath ? 'builtin' : 'project';
     for (const entry of graphs) {
       const parsed = RegistryEntrySchema.safeParse(entry);
       if (!parsed.success) {
@@ -102,11 +110,12 @@ function mergeOneRegistry(
       const e = parsed.data;
       // Resolve relative path against registry file's directory
       const resolvedPath = resolvePath(registryDir, e.path);
-      // Later entry overwrites earlier for same name (merge priority)
+      // Project-first precedence: later paths override earlier (builtin first,
+      // project last wins) — a same-named project entry shadows the builtin.
       if (merged.has(e.name)) {
-        debugLog('load', { event: 'merge_override', graph: e.name });
+        debugLog('load', { event: 'merge_override', graph: e.name, by: source });
       }
-      merged.set(e.name, { ...e, path: resolvedPath });
+      merged.set(e.name, { entry: { ...e, path: resolvedPath }, source });
     }
     debugLog('load', { event: 'registry_found', file: registryPath, entries: graphs.length });
   });
@@ -115,6 +124,11 @@ function mergeOneRegistry(
 /**
  * Build a RegistryLoader service from a list of registry paths.
  *
+ * Project-first precedence: the builtin registry path comes first, project
+ * registry paths after — later entries override earlier, so a same-named
+ * project entry shadows the builtin (the builtin is the fallback layer).
+ * `resolvedFrom` reports which layer won, making shadowing explicit.
+ *
  * Registries are re-read on every call — the registry set is small
  * (~10 entries), so caching buys nothing and stale caches silently
  * ignore runtime registry.json changes.
@@ -122,12 +136,16 @@ function mergeOneRegistry(
  * The returned object conforms to RegistryLoader['Type'] and can be
  * injected via Layer.succeed.
  */
-export function makeRegistryLoader(registryPaths: ReadonlyArray<string>): RegistryLoader['Type'] {
-  const loadAll = (): Effect.Effect<Map<string, RegistryEntry>, RegistryLoadError, FileSystem> =>
+export function makeRegistryLoader(registryPaths: ReadonlyArray<string>, builtinPath: string): RegistryLoader['Type'] {
+  const loadAll = (): Effect.Effect<
+    Map<string, { entry: RegistryEntry; source: 'project' | 'builtin' }>,
+    RegistryLoadError,
+    FileSystem
+  > =>
     Effect.gen(function* () {
-      const merged = new Map<string, RegistryEntry>();
+      const merged = new Map<string, { entry: RegistryEntry; source: 'project' | 'builtin' }>();
       for (const p of registryPaths) {
-        yield* mergeOneRegistry(merged, p);
+        yield* mergeOneRegistry(merged, p, builtinPath);
       }
       return merged;
     });
@@ -137,18 +155,26 @@ export function makeRegistryLoader(registryPaths: ReadonlyArray<string>): Regist
       Effect.gen(function* () {
         const merged = yield* loadAll();
 
-        const entry = merged.get(graphName);
-        if (!entry) {
+        const hit = merged.get(graphName);
+        if (!hit) {
           return yield* Effect.fail<GraphDefinitionError>({
             _tag: 'GraphDefinitionError',
             graphName,
             message: `Graph "${graphName}" not found in any registry`,
           });
         }
-        debugLog('load', { event: 'graph_resolved', path: entry.path });
-        return entry.path;
+        debugLog('load', { event: 'graph_resolved', path: hit.entry.path, source: hit.source });
+        return { path: hit.entry.path, source: hit.source };
       }),
 
-    registry: loadAll(),
+    registry: loadAll().pipe(
+      Effect.map((merged) => {
+        const flat = new Map<string, RegistryEntry>();
+        for (const [name, { entry }] of merged) {
+          flat.set(name, entry);
+        }
+        return flat;
+      }),
+    ),
   };
 }

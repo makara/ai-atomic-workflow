@@ -1,83 +1,71 @@
 name: doc-update
+# Graph-level ambient context — glossary, domain index, and the vocabulary
+# skills every document-maintenance phase consumes; declared once. CONTEXT.md
+# also satisfies the atom-scope-interview / atom-doc-maintenance contract
+# coverage statically.
+context:
+  - ./CONTEXT.md
+  - docs/domains.md
+  - skill:codebase-design
+  - skill:clean-ddd-hexagonal
+  - skill:caveman
+  - skill:domain-modeling
 phases:
+  # Trigger — classify the document-maintenance trigger (event driven).
   - id: doc-trigger
     type: main
     dependsOn: []
     skill: atom-scope-interview
-    channels:
-      - ./CONTEXT.md
     task: |
-      Classify the document-maintenance trigger (trigger-first — event driven, no
-      interview-driven scope collection).
+      Classify the document-maintenance trigger per atom-scope-interview
+      (trigger-first — event driven, no interview-driven scope collection).
 
-      Flow context: prefer upstream plan-parse doc_update_files (injected when
-      orchestrated via skill-change-workflow); else read upstream outputs for the
-      triggering event. When orchestrated after a spec archive (openspec-family
-      graphs), classify from the event: archive succeeded → spec-archive; skill
-      assets changed → skill-change; domain table mutated → domain-change. Direct
-      invocation with no event → proactive.
+      From upstream outputs when composed (doc_update_files, change name,
+      affected domains); from the event when orchestrated after a spec
+      archive (archive succeeded → spec-archive; skill assets changed →
+      skill-change; domain table mutated → domain-change); no event →
+      proactive.
 
-      Output: trigger (spec-archive | domain-change | skill-change | proactive),
-      affected_classes (index | derived-view | normative | contract), scope_hints
-      (change name, affected domains — from upstream when present).
+      Output contract: trigger (spec-archive | domain-change | skill-change |
+      proactive), affected_classes, scope_hints.
 
+  # Maintain — run the maintenance pipeline per atom-doc-maintenance.
   - id: doc-maintain
     type: main
     dependsOn: [doc-trigger]
     skill: atom-doc-maintenance
     task: |
-      Execute document maintenance per atom-doc-maintenance.
+      Execute document maintenance per atom-doc-maintenance. maintain() per
+      trigger + scope: classify, enumerate affected classes per taxonomy,
+      apply per-class rules, run consistency gate. Do NOT edit contract
+      documents (openspec/specs/) directly — flag for the delta flow.
 
-      Read doc-trigger output (injected). Run the maintenance pipeline:
-
-      maintain({ trigger, scope }) — classify trigger, enumerate affected document
-      classes per the taxonomy, apply per-class rules (index evolution four-step /
-      derived-view source→transform→verify / normative targeted edits / contract
-      delta flow), then run the consistency gate (mapping, links, counts, derived).
-
-      Write document updates per class rules. Do NOT edit contract documents
-      (openspec/specs/) directly — flag them for the delta flow instead.
-
-      Output (main agent collects): changes (document, action, reason), validation
+      Output contract: changes (document, action, reason), validation
       (gate results per class), updated (paths).
-    channels:
-      - node:doc-trigger
-      - ./CONTEXT.md
-      - docs/domains.md
-      - skill:codebase-design
-      - skill:clean-ddd-hexagonal
-      - skill:caveman
-      - skill:domain-modeling
+
+  # Review — document changes reviewed against the Format Reference.
   - id: doc-review
     type: main
     dependsOn: [doc-maintain]
     skill: code-review
     agent: [reviewer, explore, task, general]
-    task: |
-      Review document changes per code-review (use ## Agent hints for axis sub-agents).
-
-      Artifact: document paths + validation from doc-maintain output (injected).
-      Standards: atom-doc-maintenance Format Reference — metadata block, heading
-      hierarchy, link validity, code blocks, document types; language consistency.
-      Spec: doc-trigger output (injected) — check maintenance matches trigger scope.
-
-      Output machine-parseable YAML with overall: pass | fail. Write report (main
-      agent collects).
     channels:
       - node:doc-trigger
-      - node:doc-maintain
+    task: |
+      Review document changes per code-review (use ## Agent hints for axis
+      sub-agents). Standards: atom-doc-maintenance Format Reference (metadata
+      block, heading hierarchy, link validity, document types, language).
+      Spec: doc-trigger output — maintenance matches trigger scope.
 
-  # Accept — decision confirmation (route-first: no written actions).
-  # Recommendation follows the review verdict; revise/revise-trigger are AI-generated
-  # dynamic options, not written.
+      Output contract: report (machine-parseable YAML, overall:
+      pass | fail).
+
+  # Accept — decision confirmation.
   - id: doc-accept
     type: approval
     dependsOn: [doc-review]
-    channels:
-      - node:doc-review
     task: |
       Accept the document maintenance?
 
-      doc-review reported the maintenance verdict. Recommendation follows the review
-      verdict: accept when the document passes; otherwise revise (re-run doc-maintain
-      with review feedback) or revise the trigger (re-classify at doc-trigger).
+      Decision: accept when the documents pass review; revise (re-run
+      doc-maintain with feedback) or re-classify the trigger otherwise.

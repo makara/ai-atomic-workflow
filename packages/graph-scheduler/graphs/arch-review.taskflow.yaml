@@ -1,68 +1,71 @@
 name: arch-review
+# Graph-level ambient context — project glossary + ADR decisions + design
+# vocabulary serve every main phase; declared once. CONTEXT.md also satisfies
+# the atom-scope-interview contract coverage statically.
+context:
+  - ./CONTEXT.md
+  - docs/adr/*.md
+  - skill:codebase-design
 phases:
-  # Scope interview — entry node (route-first: no forward gate). Case-5
-  # self-judgment: when composed into arch-review-loop, the loop entry
-  # pre-confirms the scope (loop-entry output shows scope_complete: true) —
-  # this node discovers no work and completes with an empty output (execution,
-  # not a skip). Standalone (no loop-entry output) → the interview runs.
-  - id: scope-detect-interview
+  # Requirement production — scope-entry → arch-review → review-accept
+  # (loop composition composes this graph whole as its requirement stage).
+  - id: scope-entry
     type: main
     dependsOn: []
     skill: atom-scope-interview
-    channels:
-      - ./CONTEXT.md
     task: |
       Execute scope interview per atom-scope-interview.
 
-      Case-5 self-judgment: if loop-entry output (injected channel) shows
-      scope_complete: true (loop composition — scope pre-confirmed at the loop
-      entry), this node has NO WORK — output scope_complete: true (echo) and
-      finish; the interview itself is skipped by the workflow state, not by a
-      skip mechanism.
-      Otherwise conduct the interview:
-      Topics: architecture review domain/feature/problem; focus dimensions (depth/coupling/testability/naming/duplication); output path — MUST be explicitly confirmed by user.
-      Recommend default output path: docs/reports/<YYYY-MM-DD>-arch-review-<topic>.md (date prefix — new convention); user MUST explicitly confirm, may override.
+      Mandatory scope confirmation — SHALL run on EVERY activation (loop
+      jump-backs target this node): user confirms or adjusts scope + report
+      input each run; NEVER auto-skip.
 
-      Output: scope, focus, output, scope_complete.
+      Topics: scope (domain/feature/problem + focus dimensions), output path
+      (recommend docs/reports/<YYYY-MM-DD>-arch-review-<topic>.md), report
+      input (fresh | existing — report_path carries the confirmed path).
 
-  # Execute architecture review with confirmed scope — from scope-detect-interview
-  # (standalone interview) or with the loop pre-confirmed scope (loop composition).
+      Output contract: scope, focus, output, report_input
+      (fresh|existing), report_path, scope_complete.
+
+  # Report production — improve-codebase-architecture (producer).
   - id: arch-review
     type: main
-    dependsOn: [scope-detect-interview]
+    dependsOn: [scope-entry]
     skill: improve-codebase-architecture
     agent: [explore, scout, task, general]
-    channels:
-      - node:loop-entry
-      - ./CONTEXT.md
-      - docs/adr/*.md
-      - skill:codebase-design
     task: |
       Execute architecture review per improve-codebase-architecture (use ## Agent hints for the Explore sub-agent).
 
-      Scope: read scope-detect-interview output (injected) — scope, focus, confirmed output path.
-      Loop composition (scope pre-confirmed at the loop entry — loop-entry output shows scope_complete: true):
-      the scope comes from the loop-entry output (injected channel).
-      Report input (from loop-entry output — injected channel):
-      - report_input: fresh → current behavior: markdown (NOT HTML) written to the confirmed output path.
-      - report_input: fresh AND the report file at report_path already exists (round ≥ 2 — a
-        previous round produced the report) → transition to re-review semantics: treat as existing —
-        read the report at report_path (single source of truth, NO path re-confirmation), mark
-        implementation progress per Top Recommendation item (evidence-backed status), review the
-        implementation for defects (findings cards), update the report in place (condense/archive
-        implemented content, rewrite Top Recommendation — strongest remaining candidate or empty),
-        increment the round marker.
-      - report_input: existing → closed-loop re-review mode: read the report at report_path (confirmed at
-        loop entry — single source of truth, NO path re-confirmation). Mark implementation progress per
-        Top Recommendation item (evidence-backed status — pipeline change evidence + code walk). Review the
-        implementation for defects (findings cards). Update the report in place — condense/archive
-        implemented content, rewrite Top Recommendation (strongest remaining candidate, or empty).
-        Increment the round marker.
-      Output contract (both modes): report_path, round (increment), implemented (list),
-      new_findings (count), top_rec (new Top Rec or empty), top_rec_remaining (true|false),
-      summary (one line).
-      For each finding, render markdown card — Files / Problem / Solution /
-      Benefits (locality + leverage + testability) / Recommendation strength
-      (Strong | Worth exploring | Speculative).
-      End with Top recommendation + Decision Request section (Context,
-      Auto-recorded debt, Blocking findings, Dispatch record, Suggested advance label).
+      Scope from scope-entry output: scope, focus, report_path, report_input —
+      never re-detected, never re-interviewed.
+      report_input fresh → write markdown (NOT HTML) report at report_path.
+      report_input fresh AND report_path exists (round ≥ 2) OR existing →
+      re-review: read report at report_path (single source of truth — NO path re-confirmation),
+      mark
+      implementation progress per Top Rec item (evidence-backed), review
+      defects (findings cards), update report in place (condense implemented
+      content, rewrite Top Rec), increment round marker.
+
+      Findings cards: Files / Problem / Solution / Benefits (locality +
+      leverage + testability) / Recommendation strength (Strong | Worth
+      exploring | Speculative). End with Top recommendation + Decision Request
+      (Context, Auto-recorded debt, Blocking findings, Dispatch record,
+      Suggested advance label).
+
+      Output contract: report_path, round, implemented, new_findings, top_rec,
+      top_rec_remaining, summary.
+
+  # Requirement accept — Continue → requirement ready; Loop again → retry
+  # scope-entry; End → end action.
+  - id: review-accept
+    type: approval
+    dependsOn: [arch-review]
+    channels:
+      - node:scope-entry
+    task: |
+      Requirement ready?
+
+      Decision: Continue — requirement ready (report at report_path is the
+      requirement artifact; loop composition activates adopt). Loop again —
+      re-review round (retry scope-entry). End — no requirement. Top Rec
+      remains → Continue; none → End.

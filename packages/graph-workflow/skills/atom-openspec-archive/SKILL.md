@@ -1,6 +1,6 @@
 ---
 name: atom-openspec-archive
-description: 'Archive completed OpenSpec change via openspec archive CLI. Step 0 reverse-validates task completion against code evidence before archive. Use as graph phase in skill-change-workflow post-approval. Trigger: archive change, finalize openspec, archive completed change.'
+description: 'Archive completed OpenSpec change via openspec archive CLI. Step 0 reverse-validates task completion against code evidence before archive. Use as graph phase in arch-review-loop / spec-implement post-approval. Trigger: archive change, finalize openspec, archive completed change.'
 version: 1.2.1
 last_updated: '2026-08-01'
 ---
@@ -9,7 +9,7 @@ last_updated: '2026-08-01'
 
 # Atom-OpenSpec-Archive
 
-Archive completed OpenSpec change. Thin wrapper around openspec archive CLI. Designed as graph phase skill — dispatched by skill-change-workflow post change-accept approval.
+Archive completed OpenSpec change. Thin wrapper around openspec archive CLI. Designed as graph phase skill — dispatched by arch-review-loop / spec-implement post change-accept approval.
 
 Non-interactive. Uses --yes --json flags. No filesystem path assumptions — CLI resolves openspec root internally.
 

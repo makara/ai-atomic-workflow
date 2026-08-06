@@ -8,72 +8,42 @@
     {
       "name": "arch-review",
       "path": "arch-review.taskflow.yaml",
-      "description": "Architecture review: scope detect -> architecture review report"
+      "description": "Requirement production graph, standalone: scope-entry interview (entry node — scope + output path + report input fresh|existing) → arch-review report (improve-codebase-architecture — producer) → review-accept (Continue = requirement ready / Loop again / End). Independently executable requirement production; the loop composes it as its requirement stage (adopt + implement follow in arch-review-loop)."
     },
     {
-      "name": "grill-with-docs",
-      "path": "grill-with-docs.taskflow.yaml",
-      "description": "Raw idea entry: scope → grilling interview with inline domain-modeling side effects → decision gate. Two-track shared idea-sharpening entry."
-    },
-    {
-      "name": "skill-author",
-      "path": "skill-author.taskflow.yaml",
-      "description": "Skill authoring: create or edit — scope → write → review → approve → output"
-    },
-    {
-      "name": "skill-delete",
-      "path": "skill-delete.taskflow.yaml",
-      "description": "Skill deletion: select → impact analysis → confirm → execute → review → approve"
+      "name": "adopt-with-docs",
+      "path": "adopt-with-docs.taskflow.yaml",
+      "description": "Requirement adoption (adopt stage) + spec production: adopt-scope (interview: idea/goal or input document) → adopting (grilling conversation, inline domain-modeling side effects) → adopt-accept (adoption approval) → spec-propose (openspec-propose — adopted requirements materialize as the OpenSpec change). Standalone raw idea entry; composed as the loop's adopt stage — receives the produced report as input document and appends its record as a dated appendix section."
     },
     {
       "name": "graph-generate",
       "path": "graph-generate.taskflow.yaml",
-      "description": "Graph generation: interview → design → write → review → approve → examples"
+      "description": "Graph production — the maker journey: entry (atom-scope-interview) → spec (atom-graph-design per atom-graph-spec) → spec-accept → implement (atom-graph-writer: writes .taskflow.yaml + registry entry + attached doc .graph-scheduler/docs/<name>.md, load-probe validated) → review → gate → accept. Single kind (graph), single operation (create)"
     },
     {
       "name": "doc-update",
       "path": "doc-update.taskflow.yaml",
-      "description": "Document update: interview → analyze → confirm → write → review → approve"
+      "description": "Document maintenance: trigger classification → maintain per atom-doc-maintenance → review → accept. Also the post-archive doc flow for spec-implement / openspec-apply / openspec-engineer."
     },
     {
-      "name": "plan-generate",
-      "path": "plan-generate.taskflow.yaml",
-      "description": "Generic plan generation: scope interview -> to-spec PRD -> optional to-tickets split. Reusable via flow type by orchestration graphs."
-    },
-    {
-      "name": "openspec-create",
-      "path": "openspec-create.taskflow.yaml",
-      "description": "OpenSpec spec creation: scope interview with input source detection (wayfinder-map/arch-review/grill-consensus/direct) + inline ADR judgment -> gate -> openspec propose CLI delegation"
-    },
-    {
-      "name": "arch-review-loop",
-      "path": "arch-review-loop.taskflow.yaml",
-      "description": "Closed-loop architecture review: entry (existing report or fresh review; Run Mode is a graph_start run param) → arch-review re-review (round worker) → approve Top Rec → openspec-pipeline → round-end approval (Loop again default, Complete = user ends) → loop until the user approves ending"
-    },
-    {
-      "name": "implement",
-      "path": "implement.taskflow.yaml",
-      "description": "Generic implementation: input-source detection (openspec-change/tickets/prd) -> tdd implementation -> dual-axis review -> bounded gate -> conditional OpenSpec archive"
-    },
-    {
-      "name": "skill-change-workflow",
-      "path": "skill-change-workflow.taskflow.yaml",
-      "description": "Orchestrated skill change: plan → flow phases (author + delete + doc) → cross review → approval"
+      "name": "spec-implement",
+      "path": "spec-implement.taskflow.yaml",
+      "description": "Implementation graph: spec-extract (produced change — upstream channel when composed / {args.changeName} standalone) → track gate (minimal/detailed) → archive → doc maintenance → pipeline-done. Pure implementation of an existing change — no spec generation; rework is the loop in arch-review-loop."
     },
     {
       "name": "openspec-apply",
       "path": "openspec-apply.taskflow.yaml",
-      "description": "OpenSpec apply pipeline: apply change → dual review → bounded auto-rework gate → archive"
+      "description": "OpenSpec apply pipeline: apply change → dual review → bounded auto-rework gate → archive → doc maintenance"
     },
     {
       "name": "openspec-engineer",
       "path": "openspec-engineer.taskflow.yaml",
-      "description": "OpenSpec detailed implementation: spec synthesis → tickets → tdd implementation → dual review → bounded gate → approval → reverse-validated archive"
+      "description": "OpenSpec detailed implementation: spec synthesis → tickets → tdd implementation → dual review → bounded gate → approval → reverse-validated archive → doc maintenance"
     },
     {
-      "name": "openspec-pipeline",
-      "path": "openspec-pipeline.taskflow.yaml",
-      "description": "OpenSpec full-lifecycle pipeline: raw idea entry (grill-with-docs) → spec creation (openspec-create) → human gate → branch (openspec-apply direct / openspec-engineer detailed) → archive"
+      "name": "arch-review-loop",
+      "path": "arch-review-loop.taskflow.yaml",
+      "description": "Three-stage composition with a single loop: requirement production (arch-review — scope → report → accept) → round-continue content gate (branch-route: continue activates the proceed route / end when no Top Recommendation remains) → adopt (adopt-with-docs — confirms the report, appends dated appendix, produces the OpenSpec change) → implementation (spec-implement — consumes the change → track machinery → archive) → loop-gate (auto jump to requirement/scope-entry while Top Rec remains, bounded) → loop-accept (Loop again default, Complete = user ends)"
     }
   ]
 }

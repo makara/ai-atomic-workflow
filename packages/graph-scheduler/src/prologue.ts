@@ -91,6 +91,8 @@ export function synthesizePrologue(phases: readonly Phase[]): readonly Phase[] {
   const declared = new Map(phases.filter((p) => p.id.startsWith('$')).map((p) => [p.id, p]));
   const prologue: Phase[] = [];
 
+  // Mode exists only where consumed — an approval-less graph gets no mode
+  // question (spec §Activation Prologue; gates judge from context, never mode).
   const hasApproval = phases.some((p) => p.type === 'approval');
   if (hasApproval) {
     prologue.push(

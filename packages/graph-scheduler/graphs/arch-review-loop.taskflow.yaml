@@ -1,104 +1,76 @@
 name: arch-review-loop
+# Global channel — the review report stream is promoted into ambient context:
+# every decision/gate phase of the loop (round-continue, adopt, loop-gate,
+# loop-accept) reads it without per-phase declaration. The owning node skips
+# its own promoted stream.
+context:
+  - node:requirement/arch-review
 phases:
-  # Stage 1: Loop entry — scope interview. Run Mode is a per-activation
-  # decision made by the built-in $run-mode-confirm prologue node (args.mode
-  # or a question), never a graph topic.
-  # Report input: existing report path (true closed loop) OR fresh review.
-  - id: loop-entry
-    type: main
-    dependsOn: []
-    skill: atom-scope-interview
-    channels:
-      - ./CONTEXT.md
-    task: |
-      Execute scope interview per atom-scope-interview.
-
-      Mandatory per-round scope confirmation — this interview SHALL run on EVERY
-      round (loop jump-back targets this node): regardless of prior report input or
-      loop round, require the user to confirm or adjust scope (domain/feature/problem
-      + focus dimensions) and report_input (fresh|existing — re-confirmable across
-      rounds). NEVER auto-skip; scope_complete requires user participation.
-
-      Topics:
-      1. Scope — domain/feature/problem + focus dimensions; MUST be confirmed or
-         adjusted by the user each run (never assumed from a prior round).
-      2. Report input: existing report path (true closed loop — re-run on a prior
-         report; confirm the path exists, read its Top Recommendation) OR fresh
-         review (confirm output path — path MUST be explicitly confirmed; recommend
-         docs/reports/<YYYY-MM-DD>-arch-review-<topic>.md).
-
-      Output: scope, focus, output, report_input (fresh|existing), report_path,
-      scope_complete.
-
-  # Stage 2: Review — the loop's round worker, ALWAYS runs (fresh or existing).
-  # Round origin = loop-entry (dependsOn [loop-entry]): a loop jump-back to
-  # loop-entry resets this whole segment (scope re-confirmed at entry each round).
-  - id: review
+  # Three-stage loop: requirement (arch-review) → round-continue content gate →
+  # adopt (adopt-with-docs) + implement (spec-implement) on the proceed route;
+  # single loop-gate back to scope-entry.
+  - id: requirement
     type: flow
     use: arch-review
-    dependsOn: [loop-entry]
+    dependsOn: []
 
-  # Stage 3: Review accept — decision confirmation (no written actions): the AI
-  # recommends implement (Top Rec remains → continue; the implement flow is
-  # plain composition — default route, activates mechanically once this node
-  # completes) or end (no Top Rec → end action; auto mode ends automatically).
-  # Existing-report mode = same card semantics — the recommendation follows
-  # the report state, never a skipped card.
-  - id: review-accept
+  # Content gate — branch-route decision: continue activates the proceed route
+  # (adopt + implement); end completes the run. Empty rounds (no Top
+  # Recommendation) end here — proceed members never activate.
+  - id: round-continue
     type: approval
-    dependsOn: [review]
-    channels:
-      - node:loop-entry
+    dependsOn: [requirement]
+    routing:
+      actions:
+        - action: continue
+          target: proceed
+          value: continue
+          label: Continue — adopt + implement the Top Recommendation
+          description: Top Recommendation remains — proceed through adopt and implement
+        - action: end
+          value: end
+          label: End — nothing remains
+          description: No Top Recommendation — finish the loop here
     task: |
-      Implement review Top Recommendation?
+      Proceed with the round?
 
-      Review report updated (path confirmed at loop entry — docs/reports, date prefix).
-      Recommendation: implement when the review reports a remaining Top
-      Recommendation (continue — implementation proceeds); otherwise end the
-      loop (end action — auto mode ends automatically).
+      Recommendation: continue when the review reports a remaining Top
+      Recommendation (top_rec_remaining: true — branchTo proceed activates
+      adopt + implement); end when nothing remains (end action completes the
+      run — auto mode ends automatically).
 
-  # Stage 4: Implementation — plain composition flow (no route): sequencing by
-  # dependsOn [review-accept], end path by the approval's endRun action. A
-  # single-path route here would add an activation dependency on the agent
-  # emitting branchTo — a missed target silently drains the run.
+  # Adopt — report as input document (inherited via graph-level channels).
+  # Route: proceed — activated only by round-continue continue.
+  - id: adopt
+    type: flow
+    use: adopt-with-docs
+    dependsOn: [requirement]
+    route: proceed
+
+  # Implement — produced change + adoption record as input; reads declared on
+  # spec-implement's entry (spec-extract) — composition read edges, no flow
+  # channels (two-scope context model).
+  # Route: proceed — activated only by round-continue continue.
   - id: implement
     type: flow
-    use: openspec-pipeline
-    dependsOn: [review-accept]
-    channels:
-      - node:review/arch-review
-      - node:loop-entry
+    use: spec-implement
+    dependsOn: [adopt]
+    route: proceed
 
-  # Stage 5: Loop rework gate — pure backward jump (route-first): auto mode +
-  # Top Rec remains + bound not exhausted → jump back to LOOP-ENTRY (whole
-  # round re-runs from the scope interview). No match = pass through.
-  # dependsOn [implement]: the implement flow's terminal is the
-  # round-completion marker; review-accept is transitively included in the
-  # implement flow's flattened dependency set (an explicit dependsOn on both
-  # would be a redundant dependency error).
+  # Loop gate — auto + Top Rec remains + bound → re-round from scope-entry.
   - id: loop-gate
     type: gate
     dependsOn: [implement]
-    channels:
-      - node:review/arch-review
-      - node:loop-entry
     jumps:
-      - when: 'run mode is auto AND review/arch-review output shows top_rec_remaining: true AND loop-entry retryCount < 8'
-        to: loop-entry
+      - when: 'run mode is auto AND requirement/arch-review output shows top_rec_remaining: true AND requirement/scope-entry retryCount < 8'
+        to: requirement/scope-entry
 
-  # Stage 6: Round-end approval — decision confirmation (no written actions):
-  # AI recommends loop again (Top Rec remains AND bound not exhausted → retry
-  # loop-entry) or complete (no Top Rec OR bound exhausted → end action — auto
-  # mode ends automatically). Completion = end action or natural drain.
+  # Round-end — loop again (Top Rec remains + bound) or complete.
   - id: loop-accept
     type: approval
     dependsOn: [loop-gate]
-    channels:
-      - node:review/arch-review
     task: |
       End the review loop?
 
-      Loop again → re-run from the loop entry (scope re-confirmed, report
-      re-reviewed). Complete → the loop finishes. Recommendation follows the
-      report state and the loop bound (loop-entry retryCount < 8); when nothing
-      remains, ending IS the recommendation and auto mode ends automatically.
+      Decision: Loop again — re-run from requirement/scope-entry (scope +
+      report input re-confirmed). Complete — loop finishes.

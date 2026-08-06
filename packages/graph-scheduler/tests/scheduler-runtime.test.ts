@@ -54,77 +54,68 @@ describe('built-in assets', () => {
     expect(approval.routing).toBeUndefined();
   });
 
-  it('built-in skill-delete.taskflow.yaml is valid YAML with 7 phases', () => {
+  it('built-in graph-generate.taskflow.yaml is valid YAML with 7 phases — concrete maker graph', () => {
     const { readFileSync } = require('node:fs');
     const { join } = require('node:path');
     const pkgRoot = join(__dirname, '..');
-    const graphPath = join(pkgRoot, 'graphs', 'skill-delete.taskflow.yaml');
+    const graphPath = join(pkgRoot, 'graphs', 'graph-generate.taskflow.yaml');
     const raw = readFileSync(graphPath, 'utf-8');
     const graph = parseYaml(raw);
-    expect(graph.name).toBe('skill-delete');
+    expect(graph.name).toBe('graph-generate');
     expect(graph.phases).toHaveLength(7);
-    // Verify all 7 phase IDs (route-first redesign: impact-gate + execute-gate + end marker removed)
+    // Concrete maker journey phase sequence (spec-first, no skeleton)
     const phaseIds = graph.phases.map((p: { id: string }) => p.id);
-    expect(phaseIds).toContain('skill-select');
-    expect(phaseIds).toContain('impact-analysis');
-    expect(phaseIds).toContain('delete-confirm');
-    expect(phaseIds).toContain('skill-delete-execute');
-    expect(phaseIds).toContain('delete-review');
-    expect(phaseIds).toContain('delete-gate');
-    expect(phaseIds).toContain('delete-accept');
-    // Verify phase types
-    const phasesByType: Record<string, string> = {};
-    for (const p of graph.phases) phasesByType[p.id] = p.type;
-    expect(phasesByType['skill-select']).toBe('main');
-    expect(phasesByType['impact-analysis']).toBe('main');
-    expect(phasesByType['delete-confirm']).toBe('main');
-    expect(phasesByType['skill-delete-execute']).toBe('main');
-    expect(phasesByType['delete-review']).toBe('main');
-    expect(phasesByType['delete-gate']).toBe('gate');
-    expect(phasesByType['delete-accept']).toBe('approval');
-    // Verify dependsOn chain — entry node has empty dependsOn
-    const entryPhase = graph.phases.find((p: { id: string }) => p.id === 'skill-select');
-    expect(entryPhase.dependsOn).toEqual([]);
-    // Verify gate carries jumps (route-first: no branches/default) + bounded rework
-    const gatePhase = graph.phases.find((p: { id: string }) => p.id === 'delete-gate');
-    expect(gatePhase.eval, 'delete-gate eval').toBeUndefined();
-    expect(Array.isArray(gatePhase.jumps), 'delete-gate jumps').toBe(true);
+    expect(phaseIds).toEqual(['entry', 'spec', 'spec-accept', 'implement', 'review', 'gate', 'accept']);
+    // no flow composition — the maker graph is self-contained
+    expect(graph.phases.some((p: { type: string }) => p.type === 'flow')).toBe(false);
+    // entry is the entry node with the shared scope-interview skill
+    const entryPhase = graph.phases.find((p: { id: string }) => p.id === 'entry');
+    expect(entryPhase.skill).toBe('atom-scope-interview');
+    // implement output contract — three-path bundle (graph + registry + doc)
+    const implementPhase = graph.phases.find((p: { id: string }) => p.id === 'implement');
+    expect(String(implementPhase.task)).toMatch(/artifact_path/);
+    expect(String(implementPhase.task)).toMatch(/registry_path/);
+    expect(String(implementPhase.task)).toMatch(/doc_path/);
+    // gate carries bounded rework jumps (route-first: no branches/default)
+    const gatePhase = graph.phases.find((p: { id: string }) => p.id === 'gate');
+    expect(gatePhase.eval, 'gate eval').toBeUndefined();
+    expect(Array.isArray(gatePhase.jumps), 'gate jumps').toBe(true);
     expect(gatePhase.jumps.length).toBeGreaterThanOrEqual(1);
-    expect(gatePhase.default, 'delete-gate default').toBeUndefined();
-    // Bounded auto-rework jump (no DEBT condition) on the FAIL gate
+    expect(gatePhase.default, 'gate default').toBeUndefined();
     const jumpText = gatePhase.jumps.map((j: { when: string }) => j.when).join(' ');
     expect(jumpText).toContain('overall: fail');
     expect(jumpText).toContain('retryCount < 2');
     expect(jumpText).not.toContain('DEBT');
-    // Verify accept is pure human card — no branches, no written routing (route-first)
-    const approvalPhase = graph.phases.find((p: { id: string }) => p.id === 'delete-accept');
-    expect(approvalPhase.branches).toBeUndefined();
-    expect(approvalPhase.eval).toBeUndefined();
-    expect(approvalPhase.dependsOn).toEqual(['delete-gate']);
-    expect(approvalPhase.routing).toBeUndefined();
+    // two approval layers only — spec-accept + final accept, both pure cards
+    const approvals = graph.phases.filter((p: { type: string }) => p.type === 'approval');
+    expect(approvals.map((p: { id: string }) => p.id)).toEqual(['spec-accept', 'accept']);
+    for (const a of approvals) {
+      expect(a.routing).toBeUndefined();
+      expect(a.branches).toBeUndefined();
+      expect(a.eval).toBeUndefined();
+    }
   });
 
-  it('built-in skill-delete.taskflow.yaml passes TaskflowSchema validation', () => {
+  it('deleted artifact-workflow/skill-workflow files are gone — no thin compositions', () => {
+    const { existsSync } = require('node:fs');
+    const { join } = require('node:path');
+    const pkgRoot = join(__dirname, '..');
+    expect(existsSync(join(pkgRoot, 'graphs', 'artifact-workflow.taskflow.yaml'))).toBe(false);
+    expect(existsSync(join(pkgRoot, 'graphs', 'skill-workflow.taskflow.yaml'))).toBe(false);
+  });
+
+  it('built-in graph-generate passes TaskflowSchema + PhaseSchema validation', () => {
     const { readFileSync } = require('node:fs');
     const { join } = require('node:path');
     const pkgRoot = join(__dirname, '..');
-    const graphPath = join(pkgRoot, 'graphs', 'skill-delete.taskflow.yaml');
+    const graphPath = join(pkgRoot, 'graphs', 'graph-generate.taskflow.yaml');
     const raw = readFileSync(graphPath, 'utf-8');
     const graph = parseYaml(raw);
     const result = TaskflowSchema.safeParse(graph);
-    expect(result.success).toBe(true);
-  });
-
-  it('built-in skill-delete.taskflow.yaml phases each pass PhaseSchema', () => {
-    const { readFileSync } = require('node:fs');
-    const { join } = require('node:path');
-    const pkgRoot = join(__dirname, '..');
-    const graphPath = join(pkgRoot, 'graphs', 'skill-delete.taskflow.yaml');
-    const raw = readFileSync(graphPath, 'utf-8');
-    const graph = parseYaml(raw);
+    expect(result.success, `graph-generate TaskflowSchema`).toBe(true);
     for (const phase of graph.phases) {
-      const result = PhaseSchema.safeParse(phase);
-      expect(result.success).toBe(true);
+      const phaseResult = PhaseSchema.safeParse(phase);
+      expect(phaseResult.success, `graph-generate/${String(phase.id)} PhaseSchema`).toBe(true);
     }
   });
 });

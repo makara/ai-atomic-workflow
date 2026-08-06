@@ -1,44 +1,33 @@
 name: openspec-engineer
 phases:
-  # Stage 1: Spec — synthesize from the recorded decision (to-spec, no interview)
+  # Spec — synthesize from the recorded ADR decision + change context.
   - id: to-spec
     type: main
     dependsOn: []
     task: |
+      Synthesize the spec from the recorded ADR decision + change context per
+      to-spec skill. No interview. Change name — NEVER ask: {args.changeName}
+      → openspec list --json single active → spec_status: blocked + candidates.
+      Sketch seams (prefer existing, highest); confirm once with the user.
+      Write spec per to-spec template; publish to tracker with ready-for-agent
+      label (none configured → docs/specs/).
 
-      Synthesize the spec from the recorded ADR decision + change context per to-spec skill.
-      No interview — the decision is already recorded; synthesize from what exists.
-      Change name resolution — NEVER ask the user:
-      1. {args.changeName} if provided (graph_start args).
-      2. Else `openspec list --json` — exactly one active change → use it.
-      3. Else spec_status: blocked + candidate list, implement nothing.
-      Read the change's delta specs (openspec/changes/<change_name>/) and the ADR recorded
-      for it (docs/adr/ — most recent ADR referencing the change).
-      Sketch seams (prefer existing, highest seam); confirm with the user (question once).
-      Write the spec per to-spec template; publish to the issue tracker with ready-for-agent label.
-      Output (main agent collects):
-        - spec_path: <path>
-        - spec_status: published | blocked
-        - seam_summary: <seam description>
-        - change_name: <name>
-        - adr_path: <path when found>
+      Output contract: spec_path, spec_status (published | blocked),
+      seam_summary, change_name, adr_path.
 
-  # Stage 2: Tickets — split the spec into tracer-bullet slices (to-tickets)
+  # Tickets — split the spec into tracer-bullet slices.
   - id: to-tickets
     type: main
     dependsOn: [to-spec]
     task: |
       Break the spec into tracer-bullet tickets per to-tickets skill.
-      Read spec from to-spec output spec_path (injected via dependsOn implicit context).
-      Draft vertical slices with blocking edges; quiz the user on granularity and
-      blocking edges (question rounds until approved); publish to the configured
-      tracker in dependency order with ready-for-agent label.
-      Output (main agent collects):
-        - ticket_count: <N>
-        - ticket_paths: [<ticket file paths>]
-        - change_name: <echo>
+      Draft vertical slices with blocking edges; quiz the user on granularity
+      + blocking edges until approved; publish in dependency order (local
+      files when no tracker).
 
-  # Stage 3: Implement — tdd slices per implement skill (graph-mode patched)
+      Output contract: ticket_count, ticket_paths, change_name (echo).
+
+  # Implement — tdd slices per implement skill (graph-mode patched).
   - id: implement
     type: main
     skill: implement
@@ -46,43 +35,46 @@ phases:
     channels:
       - node:implement-review
     task: |
-      Execute implement graph mode per implement skill — seam confirmation (question once),
-      tdd red-green slices in frontier order, regular typecheck + single-file tests,
-      full suite at the end.
-      Re-run rounds: implement-review output is injected via node:implement-review
-      channel — FIRST fix every finding, THEN continue.
-      Work tickets (ticket_paths injected); the change ledger check-off happens
-      uniformly in openspec-archive, not here.
-      Output (main agent collects):
-        - diff_summary: <summary of implementation changes>
-        - changed_files: [paths]
-        - progress_note: <open tickets vs done>
+      Execute implement graph mode per implement skill — seam confirmation
+      (question once), tdd red-green slices in frontier order, regular
+      typecheck + single-file tests, full suite at the end. Re-run rounds:
+      fix every implement-review finding FIRST, then continue.
 
-  # Stage 4: Review — dual-axis audit per code-review (spec + tickets + ADR contract)
+      Spec standards per affected domain — deterministic mapping rule:
+      graph → atom-graph-spec, skill → atom-skill-spec, doc →
+      atom-doc-maintenance. Determine the change's affected files (delta
+      spec domains / openspec instructions apply contextFiles), load each
+      corresponding spec skill BEFORE writing, and validate the
+      implementation against its rule classes (deterministic rules →
+      validation errors, heuristic rules → warnings) while writing.
+
+      Output contract: diff_summary, changed_files, progress_note.
+
+  # Review — dual-axis audit (spec + tickets + ADR contract).
   - id: implement-review
     type: main
     skill: code-review
     agent: [reviewer, explore, task, general]
     dependsOn: [implement]
     channels:
-      - skill:atom-graph-spec
       - node:to-spec
       - node:to-tickets
     task: |
-      Dual-axis review of the implementation per code-review (use ## Agent hints for axis sub-agents).
-      Artifact set: spec (to-spec output spec_path), tickets (to-tickets output ticket_paths),
-      diff from implement output (injected); the recorded ADR (to-spec output adr_path) —
-      implementation must honor the decision.
-      Standards: repo-documented coding standards — auto-discovered per code-review §3;
-      atom-graph-spec (injected) for graph definitions.
-      Spec: ticket acceptance criteria met per ticket; spec commitments honored;
-      ADR decision honored. Graph-definition hygiene — gate branch conditions bounded by
-      target retryCount, branch targets are writer nodes, branch conditions reference
-      contract fields / decision values, channels explicit.
-      Output structured YAML report — overall: pass | fail, per-violation findings.
-      Write report (main agent collects).
+      Dual-axis review of the implementation per code-review (use ## Agent
+      hints for axis sub-agents). Artifacts: spec (to-spec), tickets
+      (to-tickets), diff (implement), recorded ADR — implementation must
+      honor the decision. Spec: ticket acceptance criteria met; ADR honored.
 
-  # Stage 5: Gate — bounded backward rework on FAIL (route-first: pure backward jump)
+      Spec standards per affected domain — deterministic mapping rule:
+      graph → atom-graph-spec, skill → atom-skill-spec, doc →
+      atom-doc-maintenance. Determine the change's affected files, load each
+      corresponding spec skill, validate the implementation against its rule
+      classes (deterministic rules → validation errors, heuristic rules →
+      warnings) + repo coding standards.
+
+      Output contract: report (structured YAML, overall: pass | fail).
+
+  # Gate — bounded rework on FAIL (backward jump to implement).
   - id: implement-gate
     type: gate
     dependsOn: [implement-review]
@@ -90,9 +82,7 @@ phases:
       - when: 'implement-review output shows overall: fail AND implement retryCount < 2'
         to: implement
 
-  # Stage 6: Accept — decision confirmation (route-first: no written actions).
-  # Recommendation follows the review verdict; revise/redo-spec are AI-generated
-  # dynamic options, not written.
+  # Accept — decision confirmation.
   - id: implement-accept
     type: approval
     dependsOn: [implement-gate]
@@ -101,13 +91,9 @@ phases:
     task: |
       Implementation approval
 
-      implement-review reported the dual-axis verdict. Recommendation follows the
-      review verdict and the rework bound: accept when the implementation passes
-      (reverse-validated archive follows); otherwise revise (re-run implement with
-      review feedback injected via node:implement-review) or redo the spec and
-      tickets (re-synthesize from the ADR decision).
-
-  # Stage 7: Archive — reverse-validated change archival (atom-openspec-archive)
+      Decision: accept when the implementation passes review (reverse-
+      validated archive follows); revise/redo spec otherwise.
+  # Archive — reverse-validated change archival.
   - id: openspec-archive
     type: main
     dependsOn: [implement-accept]
@@ -116,31 +102,19 @@ phases:
       - node:to-spec
       - node:implement
     task: |
-      Execute atom-openspec-archive flow (reverse-validated archive).
-      Read implement-accept output (injected via dependsOn implicit context).
-      Change name: from to-spec output change_name field (injected via node:to-spec channel);
-      if absent, `openspec list --json` filtered to complete changes — single entry use it,
-      multiple/zero → archive_status: blocked + candidates. NEVER ask user.
-      Step 0 reverse-validation: task completion × code evidence (grep, contextFiles +
-      implement output changed_files injected via node:implement channel); evidence hit →
-      check off ledger + register verification.md; checked without evidence → drift →
-      refuse archive + rework suggestion output.
-      Step 1-3: `openspec archive <change> --yes --json` (CLI inlines delta specs → main specs sync).
-      Write output (main agent collects):
-        - archive_status: success | failed | blocked
-        - change_name: <name>
-        - validation_result: pass | fail | warn
-        - message: <summary>
+      Execute atom-openspec-archive (reverse-validated archive). Change name:
+      to-spec output change_name (echo).
 
-  # Stage 8: Document maintenance — trigger-first flow after archive
-  # (spec-archive trigger; when guard = archive succeeded).
+      Output contract: archive_status (success | failed | blocked),
+      change_name, validation_result, message.
+
+  # Post-archive doc maintenance — runs only when archive succeeded.
   - id: doc-maintenance
     type: flow
     use: doc-update
     dependsOn: [openspec-archive]
     task: |
-      Case-5 self-judgment: if openspec-archive output (injected) does not show
-      archive_status: success, this flow has NO WORK — finish with an empty
-      declaration and no artifact; this is normal execution, not a skip.
-      Otherwise the post-archive maintenance runs — doc-update's doc-trigger
-      classifies the spec-archive trigger; scope_hints carry the change name.
+      Case-5 self-judgment: openspec-archive output shows archive_status:
+      success → run post-archive maintenance (doc-trigger classifies the
+      spec-archive trigger; scope_hints carry the change name); otherwise NO
+      WORK — empty declaration, no artifact (normal execution, not a skip).

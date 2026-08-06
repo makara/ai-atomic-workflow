@@ -33,6 +33,7 @@ import type {
   SchedulerError,
 } from '../types.js';
 
+import { ConfigService } from '../config-service.js';
 import { executeEffects, reconstructFsmState } from './fsm-reconstruct.js';
 import { getContractWarnings, loadGraphForRun, loadGraphWithRegistry, toTaskflowGraph } from './graph-loader.js';
 import { dropRunCaches, graphLoadCache } from './run-caches.js';
@@ -53,7 +54,7 @@ function loadRunContext(
 ): Effect.Effect<
   { run: GraphRun; currentState: RunState; graph: TaskflowGraph; tf: Taskflow },
   SchedulerError,
-  GraphRepository | FileSystem | RegistryLoader
+  GraphRepository | FileSystem | RegistryLoader | ConfigService
 > {
   return Effect.gen(function* () {
     const repo = yield* GraphRepository;
@@ -93,15 +94,17 @@ function dispatchEvent(
  * Build the next dispatchable node after a transition (null when run finished).
  * Shared tail for start/advance/jump.
  */
-function buildNextNode(input: NextNodeInput): Effect.Effect<NodeDetail | null, DispatchConfigError> {
+function buildNextNode(input: NextNodeInput): Effect.Effect<NodeDetail | null, DispatchConfigError, ConfigService> {
   return Effect.gen(function* () {
     const active = input.state.status === 'running' ? findActiveNode(input.state.phases, input.graph) : null;
     if (!active) return null;
+    const config = yield* ConfigService;
     return yield* buildNodeDetail({
       phaseId: active.phaseId,
       nodeState: active.nodeState,
       graph: input.graph,
       args: input.args,
+      projectContext: config.context,
     });
   });
 }
@@ -138,11 +141,17 @@ export function graphStart(
     runId: string;
     node: NodeDetail | null;
     contractWarnings?: string[];
+    /** Resolution source of the loaded graph — project | builtin | fallback. */
+    resolvedFrom: 'project' | 'builtin' | 'fallback';
+    /** Absolute path the graph was loaded from. */
+    resolvedPath: string;
+    /** Graph top-level description — purpose-focused identity text; absent when undeclared. */
+    description?: string;
     /** Run snapshot — same shape as advance/jump; entry dispatch carries it (jump nav + progress display). */
     snapshot: IGraphSnapshot;
   },
   SchedulerError | RegistryLoadError,
-  GraphRepository | FileSystem | RegistryLoader
+  GraphRepository | FileSystem | RegistryLoader | ConfigService
 > {
   return Effect.gen(function* () {
     const repo = yield* GraphRepository;
@@ -185,7 +194,15 @@ export function graphStart(
     // Build next node
     const node = yield* buildNextNode({ runId, state: nextState, graph, args: args ?? null });
     // Contract warnings captured at load — surfaced for decision gates
-    return { runId, node, contractWarnings: getContractWarnings(graphName), snapshot: buildSnapshot(nextState, graph) };
+    return {
+      runId,
+      node,
+      contractWarnings: getContractWarnings(graphName),
+      resolvedFrom: tf.resolvedFrom,
+      resolvedPath: tf.resolvedPath,
+      description: tf.description,
+      snapshot: buildSnapshot(nextState, graph),
+    };
   });
 }
 
@@ -215,7 +232,7 @@ export function graphAdvance(
 ): Effect.Effect<
   { snapshot: IGraphSnapshot; node: NodeDetail | null },
   SchedulerError,
-  GraphRepository | FileSystem | RegistryLoader
+  GraphRepository | FileSystem | RegistryLoader | ConfigService
 > {
   return Effect.gen(function* () {
     const { run, currentState, graph } = yield* loadRunContext(runId);
@@ -255,7 +272,7 @@ export function graphJump(
 ): Effect.Effect<
   { snapshot: IGraphSnapshot; node: NodeDetail | null },
   SchedulerError,
-  GraphRepository | FileSystem | RegistryLoader
+  GraphRepository | FileSystem | RegistryLoader | ConfigService
 > {
   return Effect.gen(function* () {
     const { run, currentState, graph } = yield* loadRunContext(runId);
@@ -293,7 +310,7 @@ export function graphJump(
  */
 export function graphForceEnd(
   runId: string,
-): Effect.Effect<IGraphSnapshot, SchedulerError, GraphRepository | FileSystem | RegistryLoader> {
+): Effect.Effect<IGraphSnapshot, SchedulerError, GraphRepository | FileSystem | RegistryLoader | ConfigService> {
   return Effect.gen(function* () {
     const { run, currentState, graph } = yield* loadRunContext(runId);
 
