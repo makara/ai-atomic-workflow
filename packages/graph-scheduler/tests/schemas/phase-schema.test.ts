@@ -328,7 +328,7 @@ describe('PhaseSchema — type semantics', () => {
     }
   });
 
-  it('rejects reads on main/flow — judgment context is gate/approval-only', () => {
+  it('rejects reads on all types — removed field (schema field convergence)', () => {
     for (const type of ['main', 'flow'] as const) {
       const raw = { id: 'p1', type, reads: ['up'], ...(type === 'flow' ? { use: 'child' } : {}) };
       const result = PhaseSchema.safeParse(raw);
@@ -710,5 +710,58 @@ describe('PhaseSchema — approval routing value/default', () => {
       },
     };
     expect(PhaseSchema.safeParse(raw).success).toBe(true);
+  });
+});
+
+describe('PhaseSchema — HLT operations declaration', () => {
+  it('parses main type with valid closed-set operations', () => {
+    const raw = {
+      id: 'doc-maintain',
+      type: 'main',
+      operations: ['locate', 'read', 'write', 'verify'],
+    };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.operations).toEqual(['locate', 'read', 'write', 'verify']);
+    }
+  });
+
+  it('rejects an unknown operation class — loud rejection, no runtime fallback', () => {
+    const raw = {
+      id: 'doc-maintain',
+      type: 'main',
+      operations: ['locate', 'teleport'],
+    };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'operations');
+      expect(issue).toBeDefined();
+      expect(issue?.message).toContain('not a registered High-Level Tool operation class');
+      expect(issue?.message).toContain('locate');
+    }
+  });
+
+  it('rejects operations on non-main types', () => {
+    for (const type of ['approval', 'gate', 'flow']) {
+      const raw = { id: `x-${type}`, type, operations: ['read'] };
+      const result = PhaseSchema.safeParse(raw);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const issue = result.error!.issues.find((i) => i.path.join('.') === 'operations');
+        expect(issue).toBeDefined();
+        expect(issue?.message).toContain("'operations' is main-type only");
+      }
+    }
+  });
+
+  it('omits operations when absent — skill default applies', () => {
+    const raw = { id: 'step-1', type: 'main' };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.operations).toBeUndefined();
+    }
   });
 });

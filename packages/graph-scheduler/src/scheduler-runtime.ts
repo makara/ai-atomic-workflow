@@ -352,7 +352,9 @@ export function createRuntime(config?: Partial<SchedulerConfig>): Effect.Effect<
     const registryLoaderLayer = Layer.succeed(RegistryLoader, registryLoaderService);
 
     // Layer 2c: runtime config — project-level ambient context for dispatch merge
-    const configServiceLayer = Layer.succeed(ConfigService, { context: resolved.context });
+    const configServiceLayer = Layer.succeed(ConfigService, {
+      context: resolved.context,
+    });
 
     // Compose: persistence + fs + registry + config
     const envLayer = Layer.merge(
@@ -413,6 +415,7 @@ export function createRuntime(config?: Partial<SchedulerConfig>): Effect.Effect<
           projectTaskflowDir: taskflowDirs.length > 1 ? taskflowDirs[0] : null,
           builtinGraphsDir: BUILTIN_TASKFLOW_DIR,
           skillsDir: resolveSkillsDir(),
+          projectContext: resolved.context,
         };
         return run(graphInit(scan));
       },

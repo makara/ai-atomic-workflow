@@ -21,29 +21,29 @@
       "description": "Graph production — the maker journey: entry (atom-scope-interview) → spec (atom-graph-design per atom-graph-spec) → spec-accept → implement (atom-graph-writer: writes .taskflow.yaml + registry entry + attached doc .graph-scheduler/docs/<name>.md, load-probe validated) → review → gate → accept. Single kind (graph), single operation (create)"
     },
     {
-      "name": "doc-update",
-      "path": "doc-update.taskflow.yaml",
-      "description": "Document maintenance: trigger classification → maintain per atom-doc-maintenance → review → accept. Also the post-archive doc flow for spec-implement / openspec-apply / openspec-engineer."
-    },
-    {
       "name": "spec-implement",
       "path": "spec-implement.taskflow.yaml",
-      "description": "Implementation graph: spec-extract (produced change — upstream channel when composed / {args.changeName} standalone) → track gate (minimal/detailed) → archive → doc maintenance → pipeline-done. Pure implementation of an existing change — no spec generation; rework is the loop in arch-review-loop."
+      "description": "Implementation graph: spec-extract (produced change — upstream channel when composed / {args.changeName} standalone) → track gate (minimal/detailed) → track-owned closure (plain archive / atom-doc-lifecycle) → pipeline-done. Pure implementation of an existing change — no spec generation; rework is the loop in arch-review-loop."
     },
     {
       "name": "openspec-apply",
       "path": "openspec-apply.taskflow.yaml",
-      "description": "OpenSpec apply pipeline: apply change → dual review → bounded auto-rework gate → archive → doc maintenance"
+      "description": "OpenSpec apply pipeline: apply change → dual review → bounded auto-rework gate → plain archive (openspec-archive-change)"
     },
     {
       "name": "openspec-engineer",
       "path": "openspec-engineer.taskflow.yaml",
-      "description": "OpenSpec detailed implementation: spec synthesis → tickets → tdd implementation → dual review → bounded gate → approval → reverse-validated archive → doc maintenance"
+      "description": "OpenSpec detailed implementation: spec synthesis → tickets → tdd implementation → dual review → bounded gate → approval → lifecycle closure (reverse-validated archive + ADR fold + index)"
     },
     {
       "name": "arch-review-loop",
       "path": "arch-review-loop.taskflow.yaml",
       "description": "Three-stage composition with a single loop: requirement production (arch-review — scope → report → accept) → round-continue content gate (branch-route: continue activates the proceed route / end when no Top Recommendation remains) → adopt (adopt-with-docs — confirms the report, appends dated appendix, produces the OpenSpec change) → implementation (spec-implement — consumes the change → track machinery → archive) → loop-gate (auto jump to requirement/scope-entry while Top Rec remains, bounded) → loop-accept (Loop again default, Complete = user ends)"
+    },
+    {
+      "name": "estate-maintain",
+      "path": "estate-maintain.taskflow.yaml",
+      "description": "Estate maintenance graph: entry (trigger classification — domain-change/skill-change/proactive + workstream selection) → domains-index (atom-doc-maintain per atom-domain-spec) / specs-sync (atom-spec-maintain) / adr-align (atom-adr-maintain) → review (consistency gate + reverse-validation + read-only deployment-mirror check) → accept."
     }
   ]
 }

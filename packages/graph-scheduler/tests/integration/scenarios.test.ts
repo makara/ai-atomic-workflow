@@ -196,7 +196,7 @@ describe('runtime scenarios', () => {
 
     // Start — activation prefix (confirm + load — graph has an approval)
     const { runId, node: n0 } = await rt.graphStart('gate-pair-test');
-    expect(n0!.nodeId).toBe('$run-mode-confirm');
+    expect(n0!.nodeId).toBe('$load-constraints');
     const n1 = await advanceThroughPrologue(rt, runId);
     expect(n1!.nodeId).toBe('writer');
 
@@ -234,9 +234,9 @@ describe('runtime scenarios', () => {
     expect(j.snapshot.nodes.find((n) => n.nodeId === '$run-mode-confirm')?.status).toBe('done');
 
     // Gate re-enters (retryAttempt 1) → branchTo=writer (terminal upstream, ENTRY)
-    // → JUMP reset + prologue re-run (round restart) — next dispatch is P.
+    // → JUMP reset + prologue re-run (round restart) — next dispatch is P (load first).
     const retry = await rt.graphAdvance(runId, 'auto-gate', 50, 'writer');
-    expect(retry.node!.nodeId).toBe('$run-mode-confirm');
+    expect(retry.node!.nodeId).toBe('$load-constraints');
     expect(retry.node!.retryAttempt).toBe(1);
     expect(retry.snapshot.nodes.find((n) => n.nodeId === 'auto-gate')?.retryCount).toBe(2);
     expect(retry.snapshot.nodes.find((n) => n.nodeId === 'writer')?.status).toBe('pending');
@@ -289,7 +289,7 @@ describe('runtime scenarios', () => {
     // Gate retry decision → branchTo apply-change (terminal upstream, ENTRY) →
     // JUMP reset + prologue re-run (round restart) — next dispatch is P.
     const j = await rt.graphAdvance(runId, 'change-gate', 100, 'apply-change');
-    expect(j.node!.nodeId).toBe('$run-mode-confirm');
+    expect(j.node!.nodeId).toBe('$load-constraints');
     expect(j.snapshot.nodes.find((n) => n.nodeId === 'change-gate')?.retryCount).toBe(1);
 
     // Advance the re-run prefix → apply-change re-dispatched with retry visible
@@ -324,21 +324,13 @@ describe('runtime scenarios', () => {
     // Route-first: no written actions — card = Accept + free input + AI options
     expect(accept.routingActions).toBeUndefined();
 
-    // Human continue → archive → post-archive doc-maintenance flow (spec-archive
-    // trigger; case-5 no-work when archive output absent — flow drains empty)
+    // Human continue → archive (plain, openspec-archive-change) → graph drains
+    // (no post-archive doc-maintenance flow — doc-update deleted)
     const r4 = await rt.graphAdvance(runId, 'change-accept', 100);
     expect(r4.node!.nodeId).toBe('archive');
     const r5 = await rt.graphAdvance(runId, 'archive', 100);
-    expect(r5.node!.nodeId).toBe('doc-maintenance/doc-trigger');
-    const r6 = await rt.graphAdvance(runId, 'doc-maintenance/doc-trigger', 100);
-    expect(r6.node!.nodeId).toBe('doc-maintenance/doc-maintain');
-    const r7 = await rt.graphAdvance(runId, 'doc-maintenance/doc-maintain', 100);
-    expect(r7.node!.nodeId).toBe('doc-maintenance/doc-review');
-    const r8 = await rt.graphAdvance(runId, 'doc-maintenance/doc-review', 100);
-    expect(r8.node!.nodeId).toBe('doc-maintenance/doc-accept');
-    const r9 = await rt.graphAdvance(runId, 'doc-maintenance/doc-accept', 100);
-    expect(r9.snapshot.fsmState).toBe('completed');
-    expect(r9.node).toBeNull();
+    expect(r5.snapshot.fsmState).toBe('completed');
+    expect(r5.node).toBeNull();
   });
 
   // ── Scenario 3: Force end ────────────────────────────────────────

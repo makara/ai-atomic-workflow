@@ -42,13 +42,15 @@ phases:
 
       Spec standards per affected domain — deterministic mapping rule:
       graph → atom-graph-spec, skill → atom-skill-spec, doc →
-      atom-doc-maintenance. Determine the change's affected files (delta
+      atom-doc-maintain. Determine the change's affected files (delta
       spec domains / openspec instructions apply contextFiles), load each
       corresponding spec skill BEFORE writing, and validate the
       implementation against its rule classes (deterministic rules →
       validation errors, heuristic rules → warnings) while writing.
 
-      Output contract: diff_summary, changed_files, progress_note.
+      Output contract: diff_summary, changed_files, progress_note,
+      verification_path (the change's verification document path — derived
+      from change_name, e.g. openspec/changes/<change>/verification.md).
 
   # Review — dual-axis audit (spec + tickets + ADR contract).
   - id: implement-review
@@ -67,7 +69,7 @@ phases:
 
       Spec standards per affected domain — deterministic mapping rule:
       graph → atom-graph-spec, skill → atom-skill-spec, doc →
-      atom-doc-maintenance. Determine the change's affected files, load each
+      atom-doc-maintain. Determine the change's affected files, load each
       corresponding spec skill, validate the implementation against its rule
       classes (deterministic rules → validation errors, heuristic rules →
       warnings) + repo coding standards.
@@ -93,28 +95,22 @@ phases:
 
       Decision: accept when the implementation passes review (reverse-
       validated archive follows); revise/redo spec otherwise.
-  # Archive — reverse-validated change archival.
+  # Closure — lifecycle closure: reverse-validated archive + ADR
+  # decision-fold + index rebuild in one unit (detailed track).
   - id: openspec-archive
     type: main
     dependsOn: [implement-accept]
-    skill: atom-openspec-archive
+    skill: atom-doc-lifecycle
     channels:
       - node:to-spec
       - node:implement
     task: |
-      Execute atom-openspec-archive (reverse-validated archive). Change name:
-      to-spec output change_name (echo).
+      Execute atom-doc-lifecycle close(): reverse-validate task completion
+      against code evidence → archive → fold ADRs (adr_created: to-spec
+      adr_path present → true; supersedes from the change's ADR metadata) →
+      rebuild index → lifecycle validation. Change name: to-spec output
+      change_name (echo). Verification document: node:implement
+      verification_path field — tasks consume fields, never file globs.
 
       Output contract: archive_status (success | failed | blocked),
-      change_name, validation_result, message.
-
-  # Post-archive doc maintenance — runs only when archive succeeded.
-  - id: doc-maintenance
-    type: flow
-    use: doc-update
-    dependsOn: [openspec-archive]
-    task: |
-      Case-5 self-judgment: openspec-archive output shows archive_status:
-      success → run post-archive maintenance (doc-trigger classifies the
-      spec-archive trigger; scope_hints carry the change name); otherwise NO
-      WORK — empty declaration, no artifact (normal execution, not a skip).
+      change_name, adr_changes, index_rebuilt, validation, message.

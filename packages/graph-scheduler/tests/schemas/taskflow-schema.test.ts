@@ -231,7 +231,7 @@ describe('TaskflowSchema — flow type phases', () => {
       phases: [
         { id: 'plan', type: 'main', dependsOn: [], task: 'plan work' },
         { id: 'skill-ops', type: 'flow', use: 'skill-delete', dependsOn: ['plan'] },
-        { id: 'doc-ops', type: 'flow', use: 'doc-update', dependsOn: ['plan'] },
+        { id: 'doc-ops', type: 'flow', use: 'doc-sync', dependsOn: ['plan'] },
         { id: 'review', type: 'main', skill: 'code-review', dependsOn: ['skill-ops', 'doc-ops'] },
         { id: 'approve', type: 'approval', dependsOn: ['review'] },
       ],

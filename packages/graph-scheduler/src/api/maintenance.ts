@@ -14,7 +14,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 
-import { validateEntrySkillContracts } from '../context/contracts.js';
+import { validateEntrySkillContracts, validateProjectContext } from '../context/contracts.js';
 import { GraphRepository } from '../lib/db/repository.js';
 import { SERVER_STARTED_AT } from '../runtime-start.js';
 import { ConfigFileSchema } from '../schemas/index.js';
@@ -34,6 +34,8 @@ export interface IGraphInitScan {
   readonly builtinGraphsDir: string;
   /** graph-workflow skills package dir — null = alignment skipped */
   readonly skillsDir: string | null;
+  /** project layer context (config.json `context:`) — three-tier channel model */
+  readonly projectContext?: readonly string[];
 }
 
 /** Config health report — read-only checks mirroring retired CLI validate checks 1-4. */
@@ -156,8 +158,20 @@ export function graphInit(scan: IGraphInitScan): Effect.Effect<IGraphInitReport,
 
     const skillsDir = scan.skillsDir;
     if (skillsDir && graphs.length > 0) {
+      // Three-tier channel model: graph_init health validates with the
+      // project layer (config.json context) — coverage via convention/project
+      // layers and project-layer existence both surface in the health report.
+      const projectContext = scan.projectContext;
+      // Project layer existence validation — same implementation as the load
+      // path (three-tier channel model): exact-file missing -> error, glob
+      // zero-match -> warning.
+      if (projectContext) {
+        const pc = validateProjectContext(projectContext, scan.cwd);
+        errors.push(...pc.errors);
+        warnings.push(...pc.warnings);
+      }
       const alignment = yield* Effect.either(
-        Effect.tryPromise(() => validateEntrySkillContracts(graphs, skillsDir, { checkOrphans: true })),
+        Effect.tryPromise(() => validateEntrySkillContracts(graphs, skillsDir, { checkOrphans: true, projectContext })),
       );
       if (alignment._tag === 'Right') {
         errors.push(...alignment.right.errors);

@@ -2,8 +2,8 @@
  * Unit + integration tests for the activation prologue constraints channel
  * The scheduler carries NO constraints — NodeDetail has no
  * `constraints` field, graph_start reads no file, and the built-in
- * `$load-constraints` node carries the default copy protocol task text.
- * The actual file reading is agent-side execution of the node's task.
+ * `$load-constraints` node carries the default compiled-artifact protocol task text.
+ * The actual file reading/compilation is agent-side execution of the node's task.
  */
 import { Effect } from 'effect';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -29,7 +29,7 @@ describe('synthesizePrologue', () => {
       { id: 'a', type: 'main' },
       { id: 'accept', type: 'approval' },
     ]);
-    expect(withApproval.map((p) => p.id)).toEqual(['$run-mode-confirm', '$load-constraints']);
+    expect(withApproval.map((p) => p.id)).toEqual(['$load-constraints', '$run-mode-confirm']);
   });
 
   it('author declaration replaces the built-in (same reserved id, own task)', () => {
@@ -39,10 +39,24 @@ describe('synthesizePrologue', () => {
     expect(prologue[0]?.task).toBe('custom source');
   });
 
-  it('default load task encodes the deterministic copy protocol', () => {
+  it('default load task encodes the compiled-artifact protocol', () => {
     expect(DEFAULT_LOAD_TASK).toContain('## Rules');
-    expect(DEFAULT_LOAD_TASK).toContain('verbatim');
     expect(DEFAULT_LOAD_TASK).toContain('.graph-scheduler/constraints.md');
+    expect(DEFAULT_LOAD_TASK).toContain('.graph-scheduler/constraints.json');
+    expect(DEFAULT_LOAD_TASK).toContain('compiled_at');
+    expect(DEFAULT_LOAD_TASK).toContain('existence');
+  });
+
+  it('default load task fast path emits the artifact verbatim (zero md I/O)', () => {
+    expect(DEFAULT_LOAD_TASK).toContain('If .graph-scheduler/constraints.json exists');
+    expect(DEFAULT_LOAD_TASK).toContain('zero markdown reads');
+    expect(DEFAULT_LOAD_TASK).toContain('verbatim');
+  });
+
+  it('default load task resets by deletion and recompiles invalid JSON', () => {
+    expect(DEFAULT_LOAD_TASK).toContain('deleting it forces recompilation');
+    expect(DEFAULT_LOAD_TASK).toContain('Invalid JSON');
+    expect(DEFAULT_LOAD_TASK).toContain('Both files missing → empty array');
   });
 
   it('default confirm task references the args.mode placeholder', () => {
@@ -113,7 +127,7 @@ describe('runtime constraints decoupling', () => {
     expect(result.node?.nodeId).toBe('$load-constraints');
   });
 
-  it('first dispatch is the load node carrying the default copy protocol task', async () => {
+  it('first dispatch is the load node carrying the default compiled-artifact protocol task', async () => {
     rt = await makeRuntime();
     const result = await rt.graphStart('constraint-graph');
     expect(result.node?.nodeId).toBe('$load-constraints');

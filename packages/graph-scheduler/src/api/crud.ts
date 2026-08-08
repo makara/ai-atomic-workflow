@@ -37,7 +37,7 @@ import { ConfigService } from '../config-service.js';
 import { executeEffects, reconstructFsmState } from './fsm-reconstruct.js';
 import { getContractWarnings, loadGraphForRun, loadGraphWithRegistry, toTaskflowGraph } from './graph-loader.js';
 import { dropRunCaches, graphLoadCache } from './run-caches.js';
-import { buildNodeDetail, buildSnapshot, findActiveNode, type IGraphSnapshot, type ISnapshotNode } from './snapshot.js';
+import { buildNodeDetail, buildSnapshot, findActiveNode, type IGraphSnapshot } from './snapshot.js';
 
 /** Next node detail — returned alongside snapshot for agent dispatch. */
 export type NodeDetail = INodeDetail;
@@ -61,7 +61,8 @@ function loadRunContext(
     const run = yield* repo.getRun(runId);
     const nodeStates = yield* repo.getNodeStates(runId);
     const currentState = (yield* reconstructFsmState(run, nodeStates)) as RunState;
-    const tf = yield* loadGraphForRun(runId, run.graphName);
+    const config = yield* ConfigService;
+    const tf = yield* loadGraphForRun(runId, run.graphName, config.context);
     const graph = yield* toTaskflowGraph(tf);
     return { run, currentState, graph, tf };
   });
@@ -155,7 +156,8 @@ export function graphStart(
 > {
   return Effect.gen(function* () {
     const repo = yield* GraphRepository;
-    const tf = yield* loadGraphWithRegistry(graphName);
+    const config = yield* ConfigService;
+    const tf = yield* loadGraphWithRegistry(graphName, config.context);
     const graph = yield* toTaskflowGraph(tf);
 
     // Dispatch START

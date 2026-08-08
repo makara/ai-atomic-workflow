@@ -9,7 +9,7 @@
  */
 
 import { Effect } from 'effect';
-import { mergeChannelScopes, stripCrossRunChannels } from '../context/resolve-channels.js';
+import { DEFAULT_CONVENTIONS, mergeChannelScopes, stripCrossRunChannels } from '../context/resolve-channels.js';
 import { debugLog } from '../debug.js';
 import { resolveArgs } from '../flow-flatten.js';
 import type { FsmNodeState } from '../fsm/effects.js';
@@ -134,7 +134,16 @@ export function buildNodeDetail(input: NodeDetailInput): Effect.Effect<INodeDeta
       // scope exists, mergeChannelScopes returns the phase's own array
       // reference, so the strip/dedup identity check below still
       // short-circuits.
-      const mergedChannels = mergeChannelScopes(input.projectContext, input.graph.context, phase.channels);
+      // Three-tier channel model: convention layer (platform-shipped exact
+      // files, default-loaded) merged first, then the project default layer
+      // (config.json `context`), then the graph's top-level `context:`,
+      // prepended to the phase's own channels (dedup, order preserved).
+      const mergedChannels = mergeChannelScopes(
+        DEFAULT_CONVENTIONS,
+        input.projectContext,
+        input.graph.context,
+        phase.channels,
+      );
 
       // Promotion self-skip — a node never receives its own promoted stream
       // (`node:<ownId>` from the global channel): self-read is undefined and
@@ -160,6 +169,7 @@ export function buildNodeDetail(input: NodeDetailInput): Effect.Effect<INodeDeta
         dependsOn: phase.dependsOn,
         handlerSkill: HANDLER_SKILL,
         skill: phase.skill,
+        operations: phase.operations,
         retryAttempt: input.nodeState.retryCount,
       };
 

@@ -22,7 +22,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { Phase } from '../schemas/index.js';
-import { findDownstream, resolveReady, routeActive, routeOf, type RouteMap } from '../topology.js';
+import { findDownstream, resolveReady, type RouteMap } from '../topology.js';
 import type { FsmEffect, FsmNodeState } from './effects.js';
 import type { FsmEvent } from './events.js';
 

@@ -19,6 +19,8 @@ import { NodeStateSchema } from '../src/schemas/index.js';
 // Fixture — skill docs (graph-workflow package)
 // ---------------------------------------------------------------------------
 
+// NodeDetail/fsmState/snapshot tables moved out of SKILL.md into the
+// NODE-SCHEMA.md sibling (sibling-split refactor) — the guard follows them.
 const HANDLER_SKILL = join(
   __dirname,
   '..',
@@ -28,7 +30,7 @@ const HANDLER_SKILL = join(
   'graph-workflow',
   'skills',
   'atom-phase-handler',
-  'SKILL.md',
+  'NODE-SCHEMA.md',
 );
 const PILOT_SKILL = join(__dirname, '..', '..', '..', 'packages', 'graph-workflow', 'skills', 'atom-pilot', 'SKILL.md');
 
@@ -77,7 +79,7 @@ function findTable(md: string, headerAnchor: string): Table | undefined {
 function baseNodeDetailKeys(): Set<string> {
   // `agent` is a main-type field documented in the base table — tolerated
   // here (assertKeysCovered allows it via the type-specific whitelist).
-  return new Set(['nodeId', 'type', 'dependsOn', 'handlerSkill', 'skill', 'agent', 'retryAttempt']);
+  return new Set(['nodeId', 'type', 'dependsOn', 'handlerSkill', 'skill', 'agent', 'operations', 'retryAttempt']);
 }
 
 function nodeDetailKeys(): Set<string> {
@@ -88,6 +90,7 @@ function nodeDetailKeys(): Set<string> {
     'handlerSkill',
     'skill',
     'agent',
+    'operations',
     'task',
     'topic',
     'routingActions',
@@ -108,6 +111,7 @@ function assertKeysCovered(keys: Set<string>): void {
     handlerSkill: true,
     skill: true,
     agent: true,
+    operations: true,
     task: true,
     topic: true,
     routingActions: true,
@@ -122,6 +126,7 @@ function assertKeysCovered(keys: Set<string>): void {
     dependsOn: true,
     handlerSkill: true,
     skill: true,
+    operations: true,
     retryAttempt: true,
   };
   const detailKeys = new Set(Object.keys(detailRecord));
@@ -147,7 +152,7 @@ function assertKeysCovered(keys: Set<string>): void {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('contract doc guard — atom-phase-handler SKILL.md', () => {
+describe('contract doc guard — atom-phase-handler NODE-SCHEMA.md', () => {
   const md = readSkill(HANDLER_SKILL);
   const tsBase = baseNodeDetailKeys();
   const tsAll = nodeDetailKeys();

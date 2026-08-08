@@ -36,13 +36,13 @@ const PKG_ROOT = join(__dirname, '..');
 const BUILTIN_GRAPHS = [
   'arch-review.taskflow.yaml',
   'arch-review-loop.taskflow.yaml',
-  'doc-update.taskflow.yaml',
   'e2e-minimal.taskflow.yaml',
   'graph-generate.taskflow.yaml',
   'adopt-with-docs.taskflow.yaml',
   'openspec-apply.taskflow.yaml',
   'openspec-engineer.taskflow.yaml',
   'spec-implement.taskflow.yaml',
+  'estate-maintain.taskflow.yaml',
 ] as const;
 
 function loadGraph(name: string): Record<string, unknown> {
@@ -702,7 +702,7 @@ describe('2.14 graph-generate concrete maker graph topology', () => {
     expect(entry.channels).toBeUndefined();
     expect(graph.context).toEqual(expect.arrayContaining(['skill:atom-graph-spec']));
     const task = String(entry.task);
-    expect(task).toMatch(/may be absent|not a failure/i);
+    expect(task).toMatch(/context=optional/);
     expect(task).toMatch(/no skill co-production/i);
     expect(task).not.toMatch(/kind=skill/);
     expect(task).not.toMatch(/operation.*(edit|delete)/);
@@ -748,12 +748,12 @@ describe('2.14 graph-generate concrete maker graph topology', () => {
 // 2.15 — openspec-apply / openspec-engineer spec-skill loading rule
 // (scenario split): implementation + review nodes declare the deterministic
 // domain → spec-skill mapping rule (graph → atom-graph-spec, skill →
-// atom-skill-spec, doc → atom-doc-maintenance); no static single-kind
+// atom-skill-spec, doc → atom-doc-maintain); no static single-kind
 // skill:atom-graph-spec channel remains.
 // ---------------------------------------------------------------------------
 
 describe('2.15 openspec-apply / openspec-engineer spec-skill rule', () => {
-  const RULE = /atom-skill-spec.*atom-doc-maintenance|graph → atom-graph-spec/s;
+  const RULE = /atom-skill-spec.*atom-doc-maintain|graph → atom-graph-spec/s;
 
   it('openspec-apply: apply-change + change-review declare the mapping rule', () => {
     const graph = loadGraph('openspec-apply.taskflow.yaml');
@@ -762,7 +762,7 @@ describe('2.15 openspec-apply / openspec-engineer spec-skill rule', () => {
       const p = phases.find((ph) => ph.id === id);
       expect(p, `phase ${id} present`).toBeDefined();
       expect(String(p?.task ?? '')).toMatch(RULE);
-      expect(String(p?.task ?? '')).toMatch(/atom-doc-maintenance/);
+      expect(String(p?.task ?? '')).toMatch(/atom-doc-maintain/);
     }
   });
 
@@ -773,7 +773,7 @@ describe('2.15 openspec-apply / openspec-engineer spec-skill rule', () => {
       const p = phases.find((ph) => ph.id === id);
       expect(p, `phase ${id} present`).toBeDefined();
       expect(String(p?.task ?? '')).toMatch(RULE);
-      expect(String(p?.task ?? '')).toMatch(/atom-doc-maintenance/);
+      expect(String(p?.task ?? '')).toMatch(/atom-doc-maintain/);
     }
   });
 
@@ -829,7 +829,7 @@ describe('2.9 spec-implement graph topology', () => {
     expect(phaseOf('pipeline-done').dependsOn).toEqual(['minimal-track', 'detailed-track']);
     expect(phaseOf('pipeline-done').join).toBe('any');
     // pipeline-done is the terminal — no gate after it (single loop in the
-    // composition); tracks own post-archive doc-update
+    // composition); tracks own their post-archive closure
   });
 
   it('spec-extract is extraction-only — change resolution, no generation skill', () => {
@@ -873,9 +873,9 @@ describe('2.9 spec-implement graph topology', () => {
     expect(phaseOf('detailed-track').type).toBe('flow');
     expect(phaseOf('detailed-track').use).toBe('openspec-engineer');
     expect(phaseOf('detailed-track').route).toBe('detailed-track');
-    // openspec-apply / openspec-engineer run doc-update after their own
-    // archive — spec-implement declares no doc-update flow (single
-    // doc-maintenance execution per archive event)
+    // openspec-apply / openspec-engineer own their post-archive closure
+    // (plain archive / atom-doc-lifecycle) — spec-implement declares no
+    // doc-update flow
     expect(phases.filter((p) => p.type === 'flow' && p.use === 'doc-update')).toHaveLength(0);
   });
 
@@ -915,7 +915,7 @@ describe('2.10 openspec-engineer graph topology', () => {
     return p!;
   };
 
-  it('eight phases in dependency order with single entry and no end marker', () => {
+  it('seven phases in dependency order with single entry and no end marker', () => {
     expect(phases.map((p) => p.id)).toEqual([
       'to-spec',
       'to-tickets',
@@ -924,7 +924,6 @@ describe('2.10 openspec-engineer graph topology', () => {
       'implement-gate',
       'implement-accept',
       'openspec-archive',
-      'doc-maintenance',
     ]);
     const entries = phases.filter((p) => ((p.dependsOn ?? []) as unknown[]).length === 0);
     expect(entries.map((p) => p.id)).toEqual(['to-spec']);
@@ -938,7 +937,6 @@ describe('2.10 openspec-engineer graph topology', () => {
     expect(phaseOf('implement-gate').dependsOn).toEqual(['implement-review']);
     expect(phaseOf('implement-accept').dependsOn).toEqual(['implement-gate']);
     expect(phaseOf('openspec-archive').dependsOn).toEqual(['implement-accept']);
-    expect(phaseOf('doc-maintenance').dependsOn).toEqual(['openspec-archive']);
   });
 
   it('to-spec is the decided entry — single in-degree-0 entry, no interview node', () => {
@@ -978,7 +976,7 @@ describe('2.10 openspec-engineer graph topology', () => {
   it('skill declarations match upstream contract reuse', () => {
     expect(phaseOf('implement').skill).toBe('implement');
     expect(phaseOf('implement-review').skill).toBe('code-review');
-    expect(phaseOf('openspec-archive').skill).toBe('atom-openspec-archive');
+    expect(phaseOf('openspec-archive').skill).toBe('atom-doc-lifecycle');
   });
 });
 
@@ -1062,10 +1060,43 @@ describe('2.13 arch-review-loop three-stage partition topology (requirement + ad
     expect(task).toMatch(/existing/);
     expect(task).toMatch(/scope_complete/);
     // per-round mandatory scope re-confirmation — every activation re-acquires
-    // (loop jump-backs target this node), never auto-skipped
-    expect(task).toMatch(/Mandatory scope confirmation/);
-    expect(task).toMatch(/NEVER auto-skip/);
+    // (loop jump-backs target this node), never auto-skipped; declared via the
+    // entry-skill callee contract — Behavior flags, not prose
+    expect(task).toMatch(/Topics:/);
+    expect(task).toMatch(/Behavior: confirm=mandatory/);
+    expect(task).toMatch(/output path=user_owned/);
+    expect(task).not.toMatch(/Mandatory scope confirmation/);
+    expect(task).not.toMatch(/NEVER auto-skip/);
     expect(task).not.toMatch(/never re-asked/);
+  });
+
+  it('all three entry task texts declare the callee contract', () => {
+    // every atom-scope-interview dispatch declares Topics / Behavior /
+    // Output contract — the parameter channel; the doc-update
+    // classification-only variant no longer exists (graph deleted)
+    const entries = [
+      { graph: 'arch-review.taskflow.yaml', node: 'scope-entry' },
+      { graph: 'graph-generate.taskflow.yaml', node: 'entry' },
+      { graph: 'adopt-with-docs.taskflow.yaml', node: 'adopt-scope' },
+    ];
+    for (const entry of entries) {
+      const g = loadGraph(entry.graph);
+      const phases = g.phases;
+      const phase = phases.find((p) => p.id === entry.node);
+      expect(phase, entry.graph + ' ' + entry.node).toBeDefined();
+      const task = String(phase?.task);
+      expect(phase?.skill).toBe('atom-scope-interview');
+      expect(task, entry.graph + ' ' + entry.node + ' directive').toMatch(/per atom-scope-interview/);
+    }
+    const gen = loadGraph('graph-generate.taskflow.yaml');
+    const genTask = String(gen.phases.find((p) => p.id === 'entry')?.task);
+    expect(genTask).toMatch(/dual-name check=graph_name/);
+    expect(genTask).toMatch(/context=optional/);
+    expect(genTask).toMatch(/output path=user_owned/);
+    const adopt = loadGraph('adopt-with-docs.taskflow.yaml');
+    const adoptTask = String(adopt.phases.find((p) => p.id === 'adopt-scope')?.task);
+    expect(adoptTask).toMatch(/output path=derived/);
+    expect(adoptTask).not.toMatch(/user_owned/);
   });
 
   it('no phase-level when fields — Run Mode is a run field, rework is gate jumps', () => {
@@ -1434,7 +1465,7 @@ describe('D6 entry skill contract alignment', () => {
                   type: 'main',
                   skill: 'review-skill',
                   dependsOn: ['direct-up'],
-                  channels: ['direct-up', 'node:other', 'skill:atom-graph-spec', 'docs/adr/*.md'],
+                  channels: ['direct-up', 'node:other', 'skill:atom-graph-spec', '.graph-scheduler/docs/x.md'],
                   task: 'x',
                 },
               ],
@@ -1443,11 +1474,11 @@ describe('D6 entry skill contract alignment', () => {
         ],
         dir,
       );
-      // bare 'direct-up' fails; explicit node:/skill: prefixes and file globs pass
+      // bare 'direct-up' fails; explicit node:/skill: prefixes and workflow-artifact globs pass
       expect(errors.some((e) => e.includes('bare name') && e.includes('direct-up'))).toBe(true);
       expect(errors.some((e) => e.includes('node:other'))).toBe(false);
       expect(errors.some((e) => e.includes('skill:atom-graph-spec'))).toBe(false);
-      expect(errors.some((e) => e.includes('docs/adr/*.md'))).toBe(false);
+      expect(errors.some((e) => e.includes('.graph-scheduler/docs/x.md'))).toBe(false);
     } finally {
       cleanup();
     }
@@ -1930,15 +1961,26 @@ describe('graph-level context', () => {
     expect(errors.some((e) => e.includes('atom-graph-spec') && e.includes('bare name'))).toBe(true);
   });
 
-  it('accepts prefixed and glob graph-level entries', () => {
+  it('accepts prefixed and workflow-artifact glob graph-level entries', () => {
     const graph = {
       name: 'g',
       version: 1,
-      context: ['skill:atom-graph-spec', './CONTEXT.md', 'node:m'],
+      context: ['skill:atom-graph-spec', '.graph-scheduler/docs/x.md', 'node:m'],
       phases: [{ id: 'm', type: 'main', task: 'x' }],
     };
     const { errors } = validateGraphContracts(graph, 'g.yaml');
     expect(errors).toEqual([]);
+  });
+
+  it('rejects project file glob in graph-level context (three-tier tier violation)', () => {
+    const graph = {
+      name: 'g',
+      version: 1,
+      context: ['docs/adr/*.md', './CONTEXT.md'],
+      phases: [{ id: 'm', type: 'main', task: 'x' }],
+    };
+    const { errors } = validateGraphContracts(graph, 'g.yaml');
+    expect(errors.filter((e) => e.includes('workflow runtime artifacts')).length).toBe(2);
   });
 
   it('rejects graph-level node: entry targeting a missing phase', () => {

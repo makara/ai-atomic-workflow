@@ -1,0 +1,184 @@
+name: estate-maintain
+# Estate maintenance graph — document estate upkeep with a consistency-gate
+# review. Entry classifies the trigger and selects workstreams; requirement
+# confirms user-proposed requirements (hub for every workstream); three
+# workstream nodes dispatch the estate skills in parallel from requirement;
+# review runs the gate + reverse-validation + read-only deployment-mirror
+# check; accept closes the pass.
+context:
+  # Three-tier channel model: conventions (CONTEXT.md, docs/domains.md) are
+  # platform-shipped; ADR/spec estate families arrive via config.json context
+  # (project layer) when the project declares them.
+  - skill:atom-domain-spec
+  - skill:atom-spec-maintain
+  - skill:atom-adr-maintain
+  - skill:atom-doc-maintain
+  - skill:atom-doc-lifecycle
+  - skill:clean-ddd-hexagonal
+  - skill:domain-modeling
+  - skill:codebase-design
+  - skill:caveman
+phases:
+  # Entry — trigger classification + workstream selection (event-derived,
+  # never interview-derived per estate-maintain spec).
+  - id: entry
+    type: main
+    dependsOn: []
+    skill: atom-scope-interview
+    task: |
+      Execute scope interview per atom-scope-interview.
+
+      Topics: trigger (domain-change | skill-change | proactive | user-request
+      — classify from the event, never from the interview; user-request = user
+      proposes special requirements for domain design), workstreams
+      (domains-index | specs-sync | adr-align — which run this pass; proactive
+      = all three; user-request always includes domains-index for recording).
+
+      Behavior: confirm=mandatory; output path=derived. User-request
+      requirements come from the invocation event — {args.requirements}
+      when provided, else the session message.
+
+      Output contract: trigger, workstreams, scope_complete.
+
+  # Requirement — user-request grilling confirmation (user-request trigger
+  # only; other triggers report a no-op scope, same contract as workstreams).
+  - id: requirement
+    type: main
+    dependsOn: [entry]
+    skill: grilling
+    task: |
+      Execute grilling graph mode per grilling skill to analyze and confirm
+      the user-proposed domain-design requirements.
+
+      Scope from entry output: trigger — never re-detected. Non-user-request
+      triggers SHALL report a no-op scope (zero requirements, zero consensus)
+      — never fabricated work. User-request requirements come from the
+      invocation event — {args.requirements} when provided, else the session
+      message.
+
+      Node-context declarations (override grilling defaults for this flow):
+      1. NO ADR decision applies — user scope: requirements record into
+         domains.md, not ADRs. Do not ask the ADR question; adr_created is
+         always false here.
+      2. Record-keeping is NOT this node's responsibility — confirmed
+         requirements are emitted as node output; domains-index writes them
+         into docs/domains.md Design Requirements.
+
+      Output contract: requirements [{id, statement, status}], consensus,
+      trigger.
+
+  # Workstreams — dispatched in parallel from requirement; each runs its estate skill.
+  - id: domains-index
+    type: main
+    dependsOn: [requirement]
+    channels:
+      - node:entry
+    skill: atom-doc-maintain
+    task: |
+      Execute the domains-index workstream per atom-doc-maintain (index class)
+      consulting atom-domain-spec as format reference — split principles,
+      10-100 count bound, kind layering, reverse-analysis provenance, evolution
+      four-step, Design Requirements section.
+
+      Scope from entry output: trigger, workstreams — never re-detected.
+      Run the index-class maintenance rules; report changes + consistency-gate
+      results (mapping / links / counts / derived) for the review node.
+
+      Record duty (user-request trigger): consume the requirement node output
+      (upstream requirement — direct dependency) and write the confirmed requirements into
+      docs/domains.md Design Requirements section — format per atom-domain-spec
+      §Design Requirements (ID/statement/status/source/date). Zero confirmed
+      requirements → no section write.
+
+      Consumption duty: read docs/domains.md Design Requirements before
+      executing; comply with every active requirement in this node's changes.
+
+      Output contract: changes, validation, updated, requirements_recorded.
+
+      Unselected workstreams (per entry output) SHALL report a no-op scope
+      (zero changes, zero gate checks) — never fabricated work.
+
+  - id: specs-sync
+    type: main
+    dependsOn: [requirement]
+    channels:
+      - node:entry
+    skill: atom-spec-maintain
+    task: |
+      Execute the specs-sync workstream per atom-spec-maintain — reverse-analyze
+      (triple diff: disk capabilities ↔ docs/domains.md ↔ openspec/specs) →
+      minimal change (delta specs only) → openspec-sync-specs → openspec archive.
+
+      Scope from entry output: trigger, workstreams — never re-detected.
+      1:1 mapping rule: spec dirs match domain IDs; orphans retired or
+      registered; pure registrations touch docs/domains.md only.
+
+      Consumption duty: read docs/domains.md Design Requirements before
+      executing; comply with every active requirement in this node's changes.
+
+      Output contract: drift, change_name?, synced, archived.
+
+      Unselected workstreams (per entry output) SHALL report a no-op scope
+      (zero drift, zero sync) — never fabricated work.
+
+  - id: adr-align
+    type: main
+    dependsOn: [requirement]
+    channels:
+      - node:entry
+    skill: atom-adr-maintain
+    task: |
+      Execute the adr-align workstream per atom-adr-maintain — status
+      verification vs decision reality, stale chains folded via
+      atom-doc-lifecycle fold machinery, index rebuild, archive hygiene, dead
+      citations repointed.
+
+      Scope from entry output: trigger, workstreams — never re-detected.
+
+      Consumption duty: read docs/domains.md Design Requirements before
+      executing; comply with every active requirement in this node's changes.
+
+      Output contract: findings, folds, index_rebuilt, cleaned.
+
+      Unselected workstreams (per entry output) SHALL report a no-op scope
+      (zero findings) — never fabricated work.
+
+  # Review — consistency gate + reverse-validation + deployment mirror check.
+  - id: review
+    type: main
+    dependsOn: [domains-index, specs-sync, adr-align]
+    channels:
+      - node:entry
+      - node:requirement
+    task: |
+      Review the maintenance pass per the estate-maintain spec:
+      Upstream fields: domains-index — changes / validation / updated /
+      requirements_recorded (alignment standard for reverse-validation);
+      requirement — requirements / consensus (grill confirmation records);
+      specs-sync / adr-align outputs feed the mapping and counts checks.
+      1. Consistency gate — mapping (assets ↔ domains bidirectional; spec dirs
+         ↔ domain IDs 1:1), links (no dangling targets), counts (claims match
+         disk facts), derived (views match source state), requirements (every
+         active Design Requirements row has a grill confirmation record;
+         workstream changes comply with each active requirement; section
+         format valid per atom-domain-spec). Evidence per check; failures
+         surfaced — never silently patched.
+      2. Reverse-validation — every change traces to a real estate fact;
+         registrations have decision evidence (ADR); retirements remove
+         capabilities with REMOVED deltas.
+      3. Deployment-mirror check (read-only) — diff packages/ skill set against
+         the user deployment (~/.agents/skills); report residue as drift; NEVER
+         edit deployment.
+
+      Output contract: gate_results, deployment_drift, review_verdict.
+
+  # Accept — human/auto gate closing the pass.
+  - id: accept
+    type: approval
+    dependsOn: [review]
+    task: |
+      Accept the maintenance pass?
+
+      Decision: Continue — accept the pass (changes recorded, gate results
+      reviewed). Loop again — re-run from entry (retry — rework happens on a
+      fresh pass). End — complete the pass (no rework; run ends).

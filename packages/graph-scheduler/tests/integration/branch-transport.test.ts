@@ -135,8 +135,10 @@ describe('gate jump transport seam', () => {
     expect(r1.node!.jumps).toHaveLength(1);
     expect(r1.node!.jumps![0].to).toBe('seed');
     // reads removed (schema field convergence) — judgment context auto-injects
-    // from the direct dependsOn output (seed); no extra channels declared
-    expect(r1.node!.channels).toBeUndefined();
+    // from the direct dependsOn output (seed); gate NodeDetail carries the
+    // effective channels (convention layer default-loaded; no phase-level
+    // channels declared in the fixture)
+    expect(r1.node!.channels).toEqual(['./CONTEXT.md', 'docs/domains.md']);
     // no branches/default/routing on gate NodeDetail
     expect(r1.node!.routingActions).toBeUndefined();
 

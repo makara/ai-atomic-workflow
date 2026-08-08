@@ -679,7 +679,7 @@ describe('activation prologue dispatch', () => {
     expect(node?.constraints).toBeUndefined();
   });
 
-  it('graph with approvals dispatches $run-mode-confirm first', async () => {
+  it('graph with approvals synthesizes both prologue nodes (load-first order)', async () => {
     const withApproval = JSON.stringify({
       name: 'with-approval',
       version: 1,
@@ -711,9 +711,9 @@ describe('activation prologue dispatch', () => {
     const { runId } = await fix.rt.graphStart('with-approval');
 
     // Complete the prefix — author node activates only after both P nodes
-    const n1 = await fix.rt.graphAdvance(runId, '$run-mode-confirm', 10);
-    expect(n1.node?.nodeId).toBe('$load-constraints');
-    const n2 = await fix.rt.graphAdvance(runId, '$load-constraints', 10);
+    const n1 = await fix.rt.graphAdvance(runId, '$load-constraints', 10);
+    expect(n1.node?.nodeId).toBe('$run-mode-confirm');
+    const n2 = await fix.rt.graphAdvance(runId, '$run-mode-confirm', 10);
     expect(n2.node?.nodeId).toBe('a');
   });
 
@@ -772,7 +772,9 @@ describe('run-scope channel gate', () => {
     fix = await makeFixture({ standalone });
     const { runId, node } = await startSkippingPrologue(fix.rt, 'standalone');
     expect(node?.nodeId).toBe('main-a');
-    expect(node?.channels).toEqual([]);
+    // node:loop-entry stripped (outside run set); convention layer + project
+    // default context (.graph-scheduler/config.json context) survive the merge
+    expect(node?.channels).toEqual(['./CONTEXT.md', 'docs/domains.md']);
     expect(runId).toBeTruthy();
   });
 
@@ -790,7 +792,8 @@ describe('run-scope channel gate', () => {
     expect(started.node?.nodeId).toBe('writer');
 
     const next = await fix.rt.graphAdvance(started.runId, 'writer', 10);
-    expect(next.node?.channels).toEqual(['node:writer']);
+    // effective channels = convention layer + project default layer + phase channels (global first, dedup)
+    expect(next.node?.channels).toEqual(['./CONTEXT.md', 'docs/domains.md', 'node:writer']);
   });
 });
 
@@ -809,27 +812,31 @@ describe('global channel — effective merge at dispatch', () => {
     const g = JSON.stringify({
       name: 'scoped',
       version: 1,
-      context: ['./CONTEXT.md', 'skill:atom-graph-spec'],
+      context: ['skill:atom-graph-spec'],
       phases: [
-        { id: 'writer', type: 'main', task: 'write', channels: ['./CONTEXT.md'] },
+        { id: 'writer', type: 'main', task: 'write', channels: ['.graph-scheduler/docs/x.md'] },
         { id: 'reader', type: 'main', task: 'read', dependsOn: ['writer'], channels: ['node:writer'] },
       ],
     });
     fix = await makeFixture({ scoped: g });
     const { runId, node } = await startSkippingPrologue(fix.rt, 'scoped');
     expect(node?.nodeId).toBe('writer');
-    // global first, phase own preserved, exact dedup
-    expect(node?.channels).toEqual(['./CONTEXT.md', 'skill:atom-graph-spec']);
+    // convention layer first, global next, phase own preserved, exact dedup
+    expect(node?.channels).toEqual([
+      './CONTEXT.md',
+      'docs/domains.md',
+      'skill:atom-graph-spec',
+      '.graph-scheduler/docs/x.md',
+    ]);
 
     const next = await fix.rt.graphAdvance(runId, 'writer', 10);
-    expect(next.node?.channels).toEqual(['./CONTEXT.md', 'skill:atom-graph-spec', 'node:writer']);
+    expect(next.node?.channels).toEqual(['./CONTEXT.md', 'docs/domains.md', 'skill:atom-graph-spec', 'node:writer']);
   });
 
-  it('merges project-level context — config default layer first', async () => {
+  it('merges project-level context — convention layer first, config default layer next', async () => {
     const g = JSON.stringify({
       name: 'project-scoped',
       version: 1,
-      context: ['./CONTEXT.md'],
       phases: [{ id: 'only', type: 'main', task: 'do' }],
     });
     const taskflowDir = join(tmpdir(), `crud-test-${Math.random().toString(36).slice(2)}`);
@@ -844,7 +851,12 @@ describe('global channel — effective merge at dispatch', () => {
     );
     try {
       const started = await startSkippingPrologue(rt, 'project-scoped');
-      expect(started.node?.channels).toEqual(['docs/adr/*.md', 'skill:atom-graph-spec', './CONTEXT.md']);
+      expect(started.node?.channels).toEqual([
+        './CONTEXT.md',
+        'docs/domains.md',
+        'docs/adr/*.md',
+        'skill:atom-graph-spec',
+      ]);
     } finally {
       rt.dispose();
       rmSync(taskflowDir, { recursive: true, force: true });
@@ -855,7 +867,6 @@ describe('global channel — effective merge at dispatch', () => {
     const g = JSON.stringify({
       name: 'scoped-approval',
       version: 1,
-      context: ['./CONTEXT.md'],
       phases: [
         { id: 'main-a', type: 'main', task: 'do a' },
         { id: 'approve', type: 'approval', task: 'OK?', dependsOn: ['main-a'] },
@@ -864,11 +875,12 @@ describe('global channel — effective merge at dispatch', () => {
     fix = await makeFixture({ 'scoped-approval': g });
     const { runId, node } = await startSkippingPrologue(fix.rt, 'scoped-approval');
     expect(node?.nodeId).toBe('main-a');
-    expect(node?.channels).toEqual(['./CONTEXT.md']);
+    // convention layer default-loaded into every phase — main and approval alike
+    expect(node?.channels).toEqual(['./CONTEXT.md', 'docs/domains.md']);
 
     const next = await fix.rt.graphAdvance(runId, 'main-a', 10);
     expect(next.node?.nodeId).toBe('approve');
-    expect(next.node?.channels).toEqual(['./CONTEXT.md']);
+    expect(next.node?.channels).toEqual(['./CONTEXT.md', 'docs/domains.md']);
   });
 
   it('promoted stream skipped for its owning node — self-skip', async () => {
@@ -883,13 +895,14 @@ describe('global channel — effective merge at dispatch', () => {
     });
     fix = await makeFixture({ 'self-skip': g });
     const { runId, node } = await startSkippingPrologue(fix.rt, 'self-skip');
-    // owning node does NOT receive its own promoted stream
+    // owning node does NOT receive its own promoted stream; convention layer
+    // + project default context layer remain
     expect(node?.nodeId).toBe('writer');
-    expect(node?.channels).toEqual([]);
+    expect(node?.channels).toEqual(['./CONTEXT.md', 'docs/domains.md']);
 
     const next = await fix.rt.graphAdvance(runId, 'writer', 10);
-    // downstream node receives the promoted stream as ambient
-    expect(next.node?.channels).toEqual(['node:writer']);
+    // downstream node receives the promoted stream as ambient (convention + project default layers first)
+    expect(next.node?.channels).toEqual(['./CONTEXT.md', 'docs/domains.md', 'node:writer']);
   });
 
   it('graph-level node: target missing from flattened set fails load', async () => {

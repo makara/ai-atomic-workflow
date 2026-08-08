@@ -2,8 +2,8 @@
  * PhaseHandler types — PhaseHandler interface, BaseNodeDetail, NodeDetail DTO, error types.
  *
  * Static type dispatch — main/approval/gate handlers resolved by type at
- * dispatch (no registry service). FSM/topology/DB layers
- * never reference concrete handlers — only this interface.
+ * dispatch (no registry service). FSM/topology/DB layers never reference
+ * concrete handlers — only this interface.
  *
  * @module
  */
@@ -46,6 +46,8 @@ export interface IBaseNodeDetail {
   readonly handlerSkill: string;
   /** execution skill — phase.skill, the skill that executes this phase's work (main type; optional) */
   readonly skill?: string;
+  /** operation classes — phase operations declaration (HLT closed set); handler injects registry entries + verifies per declared class */
+  readonly operations?: string[];
   readonly retryAttempt: number;
 }
 
@@ -67,6 +69,8 @@ export interface INodeDetail {
   readonly skill?: string;
   /** Agent hints — priority-ordered sub-agent type preferences for main phases; advisory, consumed by skills when dispatching */
   readonly agent?: string[];
+  /** operation classes — phase operations declaration (HLT closed set); handler injects registry entries + verifies per declared class */
+  readonly operations?: string[];
   /** main phase — task instruction text */
   readonly task?: string;
   /** Approval phase — decision topic */

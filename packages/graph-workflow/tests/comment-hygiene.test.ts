@@ -18,6 +18,13 @@ const REPO_ROOT = resolve(__dirname, '../../..');
 const ADR_PATTERN = /ADR[- ]\d{3,4}/;
 /** Doc-path references — banned in src comments only (never functional there). */
 const DOC_PATH_PATTERN = /docs\/adr|docs\/reports|\bCONTEXT\.md\b|\bREADME\.md\b/;
+
+/**
+ * Functional doc-path values in src — the three-tier convention layer makes
+ * convention paths runtime VALUES (DEFAULT_CONVENTIONS in resolve-channels.ts),
+ * not comments: doc paths are functional there, exempt from the comment rule.
+ */
+const FUNCTIONAL_DOC_PATH_LINES = new Set(['packages/graph-scheduler/src/context/resolve-channels.ts']);
 /** CJK characters — banned in packages code, skills, and graphs (single-language codebase). */
 const CJK_PATTERN = /[\u4e00-\u9fff]/;
 
@@ -95,7 +102,12 @@ function violations(): string[] {
       for (const pattern of scope.patterns) {
         const lines = content.split('\n');
         const idx = lines.findIndex((line) => pattern.test(line));
-        if (idx !== -1) found.push(`${rel}:${idx + 1} matches /${pattern.source}/`);
+        if (idx === -1) continue;
+        const functional =
+          pattern === DOC_PATH_PATTERN &&
+          FUNCTIONAL_DOC_PATH_LINES.has(rel) &&
+          lines[idx].includes('DEFAULT_CONVENTIONS');
+        if (!functional) found.push(`${rel}:${idx + 1} matches /${pattern.source}/`);
       }
     }
   }
@@ -105,6 +117,37 @@ function violations(): string[] {
 describe('comment hygiene — no ADR/doc citations in code comments', () => {
   it('scan scope contains no ADR-number citations, doc-path refs, or dead links', () => {
     const hits = violations();
+    expect(hits).toEqual([]);
+  });
+});
+
+describe('retired delivery-fidelity machinery - absence assertions', () => {
+  const ROOTS = ['packages/graph-scheduler/src', 'packages/graph-workflow'];
+  // Tokens fragment-constructed so the test file itself never contains the
+  // literal (self-clean under its own scan).
+  const CLI = 'condense' + '-context';
+  const POLICY = 'context' + 'Policy';
+  const MANIFEST = '.context' + '.json';
+  const BUDGET = 'CONTEXT BUDGET ' + 'EXCEEDED';
+  const TOKENS = [new RegExp(CLI), new RegExp(POLICY), new RegExp(MANIFEST), new RegExp(BUDGET), /condense-cli/];
+
+  it('packages contain zero retired-machinery references', () => {
+    const hits: string[] = [];
+    for (const root of ROOTS) {
+      const absRoot = join(REPO_ROOT, root);
+      const files: string[] = [];
+      walk(absRoot, files);
+      for (const file of files) {
+        if (file.endsWith(SELF)) continue;
+        const rel = relative(REPO_ROOT, file);
+        const content = readFileSync(file, 'utf-8');
+        const lines = content.split('\n');
+        for (const token of TOKENS) {
+          const idx = lines.findIndex((line) => token.test(line));
+          if (idx !== -1) hits.push(`${rel}:${idx + 1} matches /${token.source}/`);
+        }
+      }
+    }
     expect(hits).toEqual([]);
   });
 });

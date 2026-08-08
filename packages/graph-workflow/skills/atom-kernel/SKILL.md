@@ -1,13 +1,16 @@
 ---
 name: atom-kernel
-description: Platform primitives — task() dispatch, question() decision UI with 8 rules, interview() consensus (single contract, consensus + solve modes), graph-scheduler tool detection. Use when dispatching sub-agents or presenting decisions.
+description: Platform primitives - task() dispatch, question() decision UI with 8 rules, interview() consensus (single contract, consensus + solve modes), graph-scheduler tool detection, High-Level Tool Registry (closed tool set, two-plane structure - jcodemunch query plane locate/search/analyze first-class read-only, serena mutation + ground-truth plane write/verify sole, run platform shell exception; utility classes optional; tool schemas for serena/jcodemunch/headroom/graph-scheduler). Use when dispatching sub-agents or presenting decisions, executing main-phase work, authoring execution skills, or mentions high-level tool, HLT registry, tool call, tool schema, evidence loop, verify loop.
 argument-hint: none (reference skill)
+disable-model-invocation: true
 user-invocable: false
-version: 2.5.0
-last_updated: '2026-08-03'
+version: 2.13.0
+last_updated: '2026-08-08'
 ---
 
-> **Runtime constraints** — **Layer**: atom — runtime primitives.
+> **Runtime constraints** - **Layer**: atom - runtime primitives.
+
+Platform primitives - task()/question()/judge()/interview()/todo() contracts + HLT registry, single source for graph-node execution.
 
 # Atom-Kernel
 
@@ -15,241 +18,216 @@ last_updated: '2026-08-03'
 
 |Primitive|Type|Maps to|
 |-|-|-|
-|`task()`|**Callable**|platform `task` tool — dispatches sub-agents|
-|`question()`|**Callable**|platform `ask` tool — single-decision UI|
-|`judge()`|**Callable**|platform one-shot LLM judgment — when/eval evaluation|
-|`interview()`|**Behavior Contract**|Agent-implemented — multi-turn consensus conversation, two modes (consensus / solve)|
+|`task()`|**Callable**|platform `task` tool - dispatches sub-agents|
+|`question()`|**Callable**|platform `ask` tool - single-decision UI|
+|`judge()`|**Callable**|platform one-shot LLM judgment - when/eval evaluation|
+|`interview()`|**Behavior Contract**|Agent-implemented - multi-turn consensus conversation, two modes (consensus / solve)|
 
-> **`task()`, `question()`, `judge()`** are tool-mapped callables — agent invokes them directly and gets a result. Tool names in the table are OMP spellings; other platforms map their equivalents per §Platform Spellings. **`interview()`** is a behavior contract — agent reads rules below and implements manually using `question()` (or `ask`) one turn at a time. Attempting to call `interview({goal, context})` as a function will fail with `ReferenceError: … is not defined`.
+> `task()`, `question()`, `judge()` are tool-mapped callables - agent invokes directly, gets result. Mappings vary per platform (see §Platform Spellings). `interview()` is a behavior contract - agent implements manually using `question()` one turn at a time. Calling `interview({goal, context})` fails with `ReferenceError`.
 
 ## Platform Spellings
 
-Primitive contracts are platform-neutral. Tool-name mappings vary per platform — single-sourced here, never assumed exact:
+Primitive contracts platform-neutral. Mappings vary per platform - never assumed exact. Skills reference contract names only.
 
-|Primitive|Contract|OMP|opencode|Other platforms|
-|-|-|-|-|-|
-|`task()`|Sub-agent dispatch — batch in `tasks[]`, shared `context`, agent-hint selection|`task` tool|`task` tool — built-in agents `build`/`plan`/`general`/`explore`/`scout`, default `general`|platform's sub-agent dispatch tool|
-|`question()`|Single-decision UI — header/options/custom, 8 format rules|`ask` tool|`question`|platform's decision-UI tool|
-|`judge()`|One-shot lightweight-model judgment — constrained answer (`'true'`/`'false'`), conservative failure|`completion(…, model="smol")`|one-shot completion primitive|platform's one-shot completion primitive|
-
-Agent vocabulary (hint availability + platform default): OMP — platform-registered agent types (`scout`/`reviewer`/`task`/…), default `task`; opencode — built-ins per the `task()` row above; other platforms — their sub-agent types, default per platform.
-
-Skills reference contract names only (`task()`, `question()`, `judge()`) — never platform tool spellings. Add a platform row when mapping a new platform; no skill changes needed.
+|Primitive|Contract|Mapping|
+|-|-|-|
+|`task()`|Sub-agent dispatch - batch in `tasks[]`, shared `context`, agent-hint selection|platform's sub-agent dispatch tool|
+|`question()`|Single-decision UI - header/options/custom, 8 format rules|platform's decision-UI tool|
+|`judge()`|One-shot lightweight-model judgment - constrained answer (`'true'`/`'false'`), conservative failure|platform's one-shot completion primitive|
+|`todo()`|State-machine task list - pending/in_progress/completed; boundary clear at execution-unit boundaries; no-todo platform -> no-op|platform's todo tool|
 
 ---
 
 # Graph-Scheduler Tool Detection
 
-Runtime MCP tool name detection for the graph-scheduler — 9-tool substring matching. Platform tool prefixes and addressing vary (e.g. OMP `xd://mcp__graph_scheduler_…`, native MCP tool mounts on other platforms); names resolve by substring, never assumed exact.
+Runtime MCP tool name detection - names resolve by substring, never assumed exact. Before any graph operation, scan the tool list; find tool with each substring -> record exact name:
 
-Before any graph operation, scan the available tool list for graph-scheduler MCP tools:
+|Tool substring|
+|-|
+|`graph_start`|
+|`graph_advance`|
+|`graph_status`|
+|`graph_list`|
+|`graph_force_end`|
+|`graph_jump`|
+|`graph_init`|
+|`graph_clean_completed`|
+|`graph_clean_all`|
 
-- Find tool with "graph_start" in name → record exact name
-- Find tool with "graph_advance" in name → record exact name
-- Find tool with "graph_status" in name → record exact name
-- Find tool with "graph_list" in name → record exact name
-- Find tool with "graph_force_end" in name → record exact name
-- Find tool with "graph_jump" in name → record exact name
-- Find tool with "graph_init" in name → record exact name
-- Find tool with "graph_clean_completed" in name → record exact name
-- Find tool with "graph_clean_all" in name → record exact name
-
-Use detected names for all subsequent calls. Tool parameters and return values unchanged.
+Use detected names for all subsequent calls.
 
 ---
 
-# judge() — One-Shot Judgment
+# judge() - One-Shot Judgment
 
-Single constrained-answer LLM judgment per call. Used for when-guard evaluation and gate eval conditions.
-
-## Signature
+Single constrained-answer LLM judgment per call - gate jump condition evaluation.
 
 ```
 judge({ prompt }) → 'true' | 'false'
 ```
 
-- `prompt` — evaluation question. MUST demand a constrained answer: `Answer ONLY 'true' or 'false'`.
-- Returns a single token answer; anything else (failure, ambiguity) → conservative default per caller context.
-
-## Conservative Failure Semantics
+- `prompt` - evaluation question. MUST demand constrained answer: `Answer ONLY 'true' or 'false'`.
+- Returns single token answer; anything else -> conservative default per caller context.
 
 |Caller|Failure default|Rationale|
 |-|-|-|
-|when-guard|`'true'` — execute|Never skip on uncertainty (conservative — execute node)|
-|gate eval|`'false'` — no-match|Never auto-decide on uncertainty (falls through to downstream)|
+|gate eval (jump conditions)|`'false'` - no-match|Never auto-decide on uncertainty (falls through to downstream)|
 
-## Platform Mapping
-
-See §Platform Spellings — `judge()` maps to the platform's one-shot completion primitive (OMP: `completion(…, model="smol")`). Skills never spell the platform primitive directly.
+Maps to platform's one-shot completion primitive.
 
 ---
 
-# task() — Dispatch
+# todo() - Boundary Clear
 
-Dispatch sub-agents. Batch: many in `tasks[]`, shared `context`.
+Clear the platform todo list at execution-unit boundaries - per-execution scratchpad, never session-persistent. In-node create/update stays native platform tooling; skills reference the `todo()` contract.
 
-## Signature
+- **Semantics**: unconditional clear. No-todo platform -> no-op, no error.
+- **State machine**: pending -> in_progress -> completed (+ optional blocked/cancelled) - state-machine semantics + per-platform spellings in §Platform Spellings; the contract is the state machine, never the op names.
+- **Consumer**: atom-phase-handler enforces the node-boundary lifecycle (dispatch + completion clears) - the only caller.
+
+---
+
+# task() - Dispatch
+
+Dispatch sub-agents. Batch in `tasks[]`, shared `context`.
 
 ```
 task({ i, context, tasks })
 ```
 
-- `i` — intent. Present participle. 2–6 words.
-- `context` — shared constraints. Format: `# Goal`, `# Constraints`, `# Contract`.
-- `tasks` — array. Each: `name` (CamelCase ≤32), `agent` (specialist type), `task` (self-contained, acceptance criteria).
+- `i` - intent. Present participle. 2-6 words.
+- `context` - shared constraints. Format: `# Goal`, `# Constraints`, `# Contract`.
+- `tasks` - array. Each: `name` (CamelCase <=32), `agent` (specialist type), `task` (self-contained).
 
-## Agent Hints — Dispatch Type Selection
+`agent` field takes one concrete type. Graph main-phase context may carry `## Agent hints: [<type-1>, …]` (from atom-phase-handler, priority-ordered). Pick the **first** hint available in the current platform (availability = membership in the platform's agent vocabulary in §Platform Spellings); none -> platform default. Hints advisory; batch may mix types.
 
-`task()` `agent` field accepts one concrete agent type. When the calling skill runs as a graph main phase, its context may carry a `## Agent hints: [<type-1>, <type-2>, …]` block (injected by atom-phase-handler from the phase `agent` array — priority-ordered). Consumption rule:
+Capture agent ID - result via the platform's sub-agent artifact mechanism.
 
-- Pick the **first** hint whose agent type is available in the current platform environment — availability SHALL be judged as membership in the current platform's agent vocabulary in §Platform Spellings, never environment intuition.
-- None available → fall back to the platform default agent (per §Platform Spellings — OMP `task`, opencode `general`).
-- Hints are advisory — a skill that doesn't dispatch ignores them entirely.
-- The skill chooses its own fan-out structure; hints only select the type for each dispatch.
-
-Applies per dispatch call — a batch may mix types per task when the skill needs different capabilities (e.g. scout for read-only exploration, reviewer for review axes).
-
-## Launch
-
-`task({ i, context, tasks })` — capture agent ID — result retrieved via the platform's sub-agent artifact mechanism (OMP: `agent://<id>`).
-
-## Decision Request
-
-Verify-style handoff format — returned by dispatched work to checkpoint with the user (or caller). Graph review nodes embed this contract in their task text. Sections:
-
-- Context — current state, why the decision is needed
-- Auto-recorded debt — accepted trade-offs recorded, no open debt
-- Blocking findings — items that block advance
-- Dispatch record — what sub-agents ran, selection evidence
-- Suggested advance label — recommended next graph phase label
+**Decision Request** - verify-style handoff from dispatched work; sections: Context, Auto-recorded debt, Blocking findings, Dispatch record, Suggested advance label. Graph review nodes embed it.
 
 ---
 
-# question() — Decision UI
+# question() - Decision UI
 
 Single decision per call.
-
-## Signature
 
 ```
 question({ header, options, custom })
 ```
 
-- `header` — noun phrase. ≤30 chars.
-- `options` — `[{ label, description }]`. Label: concrete answer phrase. Description: single line.
-- `custom` — mandatory `true`.
+- `header` - noun phrase. <=30 chars.
+- `options` - `[{ label, description }]`. Label: concrete answer phrase. Description: single line.
 
 ## 8 Format Rules
 
-1. Header: noun phrase ≤30 chars. Topic, not outcome.
+1. Header: noun phrase <=30 chars. Topic, not outcome.
 2. Label: concrete answer phrase. Recommended first.
 3. Description: single line. May note next step.
-4. Pre-call text: background + option meanings + recommendation — three parts, same message.
+4. Pre-call text: background + option meanings + recommendation, same message.
 5. Body: forbidden.
 6. Custom: mandatory `true`.
 7. One question per call.
 8. No control chars (`\r`, `\t`, `\n`).
 
-## Decision Card
-
-Card — `question()` mapping:
-
-|Card field|Maps to|
-|-|-|
-|`topic`|`header`|
-|`routingActions[].label`|`options[].label`|
-|`routingActions[].description`|`options[].description`|
-|`routingActions[].action`|decision routing|
-|`pre_text`|pre-call text|
-
-> **`custom: true` is mandatory.** Handler MUST process custom input into `IApprovalDecision.note`. Free-text semantics by action: continue → recorded remark, retry → inject into upstream context, jump → potential target override.
-
-### Example
-
-```
-Background: auth module needs token-refresh strategy.
-Option A (Polling) — timer-based check.
-Option B (On-demand) — refresh on 401.
-Recommendation: Option B with eager-prefetch.
-
-question({ header: "Token refresh strategy", options: [{ label: "Polling", description: "Timer-based expiry check" }, { label: "On-demand", description: "Refresh on 401" }], custom: true })
-```
+**Decision card mapping**: `topic`->`header`; `routingActions[].label/description`->`options[].label/description`; `routingActions[].action`->decision routing; `pre_text`->pre-call text. `custom: true` mandatory - handler MUST map custom input to `IApprovalDecision.note`. Free-text: continue -> remark, retry -> upstream, jump -> target override.
 
 ---
 
-# interview() — Consensus Interview (Behavior Contract — NOT a callable function)
+# interview() - Consensus Interview (Behavior Contract - NOT a callable function)
 
-Single conversation contract with two modes — **consensus mode** and **solve mode** — sharing one rule set. Every rule below MUST apply on every call, both modes.
-
-## Signature
+Single conversation contract, two modes - **consensus** + **solve** - sharing one rule set. Every rule MUST apply on every call, both modes.
 
 ```
 interview({ goal, context?, research?, design? }) → consensus | solution
 ```
 
-- `goal` — interview goal. Drives question generation. First consensus point — must confirm shared understanding of goal before proceeding.
-- `context` — background. File content, state snapshot, structured data. Provides interview context. Facts discoverable from context — look up, do not ask.
-- `research?` — solve mode only. Boolean. Run research step before think. Default `true` when solve mode selected.
-- `design?` — solve mode only. Marker that the goal produces a design/solution. Presence selects solve mode.
-- Returns `consensus` — `{ decisions: [{ decision, rationale }] }` (consensus mode), or `solution` — `{ goal, findings?, design, consensus }` (solve mode).
+- `goal` - interview goal. First consensus point.
+- `context` - background. Discoverable facts - look up, do not ask.
+- `research?` - solve mode only. Research before think; default `true`.
+- `design?` - solve mode only; design/solution marker.
+- Returns `consensus` - `{ decisions: [{ decision, rationale }] }` (consensus mode), or `solution` - `{ goal, findings?, design, consensus }` (solve mode).
 
 ## Mode Selection
 
-- **Consensus mode** — reach shared understanding on a topic: confirm goal → decision rounds → `{ decisions }`. Default.
-- **Solve mode** — produce a complete solution: confirm goal → research → think → decision rounds → reject → re-think → repeat until accepted → `{ goal, findings?, design, consensus }`. Use when `research: true` or the goal produces a design/plan (graph design, skill structure design, spec synthesis). Solve mode eliminates graph-level confirm phases — confirmation logic sinks into agent-internal loop.
+- **Consensus mode** - confirm goal -> decision rounds -> `{ decisions }`. Default.
+- **Solve mode** - complete solution -> `{ goal, findings?, design, consensus }`. Use when `research: true` or goal produces a design/plan; chain per §Internal Flow.
 
 ## Behavior Contract
 
-1. **Comprehensive coverage** — cover every aspect of goal topic. Relentless. Skip no relevant dimension.
-2. **Decision tree traversal** — walk down each branch. Exhaust all paths before stopping.
-3. **Dependency resolution** — dependencies between decisions resolved one-by-one in order. Resolve prerequisite decision before dependent one.
-4. **Recommendation first** — each question ships recommended answer as first option. Recommendation derived from context analysis.
-5. **Single question discipline** — ask one question per turn. Wait for user response before next. Multiple questions bewildering.
-6. **Fact lookup** — fact discoverable from environment (filesystem, tools) — look up. Do not ask user.
-7. **Decision gate** — decisions belong to user. Each decision question submitted to user. Wait for answer.
-8. **Shared understanding gate** — do not act until user confirms shared understanding reached.
+1. **Comprehensive coverage** - cover every aspect of goal topic. Skip no relevant dimension.
+2. **Decision tree traversal** - walk down each branch; exhaust all paths.
+3. **Dependency resolution** - resolve dependencies one-by-one; prerequisite before dependent.
+4. **Recommendation first** - recommended answer as first option; derived from context analysis.
+5. **Single question discipline** - one question per turn; wait for response.
+6. **Fact lookup** - discoverable facts - look up. Do not ask user.
+7. **Decision gate** - decisions belong to user. Each submitted; wait for answer.
+8. **Shared understanding gate** - do not act until user confirms shared understanding.
 
-**Goal consensus**: even when goal explicitly given, interview() first confirms shared understanding of goal itself. Goal interpretation must reach consensus before interview proceeds.
+**Goal consensus**: even when goal explicitly given, interview() confirms shared understanding of goal itself.
 
-**Zero-question degradation**: context already covers all aspects of goal and goal needs no clarification — return consensus directly without questions. Natural consequence of rules 1-8 — not independent rule.
+**Zero-question degradation**: context already covers all aspects of goal - return consensus directly. Consequence of rules 1-8.
 
 ## Solve-Mode Additions
 
-9. **Research before think** — when `research: true` (default in solve mode), load skill research. Look up reference specs, existing patterns, constraints. Do not skip — uninformed design wastes interview rounds.
-10. **Think exhaustively** — design complete solution. Cover all dimensions: structure, naming, edges, guards, edge cases. Incomplete design → extra interview rounds.
-11. **Re-think on reject** — user rejects any decision → return to think step. Revise design. Re-interview affected decisions only — do not re-ask confirmed points.
+9. **Research before think** - when `research: true` (default in solve mode), load skill `research`. Look up specs, patterns, constraints - do not skip, uninformed design wastes rounds.
+10. **Think exhaustively** - design complete solution. Cover all dimensions: structure, naming, edges, guards, edge cases.
+11. **Re-think on reject** - user rejects any decision -> return to think, revise design, re-interview affected decisions only - do not re-ask confirmed points.
 
-## Internal Flow
+**Internal Flow** - agent-internal loop, no graph-level retry/jump: confirm(goal) -> research -> think -> interview(details) per-round; rejection -> re-think, confirmation -> solution.
 
-```
-interview({ goal, research: true, context })   ← solve mode
-  ├── confirm(goal)       ← goal consensus — confirm shared understanding
-  ├── research             ← skill research — look up specs, patterns, constraints
-  ├── think                ← agent reasons about solution — design, analyze, decide
-  ├── interview(details)   ← question() per-round — confirm each decision point
-  └── repeat until done    ← human rejects → back to think/interview; human confirms → return solution
-```
+---
 
-Loop inside agent — no graph-level retry/jump. Human rejection → agent re-thinks and re-interviews. Design + confirmation in single phase.
+# High-Level Tool Registry
 
-## Mode Comparison
+Closed set of high-level tools - the single execution contract for main-phase work. An execution is a registered tool call `{ intent, tool, args, bound }`: registry entry supplies I/O contract, chain, verify + index obligations. Unknown tool names fail the call at analyze with the candidate list. Legacy 8-field protocol fields (`read_set`, `evidence`, `write_set`, `apply`, `verify`) are REJECTED. Read-only calls end when the tool completes without writes; write calls verify per `Entry: verify` BEFORE reporting success.
 
-|Dimension|Consensus mode|Solve mode|
+**Two-plane structure**: **Query plane (jcodemunch)** - locate/search/analyze chains head with jcodemunch index tools. **Mutation + ground-truth plane (serena)** - write/verify chains name serena as the sole tool, zero fallback. **Run class** - platform shell (`bash`, rtk prefix) - the single class for arbitrary shell commands. Utility tools never appear in a query/mutation chain. Plane down -> loud failure (see ## Fault Tolerance).
+
+**Evidence Loop**: re-enter while unsatisfied AND count < bound (default 3, per-call override allowed); exceeded -> call FAILS with evidence-gap list naming missing files/symbols, no write. Loop layering: call-internal evidence loop = this contract, bounded; Cross-call rework = graph gates (jumps + retryCount, atom-graph-spec).
+
+## Fault Tolerance
+
+Failure semantics: (see HLT-REGISTRY.md §Fault Tolerance).
+
+**Protocol**: schema-first - Parameter names NEVER guessed; read the platform's full tool docs before first call. Errors repair + retry ONCE; after edit -> `register_edit` while index mounted.
+
+## Registry Entries
+
+Closed registry - views `contract`/`chain`/`plane` per entry (+ enforcement deferred - see HLT-REGISTRY.md); entries + validation: (see HLT-REGISTRY.md).
+
+---
+
+# Tool Schemas
+
+## serena
+
+LSP-powered code navigation + editing. All paths relative to project root. Symbol address = name path (e.g. `MyClass/my_method`; overloads append `[i]`). LSP per `.serena/project.yml` `languages`; missing LSP -> FS tier silently. Full tables + examples: (see SERENA-SCHEMAS.md).
+
+- LSP navigation: `find_symbol`, `find_declaration`, `find_referencing_symbols`, `find_implementations`
+- Structure/diagnostics/reads: `get_symbols_overview`, `get_diagnostics_for_file`, `search_for_pattern`, `find_file`, `list_dir`, `read_file`
+- Edits: `replace_content`, `replace_in_files`, `replace_symbol_body`, `rename_symbol`, `insert_before_symbol`/`insert_after_symbol`, `safe_delete_symbol`, `create_text_file`
+
+## jcodemunch
+
+Query-plane engine - index-backed code intelligence, read-only by charter. `repo` required on nearly every call. Full + compact tables for all registry-referenced tools: (see JCODEMUNCH-SCHEMAS.md).
+
+- `register_edit` - post-edit cache invalidation
+- `search_symbols`, `find_references` - symbol search, import-graph references
+
+## headroom
+
+Context compression - ad-hoc output + read-file compression (trigger: >8KB). Channel consumption follows the read entry chain - no pipeline.
+
+|Tool|Req params|Notes|
 |-|-|-|
-|Goal|Reach consensus on topic|Produce complete solution|
-|Internal steps|interview only|confirm → research → think → interview loop|
-|Research|agent may research ad-hoc|explicit research step via skill research|
-|Loop|single-pass consensus|multi-pass — reject → re-think → re-interview|
-|Returns|`{ decisions }`|`{ goal, findings?, design, consensus }`|
-|Use case|scope confirm, plan confirm|graph design, skill structure design|
+|`compress`|`content` (string)|Returns compressed text + hash. Original stored|
+|`retrieve`|`hash` (string)|Restore original by hash|
+|`stats`|-|Session compression stats|
 
-## Primitives Note
+**Hash contract**: `compress` returns a hash - `headroom_retrieve(<hash>)` restores the original while the store holds it (TTL = HEADROOM_CCR_TTL_SECONDS).
 
-```
-question() — single decision (primitive)
-    │
-    ▼
-interview() — single conversation contract (consensus + solve modes)
-```
+**Health gate**: `ok` / `cold` (honest 0%) / `down` - markers `[HEADROOM COLD]` / `[HEADROOM PROXY DOWN]`.
 
-Each level builds on lower: interview() uses question() per turn. `task()` is orthogonal — dispatches sub-agents that may themselves use any primitive.
+## graph-scheduler
+
+Graph lifecycle CRUD - 9 tools, names per §Graph-Scheduler Tool Detection; params/returns/examples: atom-pilot §MCP Tool Reference. Output stays in session - never passed to graph_advance. Approval/gate decisions persist run-scoped (see atom-phase-handler).

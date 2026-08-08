@@ -168,7 +168,7 @@ describe('Schema validation (valid / invalid taskflow YAML)', () => {
     const rt = await createTestRuntime(fix);
     const result = await rt.graphStart('valid');
     expect(result.runId).toBeTruthy();
-    expect(result.node?.nodeId).toBe('$run-mode-confirm');
+    expect(result.node?.nodeId).toBe('$load-constraints');
     const author = await afterPrologue(rt, result);
     expect(author?.nodeId).toBe('a1');
     expect(author?.skill).toBe('entry-agent-skill');

@@ -23,7 +23,7 @@ import type { Phase } from './schemas/index.js';
 /** Reserved id — run-mode confirmation node (mode decided per activation). */
 export const PROLOGUE_CONFIRM_ID = '$run-mode-confirm';
 
-/** Reserved id — project constraints loading node (per-activation reload = round-level freeze). */
+/** Reserved id — project constraints loading node (compiled-artifact cache, existence = validity). */
 export const PROLOGUE_LOAD_ID = '$load-constraints';
 
 /** All legal reserved ids — PhaseSchema rejects any other `$` id. */
@@ -52,22 +52,35 @@ Output JSON to the output file: {"mode": "manual"|"auto"}`;
 /**
  * Default `$load-constraints` task — the built-in constraints protocol.
  *
- * Deterministic copy protocol: read the file, copy the ## Rules section
- * verbatim (one rule per bullet line, markers stripped) — no rewriting, no
- * interpretation. Missing/empty section → empty array (constraints optional).
- * Per-activation reload — the round's dispatches consume this round's
- * snapshot (round-level freeze).
+ * Compiled-artifact protocol: the rule set is compiled once (caveman
+ * full-level organization) and cached at `.graph-scheduler/constraints.json`
+ * — file EXISTENCE is the validity signal; deleting the file resets
+ * compilation. `compiled_at` is audit-only, never an invalidation key.
+ * Missing source + missing artifact → empty array (constraints optional).
+ * Output format unchanged — consumers read `{"constraints": [...]}`.
  */
 export const DEFAULT_LOAD_TASK = `Load project constraints (built-in activation prologue node).
 
-Read .graph-scheduler/constraints.md (project root, CWD-relative).
+Compiled-artifact protocol — the compiled rule set is cached at
+.graph-scheduler/constraints.json (project root, CWD-relative); the file's
+existence is the cache validity signal (deleting it forces recompilation).
 
-Copy protocol (deterministic — no rewriting, no interpretation):
-1. Locate the exact heading line '## Rules' (case-sensitive).
-2. Copy every line after it, stopping at the next markdown heading (any line starting with #).
-3. Skip HTML comment lines (starting with <!--).
-4. One rule per line: trim whitespace, strip the leading bullet marker ('- ', '* ', '+ ') if present, keep the rest verbatim. Drop empty lines.
-5. File missing or no ## Rules section → empty array.
+1. If .graph-scheduler/constraints.json exists — parse it. Invalid JSON →
+   treat as missing (step 2). Valid → emit its "constraints" array verbatim.
+   Done — zero markdown reads, zero recompilation.
+2. Otherwise compile: read .graph-scheduler/constraints.md (project root,
+   CWD-relative). Locate the exact heading line '## Rules' (case-sensitive).
+   Collect every line after it, stopping at the next markdown heading (any
+   line starting with #). Skip HTML comment lines (starting with <!--).
+   One rule per line: trim whitespace, strip the leading bullet marker
+   ('- ', '* ', '+ ') if present, drop empty lines.
+3. Caveman-compile the rules (full level): condense, dedupe, fix wording,
+   order them; keep technical substance verbatim (commands, paths,
+   parameters, references).
+4. Write .graph-scheduler/constraints.json — JSON object:
+   {"constraints": ["<rule 1>", ...], "compiled_at": "<ISO8601 now>"}.
+   compiled_at is audit metadata only — never used for validity.
+5. Emit the compiled array. Both files missing → empty array.
 
 Output JSON to the output file: {"constraints": ["<rule 1>", ...]}`;
 
@@ -85,11 +98,23 @@ Output JSON to the output file: {"constraints": ["<rule 1>", ...]}`;
  *   protocol; schema enforces they are entry phases).
  *
  * @param phases flattened author phases (reserved-id declarations included)
- * @returns prologue phases in activation order (confirm first, load second)
+ * @returns prologue phases in activation order (load first, confirm second)
  */
 export function synthesizePrologue(phases: readonly Phase[]): readonly Phase[] {
   const declared = new Map(phases.filter((p) => p.id.startsWith('$')).map((p) => [p.id, p]));
   const prologue: Phase[] = [];
+
+  // Constraints load first — consumed by every node type AND the confirm
+  // dispatch itself (its decision card carries the ## Constraints block:
+  // mode is decided with the project norms visible). Always synthesized.
+  prologue.push(
+    declared.get(PROLOGUE_LOAD_ID) ?? {
+      id: PROLOGUE_LOAD_ID,
+      type: 'main',
+      dependsOn: [],
+      task: DEFAULT_LOAD_TASK,
+    },
+  );
 
   // Mode exists only where consumed — an approval-less graph gets no mode
   // question (spec §Activation Prologue; gates judge from context, never mode).
@@ -104,15 +129,6 @@ export function synthesizePrologue(phases: readonly Phase[]): readonly Phase[] {
       },
     );
   }
-
-  prologue.push(
-    declared.get(PROLOGUE_LOAD_ID) ?? {
-      id: PROLOGUE_LOAD_ID,
-      type: 'main',
-      dependsOn: [],
-      task: DEFAULT_LOAD_TASK,
-    },
-  );
 
   return prologue;
 }

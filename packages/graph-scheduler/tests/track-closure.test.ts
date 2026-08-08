@@ -1,0 +1,98 @@
+/**
+ * Track closure wiring tests (doc maintenance split).
+ *
+ * doc-update graph deleted; each implementation track owns its post-approval
+ * closure: minimal track (openspec-apply) archives plain via
+ * openspec-archive-change; detailed track (openspec-engineer) closes through
+ * atom-doc-lifecycle (reverse-validated archive + ADR fold + index). Neither
+ * graph declares a doc-maintenance flow. Registry lists 9 graphs.
+ */
+
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { parse as parseYaml } from 'yaml';
+
+const PKG_ROOT = join(__dirname, '..');
+
+function loadGraph(name: string) {
+  const raw = readFileSync(join(PKG_ROOT, 'graphs', `${name}.taskflow.yaml`), 'utf-8');
+  return parseYaml(raw) as {
+    name: string;
+    phases: Array<{
+      id: string;
+      type: string;
+      skill?: string;
+      use?: string;
+      dependsOn?: string[];
+    }>;
+  };
+}
+
+function phasesOf(graph: ReturnType<typeof loadGraph>) {
+  return graph.phases.map((p) => ({ ...p, dependsOn: p.dependsOn ?? [] }));
+}
+
+describe('openspec-apply — minimal track closure', () => {
+  const graph = loadGraph('openspec-apply');
+  const phases = phasesOf(graph);
+
+  it('archive node dispatches plain openspec-archive-change', () => {
+    const archive = phases.find((p) => p.id === 'archive');
+    expect(archive).toBeDefined();
+    expect(archive!.skill).toBe('openspec-archive-change');
+  });
+
+  it('no doc-maintenance flow exists', () => {
+    expect(phases.some((p) => p.use === 'doc-update' || p.id === 'doc-maintenance')).toBe(false);
+  });
+
+  it('archive depends on change-accept only', () => {
+    const archive = phases.find((p) => p.id === 'archive')!;
+    expect(archive.dependsOn).toEqual(['change-accept']);
+  });
+});
+
+describe('openspec-engineer — detailed track closure', () => {
+  const graph = loadGraph('openspec-engineer');
+  const phases = phasesOf(graph);
+
+  it('openspec-archive node dispatches atom-doc-lifecycle', () => {
+    const closure = phases.find((p) => p.id === 'openspec-archive');
+    expect(closure).toBeDefined();
+    expect(closure!.skill).toBe('atom-doc-lifecycle');
+  });
+
+  it('no doc-maintenance flow exists', () => {
+    expect(phases.some((p) => p.use === 'doc-update' || p.id === 'doc-maintenance')).toBe(false);
+  });
+
+  it('closure depends on implement-accept only', () => {
+    const closure = phases.find((p) => p.id === 'openspec-archive')!;
+    expect(closure.dependsOn).toEqual(['implement-accept']);
+  });
+
+  it('mapping rule in implement task names atom-doc-maintain', () => {
+    const implement = phases.find((p) => p.id === 'implement')!;
+    const text = (implement as { task?: string }).task ?? '';
+    expect(text).toContain('atom-doc-maintain');
+  });
+});
+
+describe('doc-update graph removed', () => {
+  it('doc-update.taskflow.yaml no longer exists', () => {
+    expect(() => readFileSync(join(PKG_ROOT, 'graphs', 'doc-update.taskflow.yaml'))).toThrow();
+  });
+
+  it('registry lists 9 graphs with estate-maintain, without doc-update', () => {
+    const registry = JSON.parse(readFileSync(join(PKG_ROOT, 'graphs', 'registry.json'), 'utf-8')) as {
+      graphs: Array<{ name: string }>;
+    };
+    const names = registry.graphs.map((g) => g.name);
+    expect(names).toHaveLength(9);
+    expect(names).toContain('estate-maintain');
+    expect(names).not.toContain('doc-update');
+    expect(names).toContain('openspec-apply');
+    expect(names).toContain('openspec-engineer');
+  });
+});

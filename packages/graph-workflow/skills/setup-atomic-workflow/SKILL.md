@@ -1,19 +1,20 @@
 ---
 name: setup-atomic-workflow
-description: 'Initialize graph-scheduler project config — setup .graph-scheduler, create config.json, scaffold constraints.md, verify existing layout. Replaces retired atom-graph-config CLI init/show. Trigger phrases: "initialize graph-scheduler project config", "setup .graph-scheduler", "create config.json", "setup-atomic-workflow".'
-version: 1.1.0
-last_updated: '2026-08-05'
+description: 'Initialize graph-scheduler project config - setup .graph-scheduler, create config.json, scaffold constraints.md, verify existing layout. Trigger phrases: "initialize graph-scheduler project config", "setup .graph-scheduler", "create config.json", "setup-atomic-workflow".'
+version: 1.3.0
+last_updated: '2026-08-07'
+user-invocable: true
 ---
 
-> **Runtime constraints** — load `atom-kernel` for question() decision UI rules.
+> **Runtime constraints** - load `atom-kernel` for question() decision UI rules. Dependency missing (atom-kernel unavailable) -> fail loudly, no silent fallback.
 
 # Setup-Atomic-Workflow
 
-Scaffold `.graph-scheduler/` project layout. Four-step flow: Explore → Present → Confirm → Write. Deterministic content comes from seed files in this skill folder — prompt never re-encodes layout semantics.
+Scaffold `.graph-scheduler/` project layout. Five-step flow: Explore -> Present -> Confirm -> Write -> Self-check. Deterministic content comes from seed files in this skill folder - prompt never re-encodes layout semantics.
 
 ## Entry
 
-**MUST EXECUTE** — when user or graph requests graph-scheduler project setup, run the four-step flow and return created/existed inventory.
+**MUST EXECUTE** - when user requests graph-scheduler project setup, run the five-step flow and return created/existed inventory.
 
 ## Flow
 
@@ -21,11 +22,11 @@ Scaffold `.graph-scheduler/` project layout. Four-step flow: Explore → Present
 
 Detect current state. Read `.graph-scheduler/` existence:
 
-- `config.json` — exists? parses? matches ConfigFileSchema shape (dbPath/taskflowDir/registryPaths/skillsDir — no agentRegistry)?
-- `graphs/` — exists? `registry.json` present?
-- `docs/` — exists? (attached-doc home for the maker journey — graph-generate writes `.graph-scheduler/docs/<name>.md`)
-- `constraints.md` — exists? `## Rules` section present?
-- project root signals — monorepo `packages/*`? existing `.graph-scheduler` elsewhere?
+- `config.json` - exists? parses? matches ConfigFileSchema shape (dbPath/taskflowDir/registryPaths/skillsDir - no agentRegistry)?
+- `graphs/` - exists? `registry.json` present?
+- `docs/` - exists? (attached-doc home for the maker journey - graph-generate writes `.graph-scheduler/docs/<name>.md`)
+- `constraints.md` - exists? `## Rules` section present?
+- project root signals - monorepo `packages/*`? existing `.graph-scheduler` elsewhere?
 
 Explore output = state summary. Setup always starts from "present current state".
 
@@ -33,11 +34,11 @@ Explore output = state summary. Setup always starts from "present current state"
 
 Show findings. For each missing piece, offer recommended default first (atom-kernel question() rule):
 
-- **dbPath** — `.graph-scheduler/data/graph-scheduler.db` (recommended)
-- **taskflowDir** — `.graph-scheduler/graphs` (recommended)
-- **registryPaths** — `[.graph-scheduler/graphs/registry.json]` (recommended)
+- **dbPath** - `.graph-scheduler/data/graph-scheduler.db` (recommended)
+- **taskflowDir** - `.graph-scheduler/graphs` (recommended)
+- **registryPaths** - `[.graph-scheduler/graphs/registry.json]` (recommended)
 
-Existing pieces presented as-is — never re-proposed.
+Existing pieces presented as-is - never re-proposed.
 
 ### Step 3: Confirm
 
@@ -45,16 +46,16 @@ Confirm each item one per turn, recommendation first. User overrides accepted. S
 
 ### Step 4: Write
 
-Copy seed files. **Never overwrite existing files — fill gaps only.** Idempotency rule hardcoded:
+Copy seed files. Idempotency rule:
 
 > never overwrite existing files, fill gaps only
 
-- `.graph-scheduler/config.json` ← `./seeds/config.json` (when missing)
-- `.graph-scheduler/constraints.md` ← `./seeds/constraints.md` (when missing)
-- `.graph-scheduler/graphs/` directory — create when missing (empty)
-- `.graph-scheduler/docs/` directory — create when missing (empty; attached-doc home for the maker journey)
+- `.graph-scheduler/config.json` <- `./seeds/config.json` (when missing)
+- `.graph-scheduler/constraints.md` <- `./seeds/constraints.md` (when missing)
+- `.graph-scheduler/graphs/` directory - create when missing (empty)
+- `.graph-scheduler/docs/` directory - create when missing (empty; attached-doc home per §Step 1)
 
-Output inventory mirroring retired IInitReport:
+Output inventory:
 
 ```
 created: [<paths>]
@@ -70,13 +71,23 @@ Re-read every written file. Verify:
 - `graphs/` and `docs/` directories exist under `.graph-scheduler/`
 - file content byte-identical to seed
 
-Parse failure → report file path + error. Failed step, not silent pass.
+Parse failure -> report file path + error. Failed step, not silent pass.
+
+## Three-tier channel model
+
+The scaffold establishes the project layer; the other two tiers are implicit:
+
+1. **Convention layer** (platform-shipped, no declaration needed) — exact files `CONTEXT.md` + `docs/domains.md`, default-loaded into every phase, absence-tolerant (missing -> empty + warning, never fail). Setup does NOT create them; projects create them lazily when they exist.
+2. **Project layer** — `.graph-scheduler/config.json` `context:` is THE project-layout declaration point: declare the project's doc/spec estate (e.g. `docs/adr/*.md`, `openspec/specs/**/*.md`). Existence-validated: exact-file missing -> load error; glob zero-match -> warning (lazy creation legal).
+3. **Graph channels** — graphs declare `node:` streams, `skill:` references, workflow runtime artifacts (`.graph-scheduler/`, `.taskflow/`) only. Project file globs in shipped graphs are load-time errors; conventions are never hand-declared.
+
+Tell users: estate vocabulary flows into phases by declaring project layout in config.json context — never by editing shipped graphs.
 
 ## Seeds
 
-- `./seeds/config.json` — default project config. Derived from `createDefaultConfig()` in `packages/graph-scheduler/src/scheduler-runtime.ts` — single source of truth. Regenerate seed when the function changes; never hand-edit layout literals.
-- `./seeds/constraints.md` — constraints template with `## Rules` section. Mirrors retired init constraint template.
+- `./seeds/config.json` - default project config. Derived from `createDefaultConfig()` in `packages/graph-scheduler/src/scheduler-runtime.ts` - single source of truth. Regenerate seed when the function changes; never hand-edit layout literals.
+- `./seeds/constraints.md` - constraints template with `## Rules` section. Mirrors the init constraint template.
 
 ## Done
 
-Tell user: setup complete, layout inventory, constraints active on next graph run. Re-run safe — second run writes nothing, all existed.
+Tell user: setup complete, layout inventory, constraints active on next graph run. Re-run safe - second run writes nothing, all existed.

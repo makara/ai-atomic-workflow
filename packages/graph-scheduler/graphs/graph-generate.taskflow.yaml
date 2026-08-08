@@ -2,12 +2,11 @@ name: graph-generate
 # Maker journey — produces .taskflow.yaml graphs (name states the operation).
 description: Maker journey — produces .taskflow.yaml graph artifacts for end-user projects.
 # Graph-level ambient context — phases consume atom-graph-spec without
-# per-node declaration; entry skips its own CONTEXT.md declaration (project
-# glossary via config default layer). CONTEXT.md also satisfies the
-# atom-scope-interview contract coverage statically.
+# per-node declaration. Three-tier channel model: CONTEXT.md arrives via the
+# platform convention layer (absence-tolerant — foreign projects degrade to
+# direct scoping).
 context:
   - skill:atom-graph-spec
-  - ./CONTEXT.md
 phases:
   # Maker journey — concrete graph production (single kind=graph, single
   # operation=create). No skeleton, no kind switch, no skill co-production.
@@ -19,13 +18,11 @@ phases:
       Execute scope interview per atom-scope-interview (maker journey —
       kind=graph, operation=create; no kind switch, no skill co-production).
 
-      Mandatory confirmation — SHALL run on EVERY activation: confirm graph
-      name, topology scope (purpose, phases, skill dependencies), save
-      location (default .graph-scheduler/graphs/). NEVER auto-skip.
+      Topics: graph name, topology scope (purpose, phases, skill
+      dependencies), save location (default .graph-scheduler/graphs/).
 
-      Foreign-project degradation: ./CONTEXT.md may be absent (end-user
-      project without the repo domain glossary) — skip the domain-model
-      lookup and interview scope directly; absence is NOT a failure.
+      Behavior: confirm=mandatory; output path=user_owned;
+      dual-name check=graph_name; context=optional.
 
       Output contract: graph_name, scope, save_location, scope_complete.
 

@@ -1,10 +1,9 @@
 name: arch-review
-# Graph-level ambient context — project glossary + ADR decisions + design
-# vocabulary serve every main phase; declared once. CONTEXT.md also satisfies
-# the atom-scope-interview contract coverage statically.
+# Graph-level ambient context — design vocabulary serves every main phase.
+# Three-tier channel model: conventions (CONTEXT.md, docs/domains.md) are
+# platform-shipped and absence-tolerant; project layout (ADR records) arrives
+# via config.json context when the project declares it.
 context:
-  - ./CONTEXT.md
-  - docs/adr/*.md
   - skill:codebase-design
 phases:
   # Requirement production — scope-entry → arch-review → review-accept
@@ -16,13 +15,13 @@ phases:
     task: |
       Execute scope interview per atom-scope-interview.
 
-      Mandatory scope confirmation — SHALL run on EVERY activation (loop
-      jump-backs target this node): user confirms or adjusts scope + report
-      input each run; NEVER auto-skip.
-
-      Topics: scope (domain/feature/problem + focus dimensions), output path
-      (recommend docs/reports/<YYYY-MM-DD>-arch-review-<topic>.md), report
+      Topics: scope (domain/feature/problem + focus dimensions), report
       input (fresh | existing — report_path carries the confirmed path).
+
+      Behavior: confirm=mandatory; output path=user_owned (recommend
+      docs/reports/<YYYY-MM-DD>-arch-review-<topic>.md).
+
+      Loop jump-backs target this node.
 
       Output contract: scope, focus, output, report_input
       (fresh|existing), report_path, scope_complete.

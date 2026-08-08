@@ -1,5 +1,6 @@
 import { z } from 'zod/v4';
 
+import { HLT_OPERATION_CLASSES } from '../hlt-classes.js';
 import { PROLOGUE_IDS } from '../prologue.js';
 
 /**
@@ -31,6 +32,8 @@ export const PhaseSchema = z
     route: z.string().optional(),
     /** agent hints — priority-ordered sub-agent type preferences (main type, advisory) */
     agent: z.array(z.string()).optional(),
+    /** operation classes — closed-set members of the High-Level Tool Registry (atom-kernel §High-Level Tool Registry); phase declaration overrides/complements the skill's Operation classes default (main type; declarative only — scheduler passes through, handler injects + verifies) */
+    operations: z.array(z.string()).optional(),
     /** per-node execution skill — the skill that runs this phase's work */
     skill: z.string().optional(),
     /** per-phase context additions — all entry kinds (skill:<name>, file globs, node:<id> read edges), uniform across main/approval/gate. Resolved against the execution skill's Context Requirements contract when one exists; node: entries read the named node's output stream. */
@@ -122,12 +125,33 @@ export const PhaseSchema = z
         message: `flow phase must not declare 'channels' (two-scope context model) — move ambient entries to the graph's top-level 'context:' and cross-level data reads to the consuming phase's 'channels: [node:<id>]'`,
       });
     }
-    if (data.type === 'approval' && data.agent !== undefined) {
+    if (data.type !== 'main' && data.agent !== undefined) {
       ctx.addIssue({
         code: 'custom',
         path: ['agent'],
-        message: `approval phase must not declare 'agent' — agent hints are a main-type priority hint array for sub-agent dispatch`,
+        message: `'agent' is main-type only — agent hints are a priority hint array for sub-agent dispatch; ${data.type} phases must not declare it (flow phases flatten at load — the field would be silently stripped)`,
       });
+    }
+    // HLT operations — closed-set members only, main type only: phase
+    // declaration overrides/complements the skill's Operation classes
+    // default; the scheduler passes through, handler injects + verifies.
+    if (data.operations !== undefined) {
+      if (data.type !== 'main') {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['operations'],
+          message: `'operations' is main-type only — operation classes declare the phase's High-Level Tool Registry classes (closed set: ${HLT_OPERATION_CLASSES.join(', ')})`,
+        });
+      }
+      for (const op of data.operations) {
+        if (!(HLT_OPERATION_CLASSES as readonly string[]).includes(op)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['operations'],
+            message: `'${op}' is not a registered High-Level Tool operation class — closed set: ${HLT_OPERATION_CLASSES.join(', ')}`,
+          });
+        }
+      }
     }
     if (data.type === 'approval' && data.jumps !== undefined) {
       ctx.addIssue({

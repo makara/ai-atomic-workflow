@@ -1,12 +1,12 @@
 ---
 name: atom-graph-writer
-description: 'Entry skill for graph YAML generation — loads atom-graph-spec, validates topology, generates valid .taskflow.yaml. Trigger: implement phase in graph-generate graph.'
+description: 'Entry skill for graph YAML generation - loads atom-graph-spec, validates topology, generates valid .taskflow.yaml. Trigger: implement phase in graph-generate graph.'
 user-invocable: false
-version: 1.1.0
-last_updated: '2026-07-30'
+version: 1.3.0
+last_updated: '2026-08-07'
 ---
 
-> **Runtime constraints** — graph dispatch: atom-graph-spec arrives via `skill:` channel (handler-injected). Standalone use: load `atom-graph-spec` for format rules and field definitions.
+> **Runtime constraints** - graph dispatch: atom-graph-spec content arrives at dispatch. Standalone use: load `atom-graph-spec` for format rules and field definitions. Dependency missing (atom-graph-spec unavailable) -> fail loudly, no silent fallback.
 
 # Atom-Graph-Writer
 
@@ -23,26 +23,33 @@ Entry skill for graph YAML generation. Loads atom-graph-spec as format reference
 
 - atom-graph-spec
 
+### Operation classes
+
+- read
+- write
+- verify
+
+### Files
+
 ## Entry
 
-**MUST WRITE** — when dispatched by atom-phase-handler for the implement phase node in the graph-generate maker journey.
+**MUST WRITE** - when dispatched by atom-phase-handler for the implement phase node in the graph-generate maker journey.
 
 ## Flow
 
 ### Step 1: Read Design
 
-Read from spec output (injected by main agent). Extract:
+Read from spec output. Extract:
 
-- `graph_name` — top-level name field
-- `phases` — array of { id, type, dependsOn, when, join, task_summary, channels }
+- `graph_name` - top-level name field
+- `phases` - array of { id, type, dependsOn, join, task_summary, channels, jumps }
 
 ### Step 2: Generate YAML
 
-Generate YAML per atom-graph-spec conventions:
+Generate YAML per atom-graph-spec conventions - task text per PHASESCHEMA.md §Task Content Spec (Directive + phase-local invariants + canonical `Output contract:` spelling + dedup deletion test) and PHASESCHEMA.md §Output Contract Spelling:
 
 ```yaml
 name: <graph_name>
-version: 1
 phases:
   - id: <id>
     type: <type>
@@ -54,27 +61,21 @@ phases:
       - <file-glob>
 ```
 
-Rules:
+Rules - per PHASESCHEMA.md §YAML Format Rules (single source): `task` block scalar `|`, `dependsOn` flow sequence, `channels` block sequence, gate `jumps` when/to pairs, `routing.actions` block sequence, 2-space indentation, `#` comments for non-obvious phase intent.
 
-- `task`: block scalar `|` for multi-line — no escape characters
-- `dependsOn`: flow sequence `[a, b]` — compact
-- `channels`: block sequence `- item` — clear; entries derive from the dispatched skill's Context Requirements contract (see atom-graph-spec §YAML channels Field)
-- `when`: inline string — short conditions
-- `routing.actions`: block sequence — self-contained per action
-- Indentation: 2 spaces
-- Comments: `#` annotate phase intent where non-obvious
+Task-text criterion (checkable): exactly one `Output contract:` line per main/approval task; no skill-protocol restatement; approval header <= 30 chars.
 
 ### Step 3: Validate
 
-Validate generated YAML against every atom-graph-spec rule class (schema fields, topology constraints, when-guard hygiene, flow use-only, join modes, approval routing).
+Validate generated YAML against every atom-graph-spec rule class (schema fields, topology constraints, gate jump hygiene, flow use-only, join modes, approval routing, task-content rules, PHASESCHEMA.md §Language Constraints classes - declared-inputs coverage, hardcoded-path rejection, claims-match-declarations).
 
 ### Step 4: Write
 
-Write generated YAML to the save_location from the entry output. Default: `<graph_name>.taskflow.yaml` in working directory. Create parent directories if needed.
+Write generated YAML to the save_location from the entry output. Default: scheduler graphs directory (per PHASESCHEMA.md §File Location convention). Create parent directories if needed.
 
 ### Step 5: Output
 
-Write result to the implement output (main agent collects):
+Write result to the implement output:
 
 ```
 graph_path: <absolute path to written .taskflow.yaml>

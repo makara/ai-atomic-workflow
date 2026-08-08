@@ -1,10 +1,8 @@
 name: adopt-with-docs
-# Graph-level ambient context — project glossary + ADR decisions + domain
-# modeling vocabulary for the adoption conversation; declared once. CONTEXT.md
-# also satisfies the atom-scope-interview contract coverage statically.
+# Graph-level ambient context — domain modeling vocabulary for the adoption
+# conversation. Three-tier channel model: conventions (CONTEXT.md) and ADR
+# records arrive via platform convention layer / config.json context.
 context:
-  - ./CONTEXT.md
-  - docs/adr/*.md
   - skill:domain-modeling
 phases:
   # Adoption stage — conversation then spec production.
@@ -16,6 +14,8 @@ phases:
       Execute scope interview per atom-scope-interview.
 
       Topics: idea_goal (raw, unfogged), doc_trace_intent.
+
+      Behavior: confirm=mandatory; output path=derived.
 
       Input document resolution: composed → input_document = upstream report
       path; standalone (raw-idea) → input_document: none.

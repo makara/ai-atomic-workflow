@@ -13,7 +13,7 @@ phases:
 
       Spec standards per affected domain — deterministic mapping rule:
       graph → atom-graph-spec, skill → atom-skill-spec, doc →
-      atom-doc-maintenance. Determine the change's affected files (delta
+      atom-doc-maintain. Determine the change's affected files (delta
       spec domains / openspec instructions apply contextFiles), load each
       corresponding spec skill BEFORE writing, and validate the
       implementation against its rule classes (deterministic rules →
@@ -41,7 +41,7 @@ phases:
 
       Spec standards per affected domain — deterministic mapping rule:
       graph → atom-graph-spec, skill → atom-skill-spec, doc →
-      atom-doc-maintenance. Determine the change's affected files, load each
+      atom-doc-maintain. Determine the change's affected files, load each
       corresponding spec skill, validate the implementation against its rule
       classes (deterministic rules → validation errors, heuristic rules →
       warnings) + repo-documented coding standards.
@@ -68,26 +68,19 @@ phases:
 
       Decision: continue (approve + archive) when the implementation passes
       review; revise/restart otherwise.
-  # Archive — reverse-validated change archival.
+  # Archive — plain change archival (minimal track: no reverse-validation,
+  # no ADR fold — the original openspec-archive-change contract).
   - id: archive
     type: main
     dependsOn: [change-accept]
-    skill: atom-openspec-archive
+    skill: openspec-archive-change
     channels:
       - node:apply-change
     task: |
-      Archive the completed openspec change per atom-openspec-archive.
-      Change name: apply-change output change_name (echo).
+      Archive the completed openspec change per openspec-archive-change
+      (plain archive — no reverse-validation; advisory context only).
+      Change name: apply-change output change_name (echo); run only when
+      apply_status is complete or partial (implemented portions archived).
 
       Output contract: archive_status (success | failed | blocked),
       change_name, validation_result, message.
-  # Post-archive doc maintenance — runs only when archive succeeded.
-  - id: doc-maintenance
-    type: flow
-    use: doc-update
-    dependsOn: [archive]
-    task: |
-      Case-5 self-judgment: archive output shows archive_status:
-      success → run post-archive maintenance (doc-trigger classifies the
-      spec-archive trigger; scope_hints carry the change name); otherwise NO
-      WORK — empty declaration, no artifact (normal execution, not a skip).

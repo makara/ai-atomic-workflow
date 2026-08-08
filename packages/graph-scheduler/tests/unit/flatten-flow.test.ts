@@ -313,10 +313,10 @@ function skillDeleteGraph(): Taskflow {
     ],
   };
 }
-/** doc-update child graph */
-function docUpdateGraph(): Taskflow {
+/** doc-sync child graph (fixture — legacy doc-update shape) */
+function docSyncGraph(): Taskflow {
   return {
-    name: 'doc-update',
+    name: 'doc-sync',
     version: 1,
     phases: [
       { id: 'doc-trigger', type: 'main', mode: 'exclusive', dependsOn: [], task: 'classify trigger' },
@@ -329,7 +329,7 @@ function docUpdateGraph(): Taskflow {
 /** Multi-graph loader for orchestrated workflow */
 function orchestrationLoader(name: string): Taskflow | null {
   if (name === 'skill-delete') return skillDeleteGraph();
-  if (name === 'doc-update') return docUpdateGraph();
+  if (name === 'doc-sync') return docSyncGraph();
   return null;
 }
 describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', () => {
@@ -349,10 +349,10 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
           dependsOn: ['plan-accept'],
         },
         {
-          id: 'doc-update',
+          id: 'doc-sync',
           type: 'flow',
           mode: 'exclusive',
-          use: 'doc-update',
+          use: 'doc-sync',
           with: { docs: ['CONTEXT.md'] },
           dependsOn: ['plan-accept'],
         },
@@ -361,7 +361,7 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
           type: 'main',
           mode: 'exclusive',
           skill: 'code-review',
-          dependsOn: ['skill-delete-foo', 'doc-update'],
+          dependsOn: ['skill-delete-foo', 'doc-sync'],
         },
         { id: 'change-accept', type: 'approval', mode: 'exclusive', dependsOn: ['cross-review'] },
       ],
@@ -373,7 +373,7 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
     expect(ids).toContain('plan-accept');
     // Flow phases removed
     expect(ids).not.toContain('skill-delete-foo');
-    expect(ids).not.toContain('doc-update');
+    expect(ids).not.toContain('doc-sync');
     // Skill-delete child phases prefixed
     expect(ids).toContain('skill-delete-foo/skill-select');
     expect(ids).toContain('skill-delete-foo/impact-analysis');
@@ -381,17 +381,17 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
     expect(ids).toContain('skill-delete-foo/skill-delete-execute');
     expect(ids).toContain('skill-delete-foo/delete-review');
     expect(ids).toContain('skill-delete-foo/delete-accept');
-    // Doc-update child phases prefixed
-    expect(ids).toContain('doc-update/doc-trigger');
-    expect(ids).toContain('doc-update/doc-maintain');
-    expect(ids).toContain('doc-update/doc-review');
-    expect(ids).toContain('doc-update/doc-accept');
+    // Doc-sync child phases prefixed
+    expect(ids).toContain('doc-sync/doc-trigger');
+    expect(ids).toContain('doc-sync/doc-maintain');
+    expect(ids).toContain('doc-sync/doc-review');
+    expect(ids).toContain('doc-sync/doc-accept');
     // Cross-review rewired to child terminals (delete-accept, doc-accept)
     const crossReview = result.phases.find((p) => p.id === 'cross-review');
     expect(crossReview?.dependsOn).toContain('skill-delete-foo/delete-accept');
-    expect(crossReview?.dependsOn).toContain('doc-update/doc-accept');
+    expect(crossReview?.dependsOn).toContain('doc-sync/doc-accept');
     expect(crossReview?.dependsOn).not.toContain('skill-delete-foo');
-    expect(crossReview?.dependsOn).not.toContain('doc-update');
+    expect(crossReview?.dependsOn).not.toContain('doc-sync');
     // change-accept preserved
     expect(ids).toContain('change-accept');
   });

@@ -10,14 +10,19 @@
  * @module
  */
 
+import { existsSync, readdirSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
+  DEFAULT_CONVENTIONS,
   fileChannelCoveredBy,
   isGlobShape,
+  isWorkflowArtifactGlob,
   mergeChannelScopes,
+  normFile,
   parseContextContract,
   resolveChannels,
+  stripPrefix,
 } from './resolve-channels.js';
 
 /** safe string coercion — never String(object) (schema-validated in production path) */
@@ -119,18 +124,25 @@ export function validateGraphContracts(
       errors.push(`${filePath}: graph-level context entry must be a string — '${String(c)}'`);
       continue;
     }
-    if (c.startsWith('skill:') || c.startsWith('node:')) {
-      if (c.startsWith('node:')) {
-        const target = c.slice('node:'.length);
-        if (!byId.has(target)) {
+    const prefixed = stripPrefix(c);
+    if (prefixed) {
+      if (prefixed.type === 'node') {
+        if (!byId.has(prefixed.target)) {
           errors.push(
-            `${filePath}: graph-level node: context entry "${c}" targets missing phase '${target}' — graph-level entries resolve against the flattened node set`,
+            `${filePath}: graph-level node: context entry "${c}" targets missing phase '${prefixed.target}' — graph-level entries resolve against the flattened node set`,
           );
         }
       }
       continue;
     }
-    if (isGlobShape(c)) continue;
+    if (isGlobShape(c)) {
+      if (!isWorkflowArtifactGlob(c)) {
+        errors.push(
+          `${filePath}: graph-level context entry "${c}" is a file glob outside workflow runtime artifacts (.graph-scheduler/, .taskflow/) — three-tier channel model: project file globs belong in config.json context, conventions are platform-shipped`,
+        );
+      }
+      continue;
+    }
     errors.push(
       `${filePath}: graph-level context entry "${c}" is a bare name — graph-level entries require an explicit skill:/node: prefix or a file glob (no execution-skill contract exists at graph scope)`,
     );
@@ -441,9 +453,10 @@ function parseFrontmatterName(content: string): string | null {
 export async function validateEntrySkillContracts(
   graphs: ReadonlyArray<{ filePath: string; graph: Record<string, unknown> }>,
   skillsDir: string,
-  opts?: { checkOrphans?: boolean },
+  opts?: { checkOrphans?: boolean; projectContext?: readonly string[] },
 ): Promise<{ errors: string[]; warnings: string[] }> {
   const checkOrphans = opts?.checkOrphans ?? true;
+  const projectContext = opts?.projectContext;
   const errors: string[] = [];
   const warnings: string[] = [];
 
@@ -493,7 +506,7 @@ export async function validateEntrySkillContracts(
   for (const { filePath, graph } of graphs) {
     const phases = (graph.phases ?? []) as Array<Record<string, unknown>>;
     checkUpstreamCoverage(phases, skills, filePath, errors);
-    checkPhaseChannels(phases, skills, filePath, errors, warnings, (graph.context ?? []) as string[]);
+    checkPhaseChannels(phases, skills, filePath, errors, warnings, (graph.context ?? []) as string[], projectContext);
   }
 
   return { errors, warnings };
@@ -574,6 +587,7 @@ function checkPhaseChannels(
   errors: string[],
   warnings: string[],
   graphContext?: readonly string[],
+  projectContext?: readonly string[],
 ): void {
   const nodeIds = new Set(phases.map((p) => str(p.id, '')));
   for (const phase of phases) {
@@ -582,11 +596,25 @@ function checkPhaseChannels(
     const prefix = `${filePath}: phases.${str(phase.id, '?')}`;
     const channels = (phase.channels ?? []) as string[];
     const dependsOn = (phase.dependsOn ?? []) as string[];
-    // Effective channels — global channel (graph top-level `context:`) merges
-    // into every phase (two-scope context model). Forward coverage evaluates
-    // the effective list: a contract entry satisfied at graph level is not
-    // reported missing on the phase.
-    const effective = [...(mergeChannelScopes(undefined, graphContext, channels) ?? [])];
+    // Three-tier channel model: phase file globs carry workflow runtime
+    // artifacts only — project file globs belong in config.json context
+    // (project layer), conventions are platform-shipped. `node:`/`skill:`
+    // prefixed entries are stream/reference channels, never file globs —
+    // excluded regardless of '/' in the target id.
+    for (const c of channels) {
+      if (stripPrefix(c)) continue;
+      if (isGlobShape(c) && !isWorkflowArtifactGlob(c)) {
+        errors.push(
+          `${prefix} — channel "${c}" is a file glob outside workflow runtime artifacts (.graph-scheduler/, .taskflow/) — three-tier channel model: project file globs belong in config.json context`,
+        );
+      }
+    }
+    // Effective channels — convention layer (platform-shipped, default-loaded)
+    // merged first, then the project default layer (config.json `context`),
+    // then the global channel (graph top-level `context:`), then the phase's
+    // own channels. Forward coverage evaluates the effective list: a contract
+    // entry satisfied by any layer is not reported missing on the phase.
+    const effective = [...(mergeChannelScopes(DEFAULT_CONVENTIONS, projectContext, graphContext, channels) ?? [])];
 
     // Graph-level node: target existence — graph-scope entries are validated
     // against the flattened set at graph level (validateGraphContracts);
@@ -627,7 +655,9 @@ function checkPhaseChannels(
     }
 
     checkForwardCoverage(skill, effective, prefix, errors);
-    checkReverseResolution(skill, channels, dependsOn, nodeIds, prefix, errors, warnings);
+    // Reverse resolution observes the same effective list as forward coverage
+    // (convention + project + graph + phase) — one effective context per phase.
+    checkReverseResolution(skill, effective, dependsOn, nodeIds, prefix, errors, warnings);
   }
 }
 
@@ -692,4 +722,109 @@ function checkReverseResolution(
   // semantics: an out-of-run target warns + strips at dispatch (legal
   // cross-run composition references). Graph-level node: targets ARE
   // membership-checked at load (validateGraphContracts, flattened set).
+}
+
+// ---------------------------------------------------------------------------
+// Project layer existence validation (three-tier channel model)
+// ---------------------------------------------------------------------------
+
+const GLOB_RE_CACHE = new Map<string, RegExp>();
+
+/** Convert a path glob (segment-aware) to a regex — `**` crosses directories. */
+function globToRegex(glob: string): RegExp {
+  const cached = GLOB_RE_CACHE.get(glob);
+  if (cached) return cached;
+  const re = new RegExp(
+    `^${normFile(glob)
+      .split('/')
+      .map((s) =>
+        s
+          .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+          .replace(/\*\*/g, '\u0000')
+          .replace(/\*/g, '[^/]*')
+          .replace(/\?/g, '[^/]')
+          .replace(/\u0000/g, '.*'),
+      )
+      .join('/')}$`,
+  );
+  GLOB_RE_CACHE.set(glob, re);
+  return re;
+}
+
+/**
+ * Bounded recursive file listing — static-prefix walk with depth/file caps.
+ * Existence validation never scans unbounded trees.
+ */
+function collectFiles(dir: string, maxDepth = 8, maxFiles = 2000): string[] {
+  const out: string[] = [];
+  const walk = (d: string, depth: number): void => {
+    if (depth > maxDepth || out.length >= maxFiles) return;
+    let entries;
+    try {
+      entries = readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (out.length >= maxFiles) return;
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p, depth + 1);
+      else out.push(p);
+    }
+  };
+  walk(dir, 0);
+  return out;
+}
+
+/** Does the glob match at least one existing file under cwd? Static prefix walked, remainder regex-matched. */
+export function globMatchesAny(glob: string, cwd: string): boolean {
+  const segs = normFile(glob)
+    .split('/')
+    .filter((s) => s.length > 0);
+  let base = cwd;
+  let i = 0;
+  while (i < segs.length && !/[*?[]/.test(segs[i])) {
+    base = join(base, segs[i]);
+    i++;
+  }
+  if (!existsSync(base)) return false;
+  if (i === segs.length) return true;
+  const re = globToRegex(segs.slice(i).join('/'));
+  return collectFiles(base).some((p) => re.test(p.substring(base.length + 1)));
+}
+
+/**
+ * Project layer (config.json `context:`) existence validation — three-tier
+ * channel model: exact-file entry missing -> error; glob zero-match -> warning
+ * (empty set legal — lazy document creation). Conventions and graph channels
+ * are NOT existence-checked (absence-tolerance + workflow artifacts).
+ */
+export function validateProjectContext(
+  context: readonly string[] | undefined,
+  cwd: string,
+): { errors: string[]; warnings: string[] } {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (!context) return { errors, warnings };
+  for (const entry of context) {
+    if (typeof entry !== 'string') {
+      errors.push(`project layer context entry must be a string — '${String(entry)}'`);
+      continue;
+    }
+    // `node:`/`skill:` prefixed entries are stream/reference channels, not
+    // files — never existence-checked.
+    if (stripPrefix(entry)) continue;
+    // Exact vs glob — wildcard presence decides, not path separators: a
+    // slash-carrying entry without wildcards is an exact file, not a glob.
+    if (/[*?[]/.test(entry)) {
+      if (!globMatchesAny(entry, cwd)) {
+        warnings.push(
+          `project layer entry "${entry}" matches zero files — empty set legal (lazy document creation), channel degrades to empty + warning`,
+        );
+      }
+    } else if (!existsSync(join(cwd, normFile(entry)))) {
+      errors.push(`project layer entry "${entry}" declares exact file '${normFile(entry)}' that does not exist`);
+    }
+  }
+  return { errors, warnings };
 }

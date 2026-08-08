@@ -43,8 +43,8 @@ function prologueGraph(name: string, phases: readonly Phase[], prologue?: readon
     name,
     phases,
     prologue: prologue ?? [
-      { id: '$run-mode-confirm', type: 'main', dependsOn: [], task: 'confirm' },
       { id: '$load-constraints', type: 'main', dependsOn: [], task: 'load' },
+      { id: '$run-mode-confirm', type: 'main', dependsOn: [], task: 'confirm' },
     ],
   };
 }
@@ -924,13 +924,13 @@ describe('activation prologue', () => {
     state = transition(state, startEvent(), g).nextState;
 
     // First prologue done — second still pending → author entry stays pending
-    state = transition(state, completeEvent('$run-mode-confirm'), g).nextState;
+    state = transition(state, completeEvent('$load-constraints'), g).nextState;
     let phases = narrowRunning(state).phases;
-    expect(phases['$load-constraints'].status).toBe('active');
+    expect(phases['$run-mode-confirm'].status).toBe('active');
     expect(phases['entry'].status).toBe('pending');
 
     // Both done — author entry activates
-    state = transition(state, completeEvent('$load-constraints'), g).nextState;
+    state = transition(state, completeEvent('$run-mode-confirm'), g).nextState;
     phases = narrowRunning(state).phases;
     expect(phases['entry'].status).toBe('active');
   });
@@ -939,19 +939,19 @@ describe('activation prologue', () => {
     const g = entryProGraph();
     let state: FsmState = { status: 'idle' };
     state = transition(state, startEvent(), g).nextState;
-    const result = transition(state, completeEvent('$run-mode-confirm'), g);
-    expect(result.effects.some((e) => e.type === 'persist_node_state' && e.nodeId === '$run-mode-confirm')).toBe(true);
+    const result = transition(state, completeEvent('$load-constraints'), g);
+    expect(result.effects.some((e) => e.type === 'persist_node_state' && e.nodeId === '$load-constraints')).toBe(true);
     const phases = narrowRunning(result.nextState).phases;
-    expect(phases['$run-mode-confirm'].status).toBe('done');
-    expect(phases['$run-mode-confirm'].retryCount).toBe(0);
+    expect(phases['$load-constraints'].status).toBe('done');
+    expect(phases['$load-constraints'].retryCount).toBe(0);
   });
 
   it('JUMP to an entry node re-runs the prologue — P reset to pending and re-dispatched first', () => {
     const g = entryProGraph();
     let state: FsmState = { status: 'idle' };
     state = transition(state, startEvent(), g).nextState;
-    state = transition(state, completeEvent('$run-mode-confirm'), g).nextState;
     state = transition(state, completeEvent('$load-constraints'), g).nextState;
+    state = transition(state, completeEvent('$run-mode-confirm'), g).nextState;
     state = transition(state, completeEvent('entry'), g).nextState;
     expect(narrowRunning(state).phases['review'].status).toBe('active');
 
@@ -1025,8 +1025,8 @@ describe('activation prologue', () => {
       phases: {
         ...state.phases,
         a: { status: 'active', retryCount: 0 },
-        '$run-mode-confirm': { status: 'active', retryCount: 0 },
-        '$load-constraints': { status: 'done', retryCount: 0 },
+        '$load-constraints': { status: 'active', retryCount: 0 },
+        '$run-mode-confirm': { status: 'done', retryCount: 0 },
       },
     };
     const event: FsmEvent = { type: 'COMPLETE', phaseId: 'a', durationMs: 10, endRun: true };

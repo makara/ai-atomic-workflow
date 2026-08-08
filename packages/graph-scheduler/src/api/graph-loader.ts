@@ -12,11 +12,10 @@ import { Effect } from 'effect';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validateEntrySkillContracts, validateGraphContracts } from '../context/contracts.js';
+import { validateEntrySkillContracts, validateGraphContracts, validateProjectContext } from '../context/contracts.js';
 import { debugLog } from '../debug.js';
 import { FileSystem, FileSystemError } from '../filesystem.js';
 import { flattenFlowPhases, MAX_FLOW_DEPTH } from '../flow-flatten.js';
-import type { FsmNodeState } from '../fsm/effects.js';
 import type { TaskflowGraph } from '../fsm/transition.js';
 import type { Taskflow } from '../graph-definition.js';
 import { loadGraph, loadGraphFromPath } from '../graph-definition.js';
@@ -105,11 +104,21 @@ function runContractsPass(
   tf: Taskflow,
   filePath: string,
   graphName: string,
+  projectContext?: readonly string[],
 ): Effect.Effect<{ tf: Taskflow; warnings: string[] }, GraphDefinitionError, never> {
   return Effect.gen(function* () {
     const contracts = validateGraphContracts(tf, filePath);
     const errors = [...contracts.errors];
     const warnings = [...contracts.warnings];
+
+    // Project layer existence validation — three-tier channel model: exact
+    // file missing -> load error, glob zero-match -> warning. Runs against
+    // the resolved config.json `context:` when the caller supplies it.
+    if (projectContext) {
+      const pc = validateProjectContext(projectContext, process.cwd());
+      errors.push(...pc.errors);
+      warnings.push(...pc.warnings);
+    }
 
     const skillsDir = resolveSkillsDir();
     if (skillsDir) {
@@ -117,6 +126,7 @@ function runContractsPass(
         Effect.tryPromise(() =>
           validateEntrySkillContracts([{ filePath, graph: tf }], skillsDir, {
             checkOrphans: false,
+            projectContext,
           }),
         ),
       );
@@ -213,6 +223,7 @@ export interface GraphLoadMeta {
 
 export function loadGraphWithRegistry(
   graphName: string,
+  projectContext?: readonly string[],
 ): Effect.Effect<Taskflow & GraphLoadMeta, SchedulerError | RegistryLoadError, FileSystem | RegistryLoader> {
   return Effect.gen(function* () {
     const loaded = yield* loadNamedGraph(graphName);
@@ -256,7 +267,7 @@ export function loadGraphWithRegistry(
     const loadChild = (childName: string): Taskflow | null => childMap.get(childName) ?? null;
     const flat = flattenFlowPhases(loaded.tf, loadChild, 1, MAX_FLOW_DEPTH);
     // Contract checks run at load: errors fail fast, warnings surface.
-    const result = yield* runContractsPass(flat, loaded.filePath, graphName);
+    const result = yield* runContractsPass(flat, loaded.filePath, graphName, projectContext);
     recordContractWarnings(graphName, result.warnings);
     return {
       ...result.tf,
@@ -274,12 +285,13 @@ export function loadGraphWithRegistry(
 export function loadGraphForRun(
   runId: string,
   graphName: string,
+  projectContext?: readonly string[],
 ): Effect.Effect<Taskflow, SchedulerError | RegistryLoadError, FileSystem | RegistryLoader> {
   return Effect.gen(function* () {
     const cached = graphLoadCache.get(runId);
     if (cached) return cached;
 
-    const tf = yield* loadGraphWithRegistry(graphName);
+    const tf = yield* loadGraphWithRegistry(graphName, projectContext);
     graphLoadCache.set(runId, tf);
     return tf;
   });

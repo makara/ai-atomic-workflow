@@ -126,8 +126,8 @@ describe('load-time contract validation', () => {
     const res = await Effect.runPromise(program);
     expect(res._tag).toBe('Right');
     if (res._tag === 'Right') {
-      // Activation prefix dispatches first (graph has an approval)
-      expect(res.right.node?.nodeId).toBe('$run-mode-confirm');
+      // Activation prefix dispatches first (graph has an approval) — load before confirm
+      expect(res.right.node?.nodeId).toBe('$load-constraints');
       // warning graph carries the summary — unbounded retry branch surfaced at start
       expect(res.right.contractWarnings?.some((w: string) => w.includes('unbounded'))).toBe(true);
     }

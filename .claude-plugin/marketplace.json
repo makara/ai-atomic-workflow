@@ -2,7 +2,7 @@
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "ai-atomic-workflow",
   "version": "1.0.0",
-  "description": "Graph-driven work-order system for AI agents — explicit phases, scoped context, and non-bypassable approval gates.",
+  "description": "Graph-driven work-order system for AI agents - explicit phases, scoped context, and non-bypassable approval gates.",
   "owner": {
     "name": "makarawang",
     "email": "makara15@gmail.com"
@@ -14,21 +14,24 @@
     {
       "name": "graph-workflow",
       "source": "./packages/graph-workflow",
-      "description": "Graph-workflow domain — built-in skills for graph lifecycle orchestration (CRUD-driven loop via graph-scheduler MCP tools)",
+      "description": "Graph-workflow domain - built-in skills for graph lifecycle orchestration (CRUD-driven loop via graph-scheduler MCP tools)",
       "skills": [
-        "./skills/atom-doc-maintenance",
+        "./skills/atom-doc-lifecycle",
+        "./skills/atom-doc-maintain",
         "./skills/atom-graph-design",
         "./skills/atom-graph-spec",
         "./skills/atom-graph-writer",
         "./skills/atom-kernel",
-        "./skills/atom-mcp-contract",
-        "./skills/atom-openspec-archive",
         "./skills/atom-phase-handler",
         "./skills/atom-pilot",
         "./skills/atom-scope-interview",
         "./skills/atom-skill-spec",
-        "./skills/setup-atomic-workflow"
+        "./skills/setup-atomic-workflow",
+        "./skills/atom-domain-spec",
+        "./skills/atom-spec-maintain",
+        "./skills/atom-adr-maintain"
       ]
     }
-  ]
+  ],
+  "skills": []
 }

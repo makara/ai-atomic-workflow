@@ -154,7 +154,7 @@ export interface IResolveInput {
 }
 
 /** Strip explicit prefix from a channel entry — returns the bare target. */
-function stripPrefix(entry: string): { type: 'skill' | 'node'; target: string } | null {
+export function stripPrefix(entry: string): { type: 'skill' | 'node'; target: string } | null {
   if (entry.startsWith('skill:')) return { type: 'skill', target: entry.slice('skill:'.length) };
   if (entry.startsWith('node:')) return { type: 'node', target: entry.slice('node:'.length) };
   return null;
@@ -165,8 +165,31 @@ export function isGlobShape(entry: string): boolean {
   return entry.includes('/') || entry.includes('*') || entry.includes('?') || entry.includes('[');
 }
 
+/**
+ * Platform convention layer — exact file paths only (no directory-class
+ * entries, no glob entries). Default-loaded into every phase; absence-tolerant
+ * by construction (agent-side missing-file warn+continue is the tolerance
+ * mechanism — mirrors prologue degrade). Three-tier channel model: this
+ * constant is the sole convention-layer source.
+ */
+export const DEFAULT_CONVENTIONS: readonly string[] = ['./CONTEXT.md', 'docs/domains.md'];
+
+/**
+ * Workflow runtime artifact namespaces — the only file-glob targets legal in
+ * graph `context:` / phase `channels:` (three-tier channel model: graph file
+ * channels carry workflow artifacts only; conventions are implicit via
+ * DEFAULT_CONVENTIONS; project layout lives in config.json `context:`).
+ */
+const WORKFLOW_ARTIFACT_PREFIXES: readonly string[] = ['.graph-scheduler/', '.taskflow/'];
+
+/** Is a file-glob channel entry targeting a workflow runtime artifact namespace? */
+export function isWorkflowArtifactGlob(entry: string): boolean {
+  const c = normFile(entry);
+  return WORKFLOW_ARTIFACT_PREFIXES.some((p) => c === p.slice(0, -1) || c.startsWith(p));
+}
+
 /** normalize a file entry for matching — strip leading ./ and trailing / */
-function normFile(entry: string): string {
+export function normFile(entry: string): string {
   return entry.replace(/^\.\//, '').replace(/\/$/, '');
 }
 
