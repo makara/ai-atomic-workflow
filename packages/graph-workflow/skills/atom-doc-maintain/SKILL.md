@@ -27,6 +27,7 @@ Document estate maintenance deep module. One contract `maintain({ trigger, scope
 - caveman
 - domain-modeling
 - codebase-design
+- atom-domain-spec
 
 ### Operation classes
 
@@ -72,7 +73,7 @@ Classification SHALL be derived from the event - never inferred from an intervie
 
 |Class|Documents|Maintenance rule|
 |-|-|-|
-|`index`|docs/domains.md - domain standard + bidirectional asset mapping|Evolution four-step per domains.md; every asset maps to exactly one domain; spec dirs match domain IDs 1:1|
+|`index`|docs/domains.md - domain standard + bidirectional asset mapping|Evolution four-step per domains.md; every asset maps to exactly one domain; spec dirs match domain IDs 1:1; format per atom-domain-spec (split principles, count bound, layering, provenance, evolution, head-position Design Requirements block, linkage rule)|
 |`derived-view`|CONTEXT.md, README.md (+ zh mirrors)|`source → transform → verify`: CONTEXT from packages state (counts, names); README regenerated from docs/readme-blueprint.md. CHANGELOG - separate flow (see §Document Types)|
 |`normative`|docs/ family - design, conventions, constraints, glossary, etc.|Targeted edits only - never re-derivation; terminology updates per domain-modeling (glossary + CONTEXT.md)|
 |`contract`|openspec/specs/<domain>/spec.md|OpenSpec delta flow only (ADDED/MODIFIED/REMOVED) - maintenance never edits main specs directly|
@@ -87,6 +88,7 @@ Every pass SHALL run the gate and report into `validation` - never silently patc
 - **Links** - relative file/skill/anchor references resolve (no dangling targets). Evidence: `grep -rEo '(docs|packages)/[a-z0-9/._-]+\.md' docs/` -> each target exists.
 - **Counts** - stated counts (ADR/reports/skills/graphs) match directory facts. Evidence: `ls docs/adr/ | wc -l` vs stated ADR count; `ls packages/graph-workflow/skills/ | wc -l` vs stated skill count.
 - **Derived** - derived views match source state (counts, names, paths). Evidence: `diff <(ls packages/graph-workflow/skills/) CONTEXT.md skill list` -> empty.
+- **Linkage** (per atom-domain-spec) - spec/ADR associations appear only inside domain list tables of docs/domains.md. Evidence: `grep -nE 'ADR [0-9]{4}|openspec/specs' docs/domains.md` -> every hit lands in Overview or a detail table row.
 
 ADR lifecycle invariants SHALL NOT be checked here - atom-doc-lifecycle owns them.
 

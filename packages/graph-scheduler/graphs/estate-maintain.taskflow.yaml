@@ -64,7 +64,7 @@ phases:
          requirements are emitted as node output; domains-index writes them
          into docs/domains.md Design Requirements.
 
-      Output contract: requirements [{id, statement, status}], consensus,
+      Output contract: requirements [{statement}], consensus,
       trigger.
 
   # Workstreams — dispatched in parallel from requirement; each runs its estate skill.
@@ -86,9 +86,9 @@ phases:
 
       Record duty (user-request trigger): consume the requirement node output
       (upstream requirement — direct dependency) and write the confirmed requirements into
-      docs/domains.md Design Requirements section — format per atom-domain-spec
-      §Design Requirements (ID/statement/status/source/date). Zero confirmed
-      requirements → no section write.
+      docs/domains.md Design Requirements block at the file head — format per atom-domain-spec
+      §Design Requirements (bullet list, one simple sentence per requirement, no
+      IDs/status/source/date). Zero confirmed requirements → no block write.
 
       Consumption duty: read docs/domains.md Design Requirements before
       executing; comply with every active requirement in this node's changes.
@@ -158,11 +158,12 @@ phases:
       specs-sync / adr-align outputs feed the mapping and counts checks.
       1. Consistency gate — mapping (assets ↔ domains bidirectional; spec dirs
          ↔ domain IDs 1:1), links (no dangling targets), counts (claims match
-         disk facts), derived (views match source state), requirements (every
-         active Design Requirements row has a grill confirmation record;
-         workstream changes comply with each active requirement; section
-         format valid per atom-domain-spec). Evidence per check; failures
-         surfaced — never silently patched.
+         disk facts), derived (views match source state), requirements (Design
+         Requirements block sits at the file head with bullet-list format;
+         workstream changes comply with each requirement; consensus evidence
+         from the requirement node output — node:requirement channel, never
+         in-file confirmation records; format valid per atom-domain-spec).
+         Evidence per check; failures surfaced — never silently patched.
       2. Reverse-validation — every change traces to a real estate fact;
          registrations have decision evidence (ADR); retirements remove
          capabilities with REMOVED deltas.

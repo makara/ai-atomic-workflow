@@ -1,10 +1,10 @@
 ---
 name: atom-domain-spec
-description: 'Format reference for docs/domains.md - the single authority for domain split principles (bounded-context judgment + core/supporting/generic subdomain classification per clean-ddd-hexagonal, ubiquitous language per domain-modeling), domain count bound 10-100 with kind layering when exceeded, reverse-analysis provenance (asset -> domain, no forward design), and the evolution four-step. Use when writing, reviewing, or maintaining docs/domains.md, or when a maintain node validates domain index changes. Consumed by atom-doc-maintain (index class) and the estate-maintain graph domains-index node.'
+description: 'Format reference for docs/domains.md - the single authority for domain split principles (bounded-context judgment + core/supporting/generic subdomain classification per clean-ddd-hexagonal, ubiquitous language per domain-modeling), domain count bound 10-100 with kind layering when exceeded, reverse-analysis provenance (asset -> domain, no forward design), the evolution four-step, the head-position Design Requirements block with constraints.json-equivalent standing, and the linkage rule (spec/ADR associations only in domain list tables). Use when writing, reviewing, or maintaining docs/domains.md, or when a maintain node validates domain index changes. Consumed by atom-doc-maintain (index class) and the estate-maintain graph domains-index node.'
 argument-hint: none (reference skill - consulted by maintain execution)
 disable-model-invocation: true
 user-invocable: false
-version: 1.0.0
+version: 2.0.0
 last_updated: '2026-08-08'
 ---
 
@@ -17,6 +17,39 @@ Format reference for `docs/domains.md` - mirrors the atom-skill-spec / atom-grap
 ## Consultation
 
 When consulted for domains.md work (write, review, or maintenance pass - by atom-doc-maintain index class, the estate-maintain review node, or direct review), validate the target against every section below. Deterministic rules -> validation errors; heuristic rules -> warnings. Reference skill - informs, never executes.
+
+## Design Requirements
+
+User-proposed, grill-confirmed requirements on domain design. Primary constraint block - sits at the head of docs/domains.md (after the header, before Split Standard), standing equal to `.graph-scheduler/constraints.json`: a binding constraint set for domain design (split, boundary, kind, naming), read and complied with by every maintenance pass. Requirements never create domains and never substitute for asset-derived provenance (see Reverse-Analysis Provenance).
+
+### Block Format
+
+```
+## Design Requirements
+
+- <one simple sentence, caveman>
+- <one simple sentence, caveman>
+```
+
+- Bullet list, one bullet per requirement - one simple sentence each, caveman style.
+- No IDs, no status, no source, no date - metadata columns forbidden.
+- Requirement no longer applies -> delete the bullet outright. No retired rows, no trace rows.
+
+### Consumption
+
+- estate-maintain workstream nodes (domains-index / specs-sync / adr-align) SHALL read the block before executing and SHALL comply with every requirement in their changes.
+- The estate-maintain review gate's `requirements` class verifies: block at head, bullet-list format, workstream compliance. Consensus evidence comes from the requirement node output (node:requirement channel) - never in-file confirmation records.
+
+### Relationship to Domains
+
+A requirement SHALL NOT create or imply a domain row (no asset, no domain - provenance rule unchanged). Requirements adjust how existing/new domain design judgments are made within the index standard.
+
+## Linkage Rule
+
+Spec/ADR associations allowed ONLY inside the domain list tables (Overview + per-kind detail sections): the Aggregate specs column and ADR provenance annotations (e.g. `SUPERSEDED (ADR n)`). Everywhere else - header, split standard, dependency rules, reverse mapping, evolution rules, design requirements, linkages - spec/ADR associations forbidden.
+
+- Deterministic rule -> validation error.
+- Mechanical check: grep spec/ADR references; every hit lands in a domain list row.
 
 ## Split Principles
 
@@ -43,7 +76,7 @@ Terminology SHALL follow domain-modeling: domain IDs and glossary terms form one
 ## Count Bound and Layering
 
 - Total domain count SHALL stay within **10 and 100** (inclusive).
-- When the count would exceed 100, the index SHALL layer domains by kind: `engine-feature` (infrastructure) -> `graph` (orchestration) -> `skill` (primitive) -> pure primitive layer, per the existing dependency direction contract. Each layer SHALL stay within the bound.
+- Count would exceed 100 -> the index layers domains by kind: `engine-feature` (infrastructure) -> `graph` (orchestration) -> `skill` (primitive) -> pure primitive layer, per the existing dependency direction contract. Each layer SHALL stay within the bound.
 - The layering split SHALL be recorded in the standard itself (new section), not left implicit.
 
 ## Reverse-Analysis Provenance
@@ -58,29 +91,6 @@ The index SHALL be derived from the actual repository state:
 ## Evolution Four-Step
 
 Add/modify/delete a domain follows the four-step procedure (intent -> boundary -> asset registration -> naming de-duplication) recorded in the index. A change that skips a step is invalid.
-
-## Design Requirements
-
-User-proposed, grill-confirmed requirements on domain design - recorded in a dedicated `## Design Requirements` section of the index. They constrain design judgment (split, boundary, kind, naming); they never create domains and never substitute for asset-derived provenance (see Reverse-Analysis Provenance).
-
-### Requirement Rows
-
-|ID|Statement|Status|Source|Date|
-|-|-|-|-|-|
-|`DR-<n>`|One-line requirement statement|`active` / `retired`|Grill confirmation record (estate-maintain requirement node consensus)|YYYY-MM-DD|
-
-- IDs: sequential `DR-1`, `DR-2`, ... - never reused; retired rows keep the ID for trace.
-- `retired`: superseded or no longer applicable - row kept, retirement reason recorded in the same change.
-- Source: the grilling consensus that confirmed the requirement (estate-maintain user-request pass); a row without a confirmation record is a validation error.
-
-### Consumption
-
-- estate-maintain workstream nodes (domains-index / specs-sync / adr-align) SHALL read the section before executing and SHALL comply with every `active` requirement in their changes.
-- The estate-maintain review gate's `requirements` class verifies: every active requirement has a confirmation record; every workstream change complies with each active requirement; the section format is valid per this standard.
-
-### Relationship to Domains
-
-A requirement SHALL NOT create or imply a domain row (no asset, no domain - provenance rule unchanged). Requirements adjust how existing/new domain design judgments are made within the index standard.
 
 ## Language and Format
 
@@ -97,4 +107,5 @@ At write or review time, run the mechanical checks:
 2. Mapping: every asset maps to exactly one domain; every domain has >= 1 asset; `openspec/specs/` dirs match domain IDs 1:1.
 3. Provenance: every row's asset exists; reverse mapping agrees bidirectionally.
 4. Bounds: 10 <= total <= 100; exceeded -> layering rule applies.
-5. Requirements: every active Design Requirements row has a confirmation record (source + date); no orphan references; workstream changes comply with each active requirement.
+5. Requirements: block at head; bullet-list format; no metadata columns; workstream changes comply with each requirement; consensus evidence in requirement node output.
+6. Linkage: grep spec/ADR references - every hit inside a domain list row; no association elsewhere.
