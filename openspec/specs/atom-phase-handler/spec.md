@@ -56,16 +56,16 @@ The global deployment candidate `~/.agents/skills` SHALL NOT contain copies of s
 
 ### Requirement: atom-phase-handler — central dispatch handler
 
-`atom-phase-handler` SHALL be the single entry point for processing `NextNode` objects. It SHALL route by `node.type` to the appropriate handler (main, approval, or gate) and return the execution result.
+`atom-phase-handler` SHALL be the single entry point for processing `NextNode` objects. It SHALL route by `node.type` to the appropriate handler (main, approval, or gate) and return the execution result. The approval handler SHALL assemble card content + the AI-judged recommendation and delegate the mode decision to `approval()` (assemble → approval() → IApprovalDecision → persist → route) — the mode branch lives in the kernel contract, not handler documents.
 
 #### Scenario: Handler routes by node type
 
 - **WHEN** `atom-phase-handler` receives `NextNode { type: "main", ... }`
 - **THEN** it SHALL execute the main handler inline (with inline context assembly when channels present)
 - **WHEN** `NextNode { type: "approval", ... }`
-- **THEN** it SHALL dispatch to the approval handler (collect user decision or auto-execute per run mode)
+- **THEN** it SHALL assemble card content + recommendation and delegate the mode decision to `approval()` (auto + recommendation → executes; manual/absent/no recommendation → card), map to IApprovalDecision, persist, and route
 - **WHEN** `NextNode { type: "gate", ... }`
-- **THEN** it SHALL evaluate rework jumps against the judgment context — no question(), no pause
+- **THEN** it SHALL evaluate rework jumps against the judgment context — no approval(), no pause
 
 #### Scenario: Handler assembles runtime context
 
@@ -220,3 +220,22 @@ The phrase "the run-scoped output stream (per §Run-scoped output streams)" SHAL
 #### Scenario: parenthetical sprawl gone
 
 Given packages/graph-workflow/skills/atom-phase-handler/SKILL.md When counting "(per §Run-scoped output streams)" occurrences Then it appears at most once (the definition)
+
+### Requirement: Decision UI block injection — main-node confirmation points per approval()
+
+The handler SHALL prepend a `## Decision UI` block to main-node context (alongside `## Run Mode:` and `## Constraints`), declaring that every user-confirmation point in the node's execution — including "ask the user" / "check with the user" / "quiz" / question()-style instructions in the dispatched skill — executes per the approval() contract: mode from `## Run Mode` (absent → manual); recommendation present + auto → execute it; no recommendation → card. Upstream skill content SHALL NOT be modified; the injection layer is the single interpretation site.
+
+#### Scenario: Upstream skill confirmation auto-executes in auto mode
+
+- **WHEN** a main node dispatches with an upstream skill containing a prose confirmation point (e.g. "Check with the user..."), run mode auto, and a recommendation exists
+- **THEN** the confirmation SHALL execute the recommendation without a card
+
+#### Scenario: Standalone execution presents cards as before
+
+- **WHEN** a skill runs outside a graph (no `## Run Mode` / `## Decision UI` context)
+- **THEN** confirmation points SHALL present cards as before (absence never auto)
+
+#### Scenario: Interview turns unaffected
+
+- **WHEN** an interview turn has no recommendation
+- **THEN** the card SHALL appear in any run mode — the injection block does not change interview semantics

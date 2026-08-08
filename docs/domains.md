@@ -34,7 +34,7 @@ Binding constraints on domain design (split, boundary, kind, naming) - standing 
 |-|-|-|
 |`skill`|Built-in skill domain|17|
 |`graph`|Built-in graph domain|9|
-|`engine-feature`|Engine feature-point domain|24|
+|`engine-feature`|Engine feature-point domain|25|
 
 ### Status Tags
 
@@ -84,6 +84,7 @@ Binding constraints on domain design (split, boundary, kind, naming) - standing 
 |graph-registry|engine-feature|Engine-feature domain|active|core|
 |graph-generate-identity|engine-feature|Engine-feature domain|active|core|
 |phase-handler|engine-feature|Engine-feature domain|active|core|
+|approval|engine-feature|Engine-feature domain|active|core|
 |auto-decision-rationale|engine-feature|Engine-feature domain|active|core|
 |context-channels|engine-feature|Engine-feature domain|active|core|
 |channels-context-model|engine-feature|Engine-feature domain|active|core|
@@ -103,14 +104,14 @@ Binding constraints on domain design (split, boundary, kind, naming) - standing 
 |query-plane|engine-feature|Engine-feature domain — query plane (ADR 0128): jcodemunch first-class for locate/search/analyze, read-only|active|core|
 |atomic-step-flows|engine-feature|Engine-feature domain — atomic steps follow fixed cross-plane flows (ADR 0128): index → confirm → mutate → register → verify|active|core|
 
-50 domains total (17 skill — 15 active + 2 retired — + 9 graph + 24 engine-feature — 22 active + 2 retired). Status: 46 active + 4 retired.
+51 domains total (17 skill — 15 active + 2 retired — + 9 graph + 25 engine-feature — 23 active + 2 retired). Status: 47 active + 4 retired.
 
 ## Skill Domains (17 · 15 active + 2 retired)
 
 |Domain ID|Description|Asset|Aggregate specs|Dependencies|Subdomain|
 |-|-|-|-|-|-|
 |atom-atomic-step|SUPERSEDED (ADR 0117/0120) — Atomic Step Protocol chapter deleted; superseded by the High-Level Tool Registry (ADR 0119, step = registered tool call); standalone skill deleted; spec removed with the ASP chapter (ADR 0120)|— (deleted)|— (spec removed)|atom-mcp-contract, atom-graph-spec (historical)||retired|
-|atom-kernel|Platform primitives + sole reference skill — task()/question()/interview()/judge() + High-Level Tool Registry (closed tool set, two-tier structure — core classes serena single-tool no fallback, utility classes optional; tool schemas for serena/jcodemunch/headroom/graph-scheduler; ADR 0119/0123) + todo() boundary-clear spelling (ADR 0112; projection retired ADR 0122) + graph tool detection|`packages/graph-workflow/skills/atom-kernel/SKILL.md`|`openspec/specs/atom-kernel/spec.md`|— (platform layer)||core|
+|atom-kernel|Platform primitives + sole reference skill — task()/approval()/interview()/judge() + High-Level Tool Registry (closed tool set, two-tier structure — core classes serena single-tool no fallback, utility classes optional; tool schemas for serena/jcodemunch/headroom/graph-scheduler; ADR 0119/0123) + todo() boundary-clear spelling (ADR 0112; projection retired ADR 0122) + graph tool detection|`packages/graph-workflow/skills/atom-kernel/SKILL.md`|`openspec/specs/atom-kernel/spec.md`|— (platform layer)||core|
 |atom-pilot|Graph lifecycle management — execute→advance loop|`packages/graph-workflow/skills/atom-pilot/SKILL.md`|`openspec/specs/atom-pilot/spec.md`|atom-phase-handler, atom-kernel||core|
 |atom-phase-handler|Central dispatch — main/approval/gate single-node routing|`packages/graph-workflow/skills/atom-phase-handler/SKILL.md`|`openspec/specs/atom-phase-handler/spec.md`|atom-kernel||core|
 |atom-scope-interview|Parameterized entry procedure — caller-declared contract (Topics / Output fields / Behavior flags), zero reverse references, delegates to interview() consensus (ADR 0126)|`packages/graph-workflow/skills/atom-scope-interview/SKILL.md`|`openspec/specs/atom-scope-interview/spec.md`|atom-kernel||core|
@@ -127,7 +128,7 @@ Binding constraints on domain design (split, boundary, kind, naming) - standing 
 |atom-adr-maintain|ADR estate alignment contract — status verification vs decision reality; stale chains folded via atom-doc-lifecycle fold machinery; index rebuild; archive hygiene; dead citations repointed|`packages/graph-workflow/skills/atom-adr-maintain/SKILL.md`|`openspec/specs/atom-adr-maintain/spec.md`|atom-doc-lifecycle, atom-doc-maintain||supporting|
 |setup-atomic-workflow|Project graph config initialization|`packages/graph-workflow/skills/setup-atomic-workflow/SKILL.md`|`openspec/specs/setup-atomic-workflow/spec.md`|—||supporting|
 
-Domain spec: one per domain (46 registered; graph-generate carries the merged maker-journey requirements (former workflow-scenarios aggregate); retired atom-mcp-contract, atom-atomic-step, context-delivery-fidelity, structural-channel-materialization specs deleted with retirement; channel-tiers orphan retired with its three-tier content merged into channels-context-model; domains without an independent behavior contract register Purpose only).
+Domain spec: one per domain (47 registered; graph-generate carries the merged maker-journey requirements (former workflow-scenarios aggregate); retired atom-mcp-contract, atom-atomic-step, context-delivery-fidelity, structural-channel-materialization specs deleted with retirement; channel-tiers orphan retired with its three-tier content merged into channels-context-model; domains without an independent behavior contract register Purpose only).
 
 ## Graph Domains (9 · Status active)
 
@@ -143,7 +144,7 @@ Domain spec: one per domain (46 registered; graph-generate carries the merged ma
 |graph-generate|Graph production — the maker journey (name states the operation): concrete 7-phase graph (entry → spec → spec-accept → implement → review → gate → accept); single kind (graph), single operation (create); entry confirms graph name + topology scope + save location (default `.graph-scheduler/graphs/`), no CONTEXT.md dependency; implement writes `.taskflow.yaml` + registry entry + attached doc (`.graph-scheduler/docs/<name>.md`); no skill co-production|`packages/graph-scheduler/graphs/graph-generate.taskflow.yaml`; produces `.graph-scheduler/graphs/`, `.graph-scheduler/docs/`|`openspec/specs/graph-generate/spec.md` (maker-journey requirements — merged from workflow-scenarios)|atom-scope-interview, atom-graph-spec||core|
 |estate-maintain|Estate maintenance graph — entry (trigger classification: domain-change/skill-change/proactive + workstream selection) → domains-index (atom-doc-maintain) / specs-sync (atom-spec-maintain) / adr-align (atom-adr-maintain) → review (consistency gate + reverse-validation + read-only deployment-mirror check) → accept|`packages/graph-scheduler/graphs/estate-maintain.taskflow.yaml`|`openspec/specs/estate-maintain/spec.md`|atom-scope-interview, atom-doc-maintain, atom-spec-maintain, atom-adr-maintain, atom-domain-spec, atom-doc-lifecycle||core|
 
-## Engine-Feature Domains (22 active · 2 retired)
+## Engine-Feature Domains (23 active · 2 retired)
 
 |Domain ID|Description|Asset|Aggregate specs|Dependencies|Subdomain|
 |-|-|-|-|-|-|
@@ -153,6 +154,7 @@ Domain spec: one per domain (46 registered; graph-generate carries the merged ma
 |graph-registry|Multi-registry merging (built-in + project)|`packages/graph-scheduler/src/registry-loader.ts`|`openspec/specs/graph-registry/spec.md`|—||core|
 |graph-generate-identity|Maker-graph identity — graph name states the operation, top-level `description`, registry project-first precedence with `resolvedFrom`, load-probe validation, runId-scoped outputs|`packages/graph-scheduler/src/registry-loader.ts` (project-first shadowing), `packages/graph-scheduler/src/graph-loader.ts` (resolvedFrom/resolvedPath/description), `packages/graph-scheduler/src/api/crud.ts` (graph_start identity fields), `packages/graph-scheduler/src/scheduler-runtime.ts` (identity banner types)|`openspec/specs/graph-generate-identity/spec.md`|graph-registry, graph-mcp-api||core|
 |phase-handler|Three handler types (main/approval/gate) + decision persistence|`packages/graph-scheduler/src/phase-handler/types.ts`, `packages/graph-scheduler/src/phase-handler/main-handler.ts`, `packages/graph-scheduler/src/phase-handler/approval-handler.ts`, `packages/graph-scheduler/src/phase-handler/gate-handler.ts`, `packages/graph-scheduler/src/phase-handler/index.ts`, `packages/graph-scheduler/src/phase-handler/errors.ts`|`openspec/specs/phase-handler/spec.md`|context-channels||core|
+|approval|approval() decision primitive — the single mode-aware single-decision UI that absorbs question() (ADR 0133); card format rules + mode dispatch (manual card / auto with recommendation executes / auto no-recommendation card); implementation in phase-handler (approval-handler.ts) + atom-kernel (§approval() contract)|`openspec/specs/approval/spec.md`|phase-handler||core|
 |auto-decision-rationale|Auto-approval decision rationale — `rationale` field persisted on the Run Mode auto path (observable output basis, F6); manual choices omit it|`packages/graph-scheduler/src/phase-handler/types.ts` (IApprovalDecision.rationale), `packages/graph-scheduler/src/phase-handler/approval-handler.ts` (auto path persistence)|`openspec/specs/auto-decision-rationale/spec.md`|phase-handler||core|
 |context-channels|Context contract parsing + channel resolution|`packages/graph-scheduler/src/context/contracts.ts`, `packages/graph-scheduler/src/context/resolve-channels.ts`|`openspec/specs/context-channels/spec.md`|—||core|
 |context-delivery-fidelity|RETIRED (ADR 0121) — machinery removed (0114 retained); channel file consumption follows the HLT read chain (atom-kernel Entry: read); judgment-domain verbatim invariant retained|—|— (spec deleted)|tool-usage-contract||retired|

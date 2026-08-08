@@ -69,15 +69,15 @@ Run mode and project constraints are NOT NodeDetail fields - they arrive via the
 
 ## Approval Routing Actions (branch-route only)
 
-YAML format uses `routing` with nested `actions` array. Each action maps to one question() option. Written actions are declared ONLY for explicit branch-route selection - the default card is Accept (AI recommendation) + free input + AI-generated contextual options.
+YAML format uses `routing` with nested `actions` array. Each action maps to one approval() option. Written actions are declared ONLY for explicit branch-route selection - the default card is Accept (AI recommendation) + free input + AI-generated contextual options.
 
 |Field (YAML)|NodeDetail|Type|Purpose|
 |-|-|-|-|
 |`action`|`action`|`'continue' \| 'retry' \| 'jump' \| 'end'`|Routing semantics - continue (advance; branch-route target = node or route id), retry (re-execute target), jump (go to target node), end (complete the run - `graph_advance` `endRun`).|
 |`target?`|`target?`|string|Branch-route option target (`continue` - node or route id) or re-run target (`retry`/`jump` - node id). Routing targets SHALL be explicit.|
 |`value`|`value`|string|Stable kebab-case machine identifier - persisted decision output carries it; gate jump conditions and AI recommendations reference `decision value`, never label text.|
-|`label`|`label`|string|Option label displayed in question()|
-|`description`|`description`|string|Option description displayed in question()|
+|`label`|`label`|string|Option label displayed in approval()|
+|`description`|`description`|string|Option description displayed in approval()|
 
 No static default field exists - Run Mode auto executes the AI recommendation (agent-judged from the judgment context - per §Jump Semantics - plus snapshot + run mode), never a declared action.
 

@@ -21,8 +21,8 @@
 |-|-|-|-|
 |`task`|string?|`main`, `approval`|Task instruction text (main - executed inline) / full card prompt (approval - first line = header, rest = card body; schema removed `topic`/`preText`, loud rejection)|
 |`channels`|string[]?|all|Effective channel patterns (global channel + phase channels - scheduler-side merge of config `context:` default layer + graph top-level `context:` prepended to phase `channels:`, dedup outer-first; carries the merged list, agent-side never re-merges) - main: skill names, file globs, or node IDs against the execution skill contract (deterministic); gate/approval: all entry kinds (uniform - same rule as main); node: entries are read edges to node streams, promotion self-skip already applied|
-|`topic`|string?|`approval`|Synthesized decision-card header - NOT a YAML-layer field; approval-handler builds it from the task's first line (`phase.task?.split('\n')[0] ?? 'Decision Required'`). Used as question() header|
-|`routingActions`|IApprovalAction[]?|`approval`|Decision routing actions - declared ONLY in branch-route scenarios; drives those question() options (see §IApprovalAction). Otherwise the card is Accept (AI recommendation) + free input + AI-generated contextual options|
+|`topic`|string?|`approval`|Synthesized decision-card header - NOT a YAML-layer field; approval-handler builds it from the task's first line (`phase.task?.split('\n')[0] ?? 'Decision Required'`). Used as approval() header|
+|`routingActions`|IApprovalAction[]?|`approval`|Decision routing actions - declared ONLY in branch-route scenarios; drives those approval() options (see §IApprovalAction). Otherwise the card is Accept (AI recommendation) + free input + AI-generated contextual options|
 |`jumps`|IJumpCondition[]?|`gate`|Rework jumps - `[{when, to}]`; the agent evaluates conditions, a hit -> backward jump to `to`, no hit -> pass through. Required non-empty - a gate without rework jumps is a silent pass-through|
 |`route`|string?|all|Route membership - declared route id (absent = implicit default route, always active)|
 
@@ -42,8 +42,8 @@ Judgment context (gate/approval) = direct dependsOn outputs (`## Upstream:` bloc
 |`action`|`'continue' \| 'retry' \| 'jump' \| 'end'`|Routing semantics - continue (advance; branch-route target = node or route id), retry (re-execute target), jump (go to target node), end (complete the run - `graph_advance` `endRun`)|
 |`target?`|string|Branch-route option target (`continue` - node or route id) or re-run target (`retry`/`jump` - node id). Routing targets SHALL be explicit (PHASESCHEMA.md §Approval Routing Actions).|
 |`value`|string|Stable kebab-case machine identifier - carried in the persisted decision; gate jump conditions and AI recommendations reference `decision value`, never label text|
-|`label`|string|Option label - displayed in question() options[].label|
-|`description`|string|Option description - displayed in question() options[].description|
+|`label`|string|Option label - displayed in approval() options[].label|
+|`description`|string|Option description - displayed in approval() options[].description|
 
 No `default` field exists - Run Mode auto executes the AI recommendation, never a declared action.
 
@@ -53,7 +53,7 @@ No `default` field exists - Run Mode auto executes the AI recommendation, never 
 |-|-|-|
 |`action`|`'continue' \| 'retry' \| 'jump' \| 'end'`|Chosen routing action. Gate path: hit -> `'jump'` (target carries the rework target); no hit -> `'continue'` (pass through, no target).|
 |`target?`|string|Target nodeId or route id. Gate hit -> the matched jump's `to` - pilot passes it as `graph_advance` `branchTo` (backward reset). Approval branch-route -> the chosen option's target (node or route id) - pilot passes it as `branchTo` (route activation). Approval retry/jump -> selected option target - pilot routes via `graph_jump`.|
-|`note?`|string|Free-text from question() custom:true text box - semantics vary by action. Run Mode auto path sets `'run mode: auto'`.|
+|`note?`|string|Free-text from approval() custom input - semantics vary by action. Run Mode auto path sets `'run mode: auto'`.|
 |`rationale?`|string|Recommendation basis summary - the auditable why behind a decision. Run Mode auto path: one-line judgment-context basis (observable output fields / decision values that drove the recommendation). Manual choices omit it (the human IS the basis). Never replaces note/label semantics.|
 |`label?`|string|Chosen routing option label - distinguishes same-action options. Gate path: the jump's `when` text (observability). Run Mode auto path = the recommendation's label.|
 |`value?`|string|Chosen routing option `value` - stable machine identifier; downstream gate jump conditions and AI recommendations consume the decision value. Absent on gate decisions (jumps carry no value).|

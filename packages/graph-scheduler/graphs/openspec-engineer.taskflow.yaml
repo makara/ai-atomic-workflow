@@ -8,7 +8,8 @@ phases:
       Synthesize the spec from the recorded ADR decision + change context per
       to-spec skill. No interview. Change name — NEVER ask: {args.changeName}
       → openspec list --json single active → spec_status: blocked + candidates.
-      Sketch seams (prefer existing, highest); confirm once with the user.
+      Sketch seams (prefer existing, highest); seam confirmation via
+      approval() — per to-spec skill (auto mode auto-confirms).
       Write spec per to-spec template; publish to tracker with ready-for-agent
       label (none configured → docs/specs/).
 
@@ -21,9 +22,9 @@ phases:
     dependsOn: [to-spec]
     task: |
       Break the spec into tracer-bullet tickets per to-tickets skill.
-      Draft vertical slices with blocking edges; quiz the user on granularity
-      + blocking edges until approved; publish in dependency order (local
-      files when no tracker).
+      Draft vertical slices with blocking edges; breakdown confirmation via
+      approval() — per to-tickets skill (auto mode auto-approves); publish
+      in dependency order (local files when no tracker).
 
       Output contract: ticket_count, ticket_paths, change_name (echo).
 
@@ -34,9 +35,12 @@ phases:
     dependsOn: [to-tickets]
     channels:
       - node:implement-review
+      - node:to-spec
     task: |
-      Execute implement graph mode per implement skill — seam confirmation
-      (question once), tdd red-green slices in frontier order, regular
+      Execute implement graph mode per implement skill. Read to-spec
+      output — seams come from seam_summary (already approved via
+      approval() — no re-confirmation); tdd red-green slices in frontier
+      order, regular
       typecheck + single-file tests, full suite at the end. Re-run rounds:
       fix every implement-review finding FIRST, then continue.
 

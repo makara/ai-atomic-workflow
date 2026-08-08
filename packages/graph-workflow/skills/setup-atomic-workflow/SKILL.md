@@ -1,12 +1,12 @@
 ---
 name: setup-atomic-workflow
 description: 'Initialize graph-scheduler project config - setup .graph-scheduler, create config.json, scaffold constraints.md, verify existing layout. Trigger phrases: "initialize graph-scheduler project config", "setup .graph-scheduler", "create config.json", "setup-atomic-workflow".'
-version: 1.3.0
-last_updated: '2026-08-07'
+version: 1.4.0
+last_updated: '2026-08-08'
 user-invocable: true
 ---
 
-> **Runtime constraints** - load `atom-kernel` for question() decision UI rules. Dependency missing (atom-kernel unavailable) -> fail loudly, no silent fallback.
+> **Runtime constraints** - load `atom-kernel` for approval() decision UI rules. Dependency missing (atom-kernel unavailable) -> fail loudly, no silent fallback.
 
 # Setup-Atomic-Workflow
 
@@ -32,7 +32,7 @@ Explore output = state summary. Setup always starts from "present current state"
 
 ### Step 2: Present
 
-Show findings. For each missing piece, offer recommended default first (atom-kernel question() rule):
+Show findings. For each missing piece, offer recommended default first (atom-kernel approval() rule):
 
 - **dbPath** - `.graph-scheduler/data/graph-scheduler.db` (recommended)
 - **taskflowDir** - `.graph-scheduler/graphs` (recommended)

@@ -118,23 +118,23 @@ export interface IApprovalAction {
   readonly target?: string;
   /** Stable machine identifier — carried in the decision output */
   readonly value?: string;
-  /** Display label used in question() options[].label */
+  /** Display label used in approval() options[].label */
   readonly label: string;
-  /** Display description used in question() options[].description */
+  /** Display description used in approval() options[].description */
   readonly description: string;
 }
 
 /**
  * Approval decision — handler output after collecting user choice + custom input.
  *
- * Carries selected routing action plus the mandatory custom:true free-text from question().
+ * Carries selected routing action plus the mandatory custom free-text from approval().
  */
 export interface IApprovalDecision {
   /** Chosen routing action */
   readonly action: 'continue' | 'retry' | 'jump' | 'end';
   /** Branch-route target (continue) or re-run target (retry/jump) */
   readonly target?: string;
-  /** Free-text input from question() custom:true text box — semantics vary by action */
+  /** Free-text input from approval() custom input — semantics vary by action */
   readonly note?: string;
   /** Chosen routing option label — distinguishes same-action options (e.g. two continues) */
   readonly label?: string;

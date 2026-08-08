@@ -1,32 +1,28 @@
-# Run-Mode Auto Path
+# Approval() Delegation
 
 ## Approval consumption (direct branch)
 
-On approval dispatch, read the mode from `$run-mode-confirm` output:
+On approval dispatch, the handler assembles the card content + the AI-judged recommendation, then delegates the mode decision to `approval()` (atom-kernel §approval() - single assembly site for mode semantics):
 
-1. **`'auto'`** - judge the AI recommendation from the judgment context (direct dependsOn outputs + `channels` `node:` targets) + snapshot + run mode (agent judgment, NOT a declared action - no `default` field exists):
-   - Recommendation exists -> auto-execute it: assemble `IApprovalDecision { action, target?, value, label, note: 'run mode: auto', rationale }`. `rationale` = one-line basis summary of the judgment context that drove the recommendation (observable output fields / decision values, e.g. `review output overall: pass; top_rec_remaining: true`) - the auditable recommendation basis (F6, arch-review round 2). `note` stays `'run mode: auto'`; `rationale` = basis, never substitute for note/label.
-   - Persist decision to `the run stream` - full decision JSON incl. `value` + `label` + `rationale` (downstream gate jump conditions consume the decision `value` exactly as the human path). Write failure -> mark `[FILE MISSING: …]` in output, do not crash.
-   - Clear todo per SKILL.md §Todo Lifecycle (completion clear) - unconditional on success/failure.
-   - Return `{ status: "done", output: "<json>", durationMs }` - no question(), no decision card.
-   - When end IS the recommendation -> `action: "end"` - pilot completes the run (`graph_advance` `endRun`).
-   - No recommendation (judgment fails / context insufficient) -> fall through to the human card even in auto - card shows one line `Run mode: auto — no recommendation; decide manually`. NEVER guess an action.
-2. **`'manual'`** (or missing confirm output - absence never auto - see atom-graph-spec §Activation Prologue) - present the human decision card (question()) as usual. No auto path. Manual choices omit `rationale` (the human IS the basis) - the field is optional.
+1. **`'auto'`** - the recommendation is judged from the judgment context (direct dependsOn outputs + `channels` `node:` targets) + snapshot + run mode (agent judgment, NOT a declared action - no `default` field exists):
+   - Recommendation exists -> approval() auto-executes it: the handler assembles `IApprovalDecision { action, target?, value, label, note: 'run mode: auto', rationale }`. `rationale` = one-line basis summary of the judgment context that drove the recommendation (observable output fields / decision values, e.g. `review output overall: pass; top_rec_remaining: true`) - the auditable recommendation basis. `note` stays `'run mode: auto'`; `rationale` = basis, never substitute for note/label.
+   - No recommendation (judgment fails / context insufficient) -> approval() falls through to the human card even in auto - card shows one line `Run mode: auto — no recommendation; decide manually`. NEVER guess an action.
+2. **`'manual'`** (or missing confirm output - absence never auto - see atom-graph-spec §Activation Prologue) - approval() presents the human decision card as usual. Manual choices omit `rationale` (the human IS the basis) - the field is optional.
 
-Scope rule: Run Mode controls approval presentation ONLY. Main nodes (grill/scope interviews, work nodes) never auto-decided, never bypassed. Gate jump semantics unchanged - jump conditions may reference the `## Run Mode: <mode>` context block (e.g. arch-review-loop loop-gate).
+Scope rule: Run Mode controls decision presentation - approval nodes AND approval() checkpoints inside main nodes. Interviews are never auto-gated - structurally, approval() without a recommendation always presents a card. Gate jump semantics unchanged - jump conditions may reference the `## Run Mode: <mode>` context block (e.g. arch-review-loop loop-gate).
 
 # Decision Card Composition
 
-Human decision card (question()) - field mapping:
+Human decision card (approval() manual/absent branch) - field mapping:
 
-- `node.topic` (task first line) -> `question()` header (noun phrase <=30 chars; truncate at the limit).
+- `node.topic` (task first line) -> `approval()` header (noun phrase <=30 chars; truncate at the limit).
 - Card options:
   - **Accept** - the AI recommendation (judged from the judgment context + snapshot + run mode).
   - **`node.routingActions`** - mapped to options with `label` + `description` (branch-route scenario only; empty otherwise).
   - **AI-generated contextual options** - retry/jump/end/branch-route options judged at execution from the judgment context + `snapshot.nodes` (eligible re-run targets: `status === 'done'` AND `nodeId != currentNodeId`) + run mode. One option per candidate, e.g. `"Retry <nodeId>"`, `"Jump to <nodeId>"`, `"End run"`.
   - **custom:true always present** - free-text text box for user input.
-- `node.task` full text -> pre-call text - display before question(); append the generic sentence `Free input overrides.` (author text carries the card body; the boilerplate is handler-owned).
-- Collect user choice + custom text -> output as `IApprovalDecision` JSON - shapes: see NODE-SCHEMA.md §IApprovalDecision JSON Shapes.
+- `node.task` full text -> pre-call text - display before the card; append the generic sentence `Free input overrides.` (author text carries the card body; the boilerplate is handler-owned).
+- Collect the approval() decision (choice + custom text) -> output as `IApprovalDecision` JSON - shapes: see NODE-SCHEMA.md §IApprovalDecision JSON Shapes.
 
 # Gate Jump Evaluation
 

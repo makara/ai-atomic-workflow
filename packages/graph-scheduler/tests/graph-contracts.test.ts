@@ -950,6 +950,20 @@ describe('2.10 openspec-engineer graph topology', () => {
     expect(String(toSpec.task)).toMatch(/No interview/);
   });
 
+  it('confirmation prose is de-hardcoded — approvals live in the skills', () => {
+    // to-spec / to-tickets / implement confirmation instructions belong to
+    // the skills' approval() checkpoints — graph task text never hardcodes
+    // user-confirmation sentences (auto mode would stall on them)
+    const tasks = phases.map((p) => String(p.task ?? ''));
+    const all = tasks.join('\n');
+    expect(all).not.toMatch(/confirm once with the user/);
+    expect(all).not.toMatch(/quiz the user/);
+    expect(all).not.toMatch(/seam confirmation \(question once\)/);
+    // skills own the checkpoints — task text references them
+    expect(tasks[0]).toMatch(/approval\(\)/); // to-spec
+    expect(tasks[1]).toMatch(/approval\(\)/); // to-tickets
+  });
+
   it('gate auto-rework is bounded, contract-field, writer-targeted', () => {
     const gate = phaseOf('implement-gate');
     expect(gate.type).toBe('gate');

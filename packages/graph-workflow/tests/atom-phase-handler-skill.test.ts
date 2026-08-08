@@ -64,7 +64,10 @@ describe('atom-phase-handler SKILL.md - project constraints + gate branch contra
 
   it('prepends constraints block to main branch inline task', () => {
     const mainBranch = skill.slice(skill.indexOf('node.type = "main"'), skill.indexOf('node.type = "approval"'));
-    expect(mainBranch).toMatch(/Prepend `## Run Mode: <mode>` block \(always\) \+ constraints block/);
+    expect(mainBranch).toMatch(/Prepend `## Run Mode: <mode>` block \(always\) \+ `## Decision UI` block/);
+    expect(mainBranch).toMatch(
+      /\+ constraints block \(per §Constraints Block Format, when constraints non-empty\) to task text/,
+    );
   });
 
   it('prepends constraints block to approval pre-call text', () => {
@@ -161,10 +164,16 @@ describe('atom-phase-handler SKILL.md - project constraints + gate branch contra
     expect(lifecycle).not.toMatch(/todo rm/);
   });
 
-  it('clears todo in the approval auto-execute early return path', () => {
-    const autoPath = skill.slice(skill.indexOf('Recommendation exists -> auto-execute it'));
-    expect(autoPath).toMatch(
-      /Persist decision to .*[Cc]lear todo per §Todo Lifecycle \(completion clear\).*[Rr]eturn `\{ status: "done", output: "<json>", durationMs \}`/s,
+  it('approval flow delegates the mode to approval() and clears todo before return', () => {
+    // collapse: the handler assembles content, delegates the mode
+    // decision to the kernel approval() contract, maps to IApprovalDecision,
+    // persists, clears todo, returns
+    const approvalSection = skill.slice(skill.indexOf('### approval type'));
+    expect(approvalSection).toMatch(/[Dd]elegate the mode decision to approval\(\)/);
+    expect(approvalSection).toMatch(/[Aa]ssemble card content \+ recommendation/);
+    expect(approvalSection).toMatch(/Map to IApprovalDecision/);
+    expect(approvalSection).toMatch(
+      /Persist.*[Cc]lear todo per §Todo Lifecycle \(completion clear\).*[Rr]eturn `\{ status: "done", output: "<json>", durationMs \}`/s,
     );
   });
 

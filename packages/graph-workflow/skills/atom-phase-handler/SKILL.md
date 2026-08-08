@@ -3,11 +3,11 @@ name: atom-phase-handler
 description: Central dispatch handler - { node, snapshot? } schema and static dispatch by node.type (main/approval/gate base types). Use when processing graph_start/graph_advance/graph_jump response, executing phase nodes, routing by node.type.
 argument-hint: none (reference + procedure skill)
 user-invocable: false
-version: 2.17.0
+version: 2.18.0
 last_updated: '2026-08-08'
 ---
 
-> **Runtime constraints** - use atom-kernel for task() dispatch and question() decision UI + High-Level Tool Registry + tool schemas; atom-graph-spec for schema/topology authority (§Constraint Layering, §Gate Jump Conditions, §Activation Prologue, §Approval Routing Actions in PHASESCHEMA.md). Graph-scheduler MCP tools are not called here - tool detection lives in atom-kernel §Graph-Scheduler Tool Detection for the entry points that do (pilot).
+> **Runtime constraints** - use atom-kernel for task() dispatch and approval() decision UI + High-Level Tool Registry + tool schemas; atom-graph-spec for schema/topology authority (§Constraint Layering, §Gate Jump Conditions, §Activation Prologue, §Approval Routing Actions in PHASESCHEMA.md). Graph-scheduler MCP tools are not called here - tool detection lives in atom-kernel §Graph-Scheduler Tool Detection for the entry points that do (pilot).
 
 # Atom-Phase-Handler
 
@@ -40,10 +40,10 @@ Dispatch flow per §Dispatch Rules - single authority.
 ## Return
 
 ```
-{ status: "done" | "failed", output: string, durationMs: number }
+{ nodeId: string, status: "done" | "failed", output: string, durationMs: number }
 ```
 
-Pilot calls `graph_advance` on handler's behalf.
+Pilot calls `graph_advance` on handler's behalf (nodeId echoes the dispatched node).
 
 ## Constraints Block Format
 
@@ -60,7 +60,7 @@ Output must satisfy constraints above. State compliance per rule before return �
 
 ## Constraint check
 
-Executor must close with `Constraint check:` section - one line per constraint:
+Executor must close with `Constraint check:` section - one line per rule:
 
 ```
 Constraint check:
@@ -109,7 +109,7 @@ Static dispatch by `node.type` - main/approval/gate; unknown fails; null complet
 `node.type = "main"` - Main execution = HLT tool-call execution. Execution core delegates to atom-kernel §High-Level Tool Registry; handler supplies machinery only.
 
 0. Clear todo per §Todo Lifecycle (dispatch clear).
-1. Assemble inline context blocks when `node.channels` / `node.dependsOn` present - see CONTEXT-ASSEMBLY.md §Main Inline Context Assembly. Prepend `## Run Mode: <mode>` block (always) + constraints block (per §Constraints Block Format, when constraints non-empty) to task text.
+1. Assemble inline context blocks when `node.channels` / `node.dependsOn` present - see CONTEXT-ASSEMBLY.md §Main Inline Context Assembly. Prepend `## Run Mode: <mode>` block (always) + `## Decision UI` block (main nodes only - the confirmation-point interpretation rule, see CONTEXT-ASSEMBLY.md §Decision UI Block; upstream skills stay untouched, their prose confirmation points execute per the approval() contract) + constraints block (per §Constraints Block Format, when constraints non-empty) to task text.
 2. Inject `## Agent hints:` block when `node.agent` non-empty (see §Agent Hints).
 3. Execute tool calls per atom-kernel §High-Level Tool Registry: a call is a registered tool invocation `{ intent, tool, args, bound }` - registry entry: I/O, evidence rules, chain, verify; bound caps loop, default 3.
 4. Constraint scan - `Constraint check:` present -> count `unsatisfied`; > 0 -> prefix `[CONSTRAINT VIOLATION: <count>]`.
@@ -155,14 +155,12 @@ Absent/empty -> no block, platform default.
 `node.type = "approval"` - decision confirmation:
 
 0. Clear todo per §Todo Lifecycle (dispatch clear).
-1. **Run Mode direct branch** - per §Activation Prologue Consumption (single assembly site incl. `rationale` - DECISION-CARDS.md §Run-Mode Auto Path). Auto: recommendation exists -> auto-execute + persist + clear + return, no card. No recommendation -> human card even in auto. `'manual'` (or missing confirm output - absence never auto - see atom-graph-spec §Activation Prologue) -> human card.
-2. Auto-execute: Recommendation exists -> auto-execute it: assemble `IApprovalDecision { action, target?, value, label, note: 'run mode: auto', rationale }` - `rationale` = one-line basis (observable output fields / decision values). Persist decision to `the run-scoped output stream` - full decision JSON incl. `value` + `label` + `rationale`; failure -> `[FILE MISSING: …]`, no crash. Clear todo per §Todo Lifecycle (completion clear). Return `{ status: "done", output: "<json>", durationMs }`. End recommendation -> `action: "end"`.
-3. Human card: `node.topic` -> question() header; card composition: see DECISION-CARDS.md §Decision Card Composition. Prepend `## Run Mode: <mode>` block (always) + constraints block (per §Constraints Block Format, when constraints non-empty) to pre-call text. Surface upstream constraint violations - append `[CONSTRAINT VIOLATION: <nodeId> × N]`; tool-usage violations - append `[TOOL USAGE VIOLATION: <nodeId> × N]` (same aggregation pipeline).
-4. Card options: Accept (AI recommendation) + `node.routingActions` (branch-route only) + AI-generated contextual options (eligible targets: `status === 'done'` AND `nodeId != currentNodeId`) + custom:true. `node.task` -> pre-call text + `Free input overrides.`
-5. Collect choice + custom text -> `IApprovalDecision` JSON (shapes: NODE-SCHEMA.md §IApprovalDecision JSON Shapes).
-6. Persist to `the run-scoped output stream` - full JSON incl. `value` + `label`; failure -> `[FILE MISSING: output stream for <runId>/<nodeId>]`, no crash. Format: DECISION-CARDS.md §Persist Decision.
-7. Clear todo per §Todo Lifecycle (completion clear).
-8. Return `{ status: "done", output: "<json>", durationMs }`.
+1. **Assemble card content + recommendation** (judgment context = direct dependsOn outputs + `channels` `node:` targets + snapshot + run mode): `node.topic` -> approval() header; `node.routingActions` -> options (branch-route only); the AI-judged recommendation -> Accept option (judgment, NOT a declared action - no `default` field exists); AI-generated contextual options -> eligible re-run targets (`status === 'done'` AND `nodeId != currentNodeId`) - retry/jump/end/branch-route options. Prepend `## Run Mode: <mode>` block (always) + constraints block (per §Constraints Block Format, when constraints non-empty) to pre-call text. Surface upstream constraint violations - append `[CONSTRAINT VIOLATION: <nodeId> × N]`; tool-usage violations - append `[TOOL USAGE VIOLATION: <nodeId> × N]` (same aggregation pipeline). `node.task` full text -> pre-call text + `Free input overrides.`
+2. **Delegate the mode decision to approval()** - per atom-kernel §approval() (single assembly site for mode semantics). Auto + recommendation -> approval() executes it: no card, decision recorded with note `'run mode: auto'` + rationale. Manual / missing confirm output / no recommendation -> approval() presents the human decision card. NEVER guess an action in auto without a recommendation.
+3. **Map to IApprovalDecision** - shapes: NODE-SCHEMA.md §IApprovalDecision JSON Shapes. Auto-executed: `note: 'run mode: auto'`, `rationale` = one-line judgment-context basis (observable output fields / decision values, e.g. `review output overall: pass; top_rec_remaining: true`). End recommendation -> `action: "end"`. Manual choices omit `rationale` (the human IS the basis) - the field is optional.
+4. **Persist** to `the run-scoped output stream` - full decision JSON incl. `value` + `label` (auto path adds `rationale`; downstream gate jump conditions consume the decision `value` exactly as the human path). Write failure -> mark `[FILE MISSING: output stream for <runId>/<nodeId>]` in output, do not crash. Format: DECISION-CARDS.md §Persist Decision.
+5. Clear todo per §Todo Lifecycle (completion clear).
+6. Return `{ status: "done", output: "<json>", durationMs }`.
 
 ### unknown type
 

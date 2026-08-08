@@ -44,7 +44,7 @@ Caller mode argument: {args.mode} — the literal placeholder '{args.mode}' mean
 
 Protocol:
 1. If the caller mode argument is set (placeholder resolved) — emit it.
-2. Otherwise question() the user — Manual (recommended, default) vs Auto. Absence NEVER auto.
+2. Otherwise present the approval() card — no mode block exists yet, so approval() takes its manual branch (Manual (recommended, default) vs Auto). Absence NEVER auto.
 Every activation re-confirms — never echo a previous activation's value.
 
 Output JSON to the output file: {"mode": "manual"|"auto"}`;

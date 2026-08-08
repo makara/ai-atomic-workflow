@@ -93,7 +93,7 @@ apply-change SHALL output a machine-parseable structured block: `change_name`, `
 
 ### Requirement: Bounded automatic rework gate
 
-change-accept SHALL decide automatically via an eval condition: `when: 'change-review output shows overall: fail AND retryAttempt < 2'` → retry to apply-change; when the condition does not match (DEBT, no issues, or retryAttempt at the bound) it SHALL fall through to the human question(). The automatic rework condition SHALL reference the atom-dual-review output contract field `overall: fail` and set an upper bound on retryAttempt — it SHALL NOT use non-contract wording such as "FAIL verdict" and SHALL NOT loop unboundedly.
+change-accept SHALL decide automatically via an eval condition: `when: 'change-review output shows overall: fail AND retryAttempt < 2'` → retry to apply-change; when the condition does not match (DEBT, no issues, or retryAttempt at the bound) it SHALL fall through to the human approval() card. The automatic rework condition SHALL reference the atom-dual-review output contract field `overall: fail` and set an upper bound on retryAttempt — it SHALL NOT use non-contract wording such as "FAIL verdict" and SHALL NOT loop unboundedly.
 
 #### Scenario: FAIL automatic rework
 

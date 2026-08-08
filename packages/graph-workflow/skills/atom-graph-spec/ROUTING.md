@@ -101,7 +101,7 @@ Channel file entries (globs / bare paths) consume per the HLT read chain (atom-k
 
 ## Approval Decision Confirmation
 
-Approval phase (`type: approval`) = decision-confirmation node. Accepts AI recommendation, takes free input, routes. The default card = **Accept** (the AI recommendation) + **system free input** (question() custom:true) + **AI-generated contextual options** (retry/jump/end/branch-route - judged at execution from the judgment context (per §Jump Semantics) + snapshot + run mode, never written). Written routing actions exist ONLY for explicit branch-route selection (the sole system-wide scenario: openspec-pipeline minimal/detailed tracks).
+Approval phase (`type: approval`) = decision-confirmation node. Accepts AI recommendation, takes free input, routes. The default card = **Accept** (the AI recommendation) + **system free input** (approval() custom input) + **AI-generated contextual options** (retry/jump/end/branch-route - judged at execution from the judgment context (per §Jump Semantics) + snapshot + run mode, never written). Written routing actions exist ONLY for explicit branch-route selection (the sole system-wide scenario: openspec-pipeline minimal/detailed tracks).
 
 ### Branch-Route Actions
 
@@ -123,7 +123,7 @@ Each action MAY declare `value` (stable kebab-case machine identifier - carried 
 With no declared `routing` (the normal case), the card is assembled at execution:
 
 - **Accept** - accept the AI recommendation (agent-judged from the judgment context + snapshot + run mode: e.g. "no Top Rec -> recommend end", "review shows fail -> recommend retry the writer").
-- **Free input** - question() custom:true text box, always present; free text overrides the recommendation.
+- **Free input** - approval() custom input, always present; free text overrides the recommendation.
 - **AI-generated options** - contextual retry/jump/end/branch-route options judged at execution, presented alongside Accept.
 
 ### Approval Dependency Rule
@@ -168,9 +168,9 @@ Run Mode = auto-approve convention driven by the `$run-mode-confirm` activation 
 
 ### Consumption (direct branch)
 
-atom-phase-handler approval branch reads the `$run-mode-confirm` output:
+atom-phase-handler approval nodes AND approval() checkpoints inside main nodes read the `$run-mode-confirm` output:
 
-- `'auto'` -> the handler judges the AI recommendation from the judgment context (per §Jump Semantics) + snapshot + run mode, then auto-executes per atom-phase-handler DECISION-CARDS.md §Run-Mode Auto Path (single assembly site - `IApprovalDecision` incl. `rationale`, decision-file persistence with value + label, end-action handling). No recommendation (judgment fails / context insufficient) -> human card even in auto - never guess an action.
+- `'auto'` -> the handler/checkpoint judges the AI recommendation from the judgment context (per §Jump Semantics) + snapshot + run mode, then auto-executes per atom-kernel §approval() (single assembly site for mode semantics - `IApprovalDecision` incl. `rationale`, decision-file persistence with value + label, end-action handling). No recommendation (judgment fails / context insufficient) -> human card even in auto - never guess an action.
 - `'manual'` (or missing confirm output) -> human card. No output scans, no parse/conflict fail-safe matrix - the confirm output is the single source of truth.
 
 ### Run Mode context
@@ -179,10 +179,11 @@ The `## Run Mode: <mode>` block accompanies every node dispatch context (main/ap
 
 ### Scope
 
-Run Mode controls **approval presentation only**:
+Run Mode controls **decision presentation**:
 
 - Approval phases - auto-execute the AI recommendation when the mode is Auto.
-- Main nodes (grill/scope interviews, work nodes) - never auto-decided, never bypassed by the mode. The mode never gates an interview.
+- approval() checkpoints inside main nodes - auto-execute the recommendation when the mode is Auto (to-spec seam check, to-tickets breakdown quiz, single-decision confirmations with a recommendation).
+- Main nodes (grill/scope interviews, work nodes) - never auto-decided outside approval() checkpoints. The mode never gates an interview - structurally: approval() without a recommendation always presents a card.
 - Gate jump semantics unchanged - a gate may reference the run-mode context in jump conditions.
 
 ### Loop Router Integration

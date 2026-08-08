@@ -4,11 +4,11 @@ description: Graph lifecycle manager - execute->advance loop. Dispatch via atom-
 argument-hint: '<graph-name> [--verbose] [--debug]'
 disable-model-invocation: true
 user-invocable: true
-version: 3.8.0
-last_updated: '2026-08-07'
+version: 3.9.0
+last_updated: '2026-08-08'
 ---
 
-> **Runtime constraints** - load `atom-kernel` for task() contract and question() decision UI. Load `atom-phase-handler` for {node, snapshot?} data handling, single-node dispatch, and error handling. Detect graph-scheduler MCP tools at runtime - see atom-kernel §Graph-Scheduler Tool Detection.
+> **Runtime constraints** - load `atom-kernel` for task() contract and approval() decision UI. Load `atom-phase-handler` for {node, snapshot?} data handling, single-node dispatch, and error handling. Detect graph-scheduler MCP tools at runtime - see atom-kernel §Graph-Scheduler Tool Detection.
 
 > **Layer**: atom - graph lifecycle manager
 
@@ -83,7 +83,7 @@ Node types - dispatched by type (main/approval/gate; handlerSkill constant `atom
 
 - `node.type = "main"` -> handler executes inline (with inline context assembly when channels present)
 - `node.type = "approval"` -> handler assembles the decision card (per atom-phase-handler §approval type) and returns IApprovalDecision -> pilot routes per §Approval Decision Processing
-- `node.type = "gate"` -> handler evaluates rework jumps (per atom-phase-handler §gate type) and returns IApprovalDecision -> pilot routes per §Gate Decision Routing - no question(), no pause
+- `node.type = "gate"` -> handler evaluates rework jumps (per atom-phase-handler §gate type) and returns IApprovalDecision -> pilot routes per §Gate Decision Routing - no approval(), no pause
 
 ## Approval Decision Processing
 

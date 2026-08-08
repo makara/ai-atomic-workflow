@@ -8,7 +8,7 @@ Project graph configuration initialization. Assets: `packages/graph-workflow/ski
 
 ### Requirement: Four-step setup flow
 
-The setup skill SHALL follow Explore → Present → Confirm → Write. Explore SHALL detect existing state (`.graph-scheduler/` dir, config.json, graphs/, constraints.md) and present it — reading config.json, listing graph files, and extracting constraint rules. Present SHALL offer recommended defaults first (per atom-kernel question() rules). Confirm SHALL confirm dbPath/taskflowDir/registryPaths one item per turn, recommendation first. Write SHALL copy seed files only.
+The setup skill SHALL follow Explore → Present → Confirm → Write. Explore SHALL detect existing state (`.graph-scheduler/` dir, config.json, graphs/, constraints.md) and present it — reading config.json, listing graph files, and extracting constraint rules. Present SHALL offer recommended defaults first (per atom-kernel approval() rules). Confirm SHALL confirm dbPath/taskflowDir/registryPaths one item per turn, recommendation first. Write SHALL copy seed files only.
 
 #### Scenario: Fresh project scaffold
 

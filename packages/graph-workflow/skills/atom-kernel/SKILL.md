@@ -1,16 +1,16 @@
 ---
 name: atom-kernel
-description: Platform primitives - task() dispatch, question() decision UI with 8 rules, interview() consensus (single contract, consensus + solve modes), graph-scheduler tool detection, High-Level Tool Registry (closed tool set, two-plane structure - jcodemunch query plane locate/search/analyze first-class read-only, serena mutation + ground-truth plane write/verify sole, run platform shell exception; utility classes optional; tool schemas for serena/jcodemunch/headroom/graph-scheduler). Use when dispatching sub-agents or presenting decisions, executing main-phase work, authoring execution skills, or mentions high-level tool, HLT registry, tool call, tool schema, evidence loop, verify loop.
+description: Platform primitives - task() dispatch, approval() decision UI (mode-aware single decision — absorbs question(), 8 card rules), interview() consensus (single contract, consensus + solve modes), judge(), graph-scheduler tool detection, High-Level Tool Registry (closed tool set, two-plane structure - jcodemunch query plane locate/search/analyze first-class read-only, serena mutation + ground-truth plane write/verify sole, run platform shell exception; utility classes optional; tool schemas for serena/jcodemunch/headroom/graph-scheduler). Use when dispatching sub-agents or presenting decisions, executing main-phase work, authoring execution skills, or mentions high-level tool, HLT registry, tool call, tool schema, evidence loop, verify loop.
 argument-hint: none (reference skill)
 disable-model-invocation: true
 user-invocable: false
-version: 2.13.0
+version: 2.14.0
 last_updated: '2026-08-08'
 ---
 
 > **Runtime constraints** - **Layer**: atom - runtime primitives.
 
-Platform primitives - task()/question()/judge()/interview()/todo() contracts + HLT registry, single source for graph-node execution.
+Platform primitives - task()/judge()/approval()/interview()/todo() contracts + HLT registry, single source for graph-node execution.
 
 # Atom-Kernel
 
@@ -19,11 +19,11 @@ Platform primitives - task()/question()/judge()/interview()/todo() contracts + H
 |Primitive|Type|Maps to|
 |-|-|-|
 |`task()`|**Callable**|platform `task` tool - dispatches sub-agents|
-|`question()`|**Callable**|platform `ask` tool - single-decision UI|
 |`judge()`|**Callable**|platform one-shot LLM judgment - when/eval evaluation|
+|`approval()`|**Behavior Contract**|Agent-implemented - mode-aware single decision; card branch invokes the platform's decision-UI tool, auto branch executes the recommendation in-context|
 |`interview()`|**Behavior Contract**|Agent-implemented - multi-turn consensus conversation, two modes (consensus / solve)|
 
-> `task()`, `question()`, `judge()` are tool-mapped callables - agent invokes directly, gets result. Mappings vary per platform (see §Platform Spellings). `interview()` is a behavior contract - agent implements manually using `question()` one turn at a time. Calling `interview({goal, context})` fails with `ReferenceError`.
+> `task()`, `judge()` are tool-mapped callables - agent invokes directly, gets result. Mappings vary per platform (see §Platform Spellings). `approval()` and `interview()` are behavior contracts - agent implements manually. `approval()` reads the run-mode context and either presents a decision card (platform decision-UI tool) or executes the recommendation; `interview()` implements its turns via `approval()` WITHOUT recommendation (card in any mode - interviews are never auto-gated). Calling `approval({goal, context})` or `interview({goal, context})` fails with `ReferenceError`.
 
 ## Platform Spellings
 
@@ -32,8 +32,9 @@ Primitive contracts platform-neutral. Mappings vary per platform - never assumed
 |Primitive|Contract|Mapping|
 |-|-|-|
 |`task()`|Sub-agent dispatch - batch in `tasks[]`, shared `context`, agent-hint selection|platform's sub-agent dispatch tool|
-|`question()`|Single-decision UI - header/options/custom, 8 format rules|platform's decision-UI tool|
 |`judge()`|One-shot lightweight-model judgment - constrained answer (`'true'`/`'false'`), conservative failure|platform's one-shot completion primitive|
+|`approval()`|Mode-aware single decision - header/options/custom + recommendation/rationale; manual/absent/no-recommendation -> decision card, auto + recommendation -> execute it (recorded)|platform's decision-UI tool (card branch)|
+|`interview()`|Multi-turn consensus conversation - single contract, two modes (consensus / solve), turns via approval() without recommendation|agent-implemented using approval() turns|
 |`todo()`|State-machine task list - pending/in_progress/completed; boundary clear at execution-unit boundaries; no-todo platform -> no-op|platform's todo tool|
 
 ---
@@ -107,29 +108,18 @@ Capture agent ID - result via the platform's sub-agent artifact mechanism.
 
 ---
 
-# question() - Decision UI
+# approval() - Decision UI
 
-Single decision per call.
+Single decision per call, mode-aware. The one decision primitive - question() is absorbed into it. Cold detail (mode dispatch, 8 format rules, card mapping, main-node checkpoints): see APPROVAL-CARDS.md.
 
 ```
-question({ header, options, custom })
+approval({ header, options, custom, recommendation?, rationale? }) → decision
 ```
 
-- `header` - noun phrase. <=30 chars.
-- `options` - `[{ label, description }]`. Label: concrete answer phrase. Description: single line.
-
-## 8 Format Rules
-
-1. Header: noun phrase <=30 chars. Topic, not outcome.
-2. Label: concrete answer phrase. Recommended first.
-3. Description: single line. May note next step.
-4. Pre-call text: background + option meanings + recommendation, same message.
-5. Body: forbidden.
-6. Custom: mandatory `true`.
-7. One question per call.
-8. No control chars (`\r`, `\t`, `\n`).
-
-**Decision card mapping**: `topic`->`header`; `routingActions[].label/description`->`options[].label/description`; `routingActions[].action`->decision routing; `pre_text`->pre-call text. `custom: true` mandatory - handler MUST map custom input to `IApprovalDecision.note`. Free-text: continue -> remark, retry -> upstream, jump -> target override.
+- Mode source: `## Run Mode: <mode>` block (present on every graph node dispatch; absent -> `manual` - absence never auto).
+- Manual / absent / no recommendation -> decision card (options + custom). Return the user's choice.
+- Auto + recommendation -> execute the recommendation: no card; record the decision + rationale (observability). Return it.
+- Auto without recommendation -> decision card (`Run mode: auto — no recommendation; decide manually`). NEVER guess an action.
 
 ---
 
@@ -164,6 +154,8 @@ interview({ goal, context?, research?, design? }) → consensus | solution
 8. **Shared understanding gate** - do not act until user confirms shared understanding.
 
 **Goal consensus**: even when goal explicitly given, interview() confirms shared understanding of goal itself.
+
+**Turn mechanics**: each turn presents via `approval()` WITHOUT recommendation - the card appears in any run mode (interview is never auto-gated). The mode never skips an interview turn.
 
 **Zero-question degradation**: context already covers all aspects of goal - return consensus directly. Consequence of rules 1-8.
 

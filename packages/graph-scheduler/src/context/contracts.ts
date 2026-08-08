@@ -96,7 +96,7 @@ const OUTPUT_CONTRACT_RE = /Output\s+contract:/;
 const LEGACY_OUTPUT_RE = /^\s*Output:/m;
 /** Task Content Spec: skill-protocol restatement patterns — heuristic warning */
 const PROTOCOL_RESTATEMENT_RE =
-  /interview\(\{ goal:|confirm\(goal\):|research:\s*Read the injected|question\(\) one question per turn|walk every decision-tree branch/;
+  /interview\(\{ goal:|confirm\(goal\):|research:\s*Read the injected|approval\(\) WITHOUT recommendation|walk every decision-tree branch/;
 /** Task Content Spec: injection-mechanics wording — heuristic warning */
 const INJECTION_MECHANICS_RE =
   /(?:read\s+[\w/-]+\s+output|output)\s+\(injected|via dependsOn implicit context|via node:\w+ channel/i;

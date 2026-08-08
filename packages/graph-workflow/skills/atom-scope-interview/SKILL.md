@@ -3,11 +3,11 @@ name: atom-scope-interview
 description: Generic entry procedure for graph entry phases - caller-declared contract (topics, output fields, behavior flags), collect -> propose -> interview() consensus -> derive -> check -> emit. Use when dispatching entry scope phases.
 argument-hint: none (entry skill - dispatched by atom-phase-handler)
 user-invocable: false
-version: 2.0.0
+version: 2.1.0
 last_updated: '2026-08-08'
 ---
 
-> **Runtime constraints** - load `atom-kernel` for interview() and question() behavior contracts.
+> **Runtime constraints** - load `atom-kernel` for interview() and approval() behavior contracts.
 
 Generic entry procedure for graph entry phases - caller-declared contract (topics, output fields, behavior flags), collect -> propose -> interview() consensus -> derive -> check -> emit.
 

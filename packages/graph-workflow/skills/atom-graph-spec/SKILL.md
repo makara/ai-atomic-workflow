@@ -3,8 +3,8 @@ name: atom-graph-spec
 description: Reference for .taskflow.yaml graph format specification - PhaseSchema, topology, gate rework jumps, join modes, channels, approval decision confirmation, branch routes, Run Mode. Use when writing or reviewing taskflow graphs, mentions graph format, graph definition, PhaseSchema.
 argument-hint: none (reference skill)
 user-invocable: true
-version: 1.7.0
-last_updated: '2026-08-07'
+version: 1.8.0
+last_updated: '2026-08-08'
 ---
 
 > **Runtime constraints** - load `atom-phase-handler` for PhaseSchema reference.
@@ -53,7 +53,7 @@ Absent `join` = all (explicit `join: all` -> schema rejection); `join: any` fire
 - **Gate jumps** - `jumps: [{when, to}]`: natural-language rework conditions, first match wins; hit = backward jump resetting target + downstream terminals. Detail: see ROUTING.md §Gate Jump Conditions, §Jump Semantics.
 - **Approval routing** - default card = Accept (AI recommendation) + free input + AI-generated contextual options; written `routing` actions exist ONLY for explicit branch-route selection. Detail: see ROUTING.md §Approval Decision Confirmation.
 - **Channels** - phase-level `channels:` context additions; `node:<id>` = read edge to a non-`dependsOn` stream; graph `context:` = global channel. Detail: see PHASESCHEMA.md §YAML channels Field.
-- **Run Mode** - auto-approve convention: approval auto-executes the AI recommendation in auto, human card in manual; re-confirmed per activation. Detail: see ROUTING.md §Run Mode.
+- **Run Mode** - auto-approve convention: approval nodes and approval() checkpoints auto-execute the AI recommendation in auto, human card in manual (interviews structurally never gated - approval() without recommendation always cards); re-confirmed per activation. Detail: see ROUTING.md §Run Mode.
 
 ---
 
@@ -110,7 +110,7 @@ Activation prefix (P) = graph-level abstract-node mechanism. Carries user-layer 
 |Node|Reserved id|Behavior (built-in default)|
 |-|-|-|
 |Constraints load|`$load-constraints`|Compiled-artifact protocol - `.graph-scheduler/constraints.json` exists -> emit its `constraints` array verbatim (fast path, zero markdown I/O); missing -> caveman-compile `.graph-scheduler/constraints.md` `## Rules` into the artifact (`compiled_at` audit metadata) and emit. Existence = validity; deletion = reset; invalid JSON -> recompile. Output JSON `{"constraints": [...]}`.|
-|Run mode confirm|`$run-mode-confirm`|Emit `args.mode` when set (`{args.mode}` interpolation); otherwise question() the user (Manual recommended - absence NEVER auto). Output JSON `{"mode": "manual"\|"auto"}`. Re-decides EVERY activation - round restarts re-ask (no echo).|
+|Run mode confirm|`$run-mode-confirm`|Emit `args.mode` when set (`{args.mode}` interpolation); otherwise presents the approval() card (no mode block exists yet -> manual branch; Manual recommended - absence NEVER auto). Output JSON `{"mode": "manual"\|"auto"}`. Re-decides EVERY activation - round restarts re-ask (no echo).|
 
 Synthesis order is load-first: `$load-constraints` dispatches before `$run-mode-confirm`, so the confirm decision card carries the `## Constraints` block (mode decided with the project norms visible).
 

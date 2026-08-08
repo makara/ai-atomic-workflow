@@ -2,8 +2,8 @@
 name: atom-graph-design
 description: 'Entry skill for graph topology design - loads atom-graph-spec, analyzes requirements, designs phase list with dependsOn/jumps/channels. Trigger: spec phase in graph-generate graph.'
 user-invocable: false
-version: 1.4.0
-last_updated: '2026-08-07'
+version: 1.5.0
+last_updated: '2026-08-08'
 ---
 
 > **Runtime constraints** - load `atom-kernel` for interview() behavior contract (solve mode). Graph dispatch: atom-graph-spec content arrives at dispatch; standalone use loads it directly.
@@ -89,7 +89,7 @@ Validate per atom-graph-spec §Topology Constraints:
 
 #### interview(details)
 
-Present design decisions one at a time via question(). Recommendation first.
+Present design decisions one at a time via approval() (with recommendation - auto mode executes it). Recommendation first.
 
 Confirm:
 

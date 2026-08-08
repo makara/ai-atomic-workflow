@@ -22,7 +22,7 @@ When the flattened graph contains approval nodes, `$run-mode-confirm` SHALL be s
 
 ### Requirement: Built-in `$run-mode-confirm` behavior
 
-The built-in confirm node SHALL: ① when `args.mode` is set (`{args.mode}` interpolation; kept as a literal when unset) → emit that value; ② otherwise ask via question() (Manual recommended — absence never auto); ③ execute ① and ② on every activation (including round restarts) — no echo mechanism. The output SHALL be JSON `{ "mode": "manual" | "auto" }` written to the output file.
+The built-in confirm node SHALL: ① when `args.mode` is set (`{args.mode}` interpolation; kept as a literal when unset) → emit that value; ② otherwise ask via approval() — decision card, Manual recommended — absence never auto; ③ execute ① and ② on every activation (including round restarts) — no echo mechanism. The output SHALL be JSON `{ "mode": "manual" | "auto" }` written to the output file.
 
 #### Scenario: args.mode short-circuits
 
@@ -32,7 +32,7 @@ The built-in confirm node SHALL: ① when `args.mode` is set (`{args.mode}` inte
 #### Scenario: Round restart re-asks
 
 - **WHEN** a round restart activates the confirm node and args.mode is unset
-- **THEN** it asks via question() again — the mode may change between rounds, never silently carried over
+- **THEN** it asks via approval() again — the mode may change between rounds, never silently carried over
 
 ### Requirement: Built-in `$load-constraints` behavior
 
@@ -64,17 +64,22 @@ All dispatches of the current round SHALL consume the P outputs of the current r
 
 ### Requirement: Mode scope — approvals only
 
-Run Mode controls only approval presentation; main (interview/work) nodes SHALL never auto-execute and never be skipped.
+Run Mode controls decision presentation: approval nodes AND approval() checkpoints inside main nodes — main nodes SHALL never auto-execute or be skipped outside approval() checkpoints. Interviews are never gated — structurally, approval() without a recommendation always presents a card.
 
 #### Scenario: Grill interview runs in auto mode
 
 - **WHEN** a main interview node (grill/scope) runs in auto mode
-- **THEN** the interview still conducts its conversation — Run Mode never bypasses interviews
+- **THEN** the interview still conducts its conversation — Run Mode never bypasses interviews (no recommendation → card)
 
 #### Scenario: Gate eval unchanged
 
 - **WHEN** a gate runs in auto mode
 - **THEN** gate jump evaluation is unchanged by Run Mode (agent judges; mode does not affect gates)
+
+#### Scenario: Main-node checkpoint auto-executes in auto mode
+
+- **WHEN** a main node calls approval() with a recommendation in auto mode
+- **THEN** the recommendation executes without a card
 
 #### Scenario: Interview never auto-executed
 
@@ -83,7 +88,7 @@ Run Mode controls only approval presentation; main (interview/work) nodes SHALL 
 
 ### Requirement: Run-level mode field
 
-Run Mode SHALL be decided by the built-in `$run-mode-confirm` node on every activation (run start and round restarts): when `args.mode` is set (`{args.mode}` interpolation short-circuits) → emit; otherwise ask via question() (Manual recommended — absence never auto). The mode SHALL NOT be persisted in the run record and SHALL NOT appear in NodeDetail fields; the consuming side reads the confirm node's output file. Graphs without approval/gate nodes SHALL skip confirm synthesis (no mode consumption point — gate `jumps[].when` conditions also consume the mode).
+Run Mode SHALL be decided by the built-in `$run-mode-confirm` node on every activation (run start and round restarts): when `args.mode` is set (`{args.mode}` interpolation short-circuits) → emit; otherwise ask via approval() — decision card, Manual recommended — absence never auto. The mode SHALL NOT be persisted in the run record and SHALL NOT appear in NodeDetail fields; the consuming side reads the confirm node's output file. Graphs without approval/gate nodes SHALL skip confirm synthesis (no mode consumption point — gate `jumps[].when` conditions also consume the mode).
 
 #### Scenario: Run created with explicit mode
 

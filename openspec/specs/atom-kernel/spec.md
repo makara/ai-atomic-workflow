@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Platform primitives — task()/question()/interview()/judge() + graph tool detection (platform layer). Asset: `packages/graph-workflow/skills/atom-kernel/SKILL.md`.
+Platform primitives — task()/approval()/interview()/judge() + graph tool detection (platform layer). Asset: `packages/graph-workflow/skills/atom-kernel/SKILL.md`.
 
 ## Requirements
 
@@ -44,18 +44,17 @@ System SHALL provide `task()` for dispatching sub-agents with a 4-field contract
 
 ### Requirement: question() — single-decision UI
 
-System SHALL provide `question()` for presenting a single decision to the user. Eight format rules govern structure, and a Decision Card maps question fields to approval routing actions. Platform spellings SHALL live in the spelling table (OMP: `ask` tool).
+System SHALL provide `approval()` as the single mode-aware decision UI; the former `question()` primitive is absorbed into it. Eight format rules govern structure, and a Decision Card maps approval fields to approval routing actions. Platform spellings SHALL live in the spelling table.
 
 #### Scenario: question presents single decision
 
-- **WHEN** `question({ header: "Token refresh strategy", options: [{ label: "Polling", description: "Timer-based expiry check" }, { label: "On-demand", description: "Refresh on 401" }], custom: true })` is called
+- **WHEN** `approval({ header, options, custom: true })` is called with run mode manual or absent (the former question() behavior)
 - **THEN** the user SHALL see a decision card with the header as topic, options as routing actions
-- **THEN** pre-call text SHALL include background, option meanings, and recommendation — three parts in the same message
 - **THEN** exactly one decision SHALL be presented per call
 
 #### Scenario: Eight format rules enforced
 
-- **WHEN** `question()` is called
+- **WHEN** `approval()` presents a card
 - **THEN** Rule 1: header SHALL be a noun phrase ≤30 chars — topic, not outcome
 - **THEN** Rule 2: first option SHALL be the recommended answer, label as concrete answer phrase
 - **THEN** Rule 3: description SHALL be single line, may note next step
@@ -65,20 +64,30 @@ System SHALL provide `question()` for presenting a single decision to the user. 
 - **THEN** Rule 7: one question per call
 - **THEN** Rule 8: no control characters (`\r`, `\t`, `\n`) in any field
 
+#### Scenario: Auto mode executes the recommendation
+
+- **WHEN** `approval()` is called with run mode auto and a recommendation is provided
+- **THEN** the recommendation SHALL execute without a card, and the decision SHALL be recorded with note `'run mode: auto'` and a rationale
+
+#### Scenario: Auto mode without recommendation presents a card
+
+- **WHEN** `approval()` is called with run mode auto and no recommendation
+- **THEN** a card SHALL be presented — no action is ever guessed
+
+#### Scenario: Custom input carries free-text semantics
+
+- **WHEN** user provides free-text via `custom: true`
+- **THEN** the input SHALL be recorded as `note` in the decision
+- **THEN** `note` semantics vary by action: `continue` → recorded remark, `retry` → inject into upstream context, `jump` → potential target override
+
 #### Scenario: Decision Card maps to question fields
 
 - **WHEN** an approval phase defines routing actions
 - **THEN** `topic` SHALL map to `header`
 - **THEN** `routingActions[].label` SHALL map to `options[].label`
 - **THEN** `routingActions[].description` SHALL map to `options[].description`
-- **THEN** `routingActions[].action` SHALL drive decision routing (continue/retry/jump)
-- **THEN** `pre_text` SHALL be the pre-call text
-
-#### Scenario: Custom input carries free-text semantics
-
-- **WHEN** user provides free-text via `custom: true`
-- **THEN** the input SHALL be recorded as `note` in the `ApprovalDecision`
-- **THEN** `note` semantics vary by action: `continue` → recorded remark, `retry` → inject into upstream context, `jump` → potential target override
+- **THEN** `routingActions[].action` SHALL drive decision routing (continue/retry/jump/end)
+- **THEN** pre-call text SHALL be the pre-call text
 
 ### Requirement: judge() — one-shot judgment primitive
 
@@ -98,7 +107,7 @@ System SHALL provide `judge()` as a one-shot LLM judgment primitive: a single li
 
 ### Requirement: interview() — multi-turn consensus
 
-System SHALL define `interview()` as a behavior contract for multi-round consensus conversations with two modes (consensus mode and solve mode) sharing one rule set. The contract SHALL stay decoupled from platform spellings — all questions SHALL go through the `question()` contract. Eight behavior rules govern the interview process. `interview()` is NOT a callable function — it is implemented by the agent using `question()` one turn at a time.
+System SHALL define `interview()` as a behavior contract for multi-round consensus conversations with two modes (consensus mode and solve mode) sharing one rule set. The contract SHALL stay decoupled from platform spellings — all questions SHALL go through the `approval()` contract WITHOUT recommendation (a card appears in any run mode — interviews are never auto-gated). Eight behavior rules govern the interview process. `interview()` is NOT a callable function — it is implemented by the agent using `approval()` one turn at a time.
 
 Consensus mode: confirm goal → decision rounds → `{ decisions }`. Solve mode: confirm goal → research? (default true) → think → decision rounds → reject → re-think → repeat until accepted → `{ goal, findings?, design, consensus }`. Solve mode SHALL apply when `research: true` or the goal produces a design/solution; the mode SHALL be selected by the caller, not inferred.
 
@@ -110,7 +119,12 @@ Solve-mode additions SHALL apply on top of rules 1-8: research before think (whe
 - **THEN** every aspect of the goal topic SHALL be covered — comprehensive coverage, no skipped dimensions
 - **THEN** each branch of the decision tree SHALL be exhausted before stopping
 - **THEN** dependencies between decisions SHALL be resolved in order — prerequisite before dependent
-- **THEN** exactly one question SHALL be asked per turn via `question()`
+- **THEN** exactly one question SHALL be asked per turn via `approval()` (no recommendation)
+
+#### Scenario: Interview turn cards in auto mode
+
+- **WHEN** an interview turn presents in auto mode
+- **THEN** a card SHALL appear — no recommendation exists, so the mode never gates the interview
 
 #### Scenario: Recommendation drives each question
 
@@ -163,11 +177,11 @@ Solve-mode additions SHALL apply on top of rules 1-8: research before think (whe
 
 ### Requirement: Primitives triangle — layered composition
 
-The primitives SHALL form a layered dependency where each level builds on the one below. `question()` is the atomic unit; `interview()` composes multiple `question()` calls and carries both consensus and solve modes. There SHALL be exactly one conversation contract (`interview()`) — no standalone `solve()` contract, and no `solve()` references in skill documents or graph task texts (grep-verifiable zero residue).
+The primitives SHALL form a layered dependency where each level builds on the one below. `approval()` is the atomic unit; `interview()` composes multiple `approval()` calls and carries both consensus and solve modes. There SHALL be exactly one conversation contract (`interview()`) — no standalone `solve()` contract, and no `solve()` references in skill documents or graph task texts (grep-verifiable zero residue).
 
 #### Scenario: Each level composes the level below
 
-- **WHEN** `interview()` runs — it SHALL use `question()` per turn
+- **WHEN** `interview()` runs — it SHALL use `approval()` per turn
 - **THEN** `task()` is orthogonal — it dispatches sub-agents that may themselves use any primitive
 
 #### Scenario: No solve() residue in consumers
@@ -177,7 +191,7 @@ The primitives SHALL form a layered dependency where each level builds on the on
 
 ### Requirement: atom-kernel SHALL NOT declare loading writing-great-skills
 
-atom-kernel is a runtime-primitives reference skill (platform spellings, graph-scheduler tool detection, judge/task/question/interview contracts). It SHALL NOT declare loading skill `writing-great-skills` — an authoring-format skill with no content dependency on the kernel. The runtime-constraints header SHALL carry at most the `**Layer**` declaration; loading declarations SHALL be limited to skills the kernel body actually consumes.
+atom-kernel is a runtime-primitives reference skill (platform spellings, graph-scheduler tool detection, judge/task/approval/interview contracts). It SHALL NOT declare loading skill `writing-great-skills` — an authoring-format skill with no content dependency on the kernel. The runtime-constraints header SHALL carry at most the `**Layer**` declaration; loading declarations SHALL be limited to skills the kernel body actually consumes.
 
 #### Scenario: Kernel runtime constraints contain no authoring skill
 
@@ -205,7 +219,7 @@ The interview() behavior-contract section SHALL NOT list upstream skills (grilli
 
 ### Requirement: Spelling table SHALL include the opencode platform row
 
-atom-kernel §Platform Spellings SHALL carry an opencode row covering all three primitives: `task()` maps to the Task tool with agent vocabulary `build`/`plan`/`general`/`explore`/`scout` and platform default `general`; `question()` maps to the platform's question primitive; `judge()` maps to the platform's one-shot completion primitive. The row SHALL also name the platform's default agent type for hint fallback.
+atom-kernel §Platform Spellings SHALL carry an opencode row covering all three primitives: `task()` maps to the Task tool with agent vocabulary `build`/`plan`/`general`/`explore`/`scout` and platform default `general`; `approval()` maps to the platform's decision-UI primitive; `judge()` maps to the platform's one-shot completion primitive. The row SHALL also name the platform's default agent type for hint fallback.
 
 #### Scenario: opencode row present
 
