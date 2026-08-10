@@ -4,11 +4,11 @@ description: Graph lifecycle manager - execute->advance loop. Dispatch via atom-
 argument-hint: '<graph-name> [--verbose] [--debug]'
 disable-model-invocation: true
 user-invocable: true
-version: 3.9.0
-last_updated: '2026-08-08'
+version: 3.10.0
+last_updated: '2026-08-09'
 ---
 
-> **Runtime constraints** - load `atom-kernel` for task() contract and approval() decision UI. Load `atom-phase-handler` for {node, snapshot?} data handling, single-node dispatch, and error handling. Detect graph-scheduler MCP tools at runtime - see atom-kernel §Graph-Scheduler Tool Detection.
+> **Runtime constraints** - load skill atom-kernel for task() contract and approval() decision UI. load skill atom-phase-handler for {node, snapshot?} data handling, single-node dispatch, and error handling. Detect graph-scheduler MCP tools at runtime - see atom-kernel §Graph-Scheduler Tool Detection.
 
 > **Layer**: atom - graph lifecycle manager
 
@@ -46,9 +46,9 @@ Execution flow:
 2. Load `atom-phase-handler` - node dispatch schema
 3. Detect graph-scheduler MCP tools per §Graph-Scheduler Tool Detection
 4. **Run Mode flags** (the mode is a per-activation decision made by the built-in `$run-mode-confirm` prologue node - the pilot never asks):
-   - `--auto` flag -> `args: { mode: 'auto' }`; `--manual` flag -> `args: { mode: 'manual' }`; neither -> pass NO mode arg - the confirm node asks the user on first dispatch (Manual recommended - absence never means auto, per atom-graph-spec §Activation Prologue).
+   - `--auto` flag -> `args: { mode: 'auto' }`; `--manual` flag -> `args: { mode: 'manual' }`; neither -> pass NO mode arg - the confirm node asks the user on first dispatch (Manual recommended - mode semantics: see atom-kernel §approval() / atom-graph-spec §Activation Prologue).
    - Direct MCP callers (no pilot) pass `args.mode` explicitly or leave it unset.
-5. Call `graph_start { graphName, args? }` - return shape: see MCP-REFERENCE.md §Return Shapes.
+5. Call `graph_start { graphName, args? }` - return shape: see §MCP Reference (Return Shapes).
 6. **Identity banner (before first node)** - display the run identity so the executed graph is explicit from the start:
    ```
    Executing <graphName> (<resolvedFrom>) — <description>
@@ -61,7 +61,45 @@ Verbosity: `--verbose` / `--debug` set tiers - see DISPLAY.md §Verbose / §Debu
 
 ## Graph-Scheduler Tool Detection
 
-Detect graph-scheduler MCP tools at runtime - 9-tool substring matching rules live in atom-kernel §Graph-Scheduler Tool Detection (platform primitives, loaded with the kernel). Tool schemas, return shapes, command->tool map: see MCP-REFERENCE.md.
+Detect graph-scheduler MCP tools at runtime - 9-tool substring matching rules live in atom-kernel §Graph-Scheduler Tool Detection (platform primitives, loaded with the kernel). Tool schemas, return shapes, command->tool map: see §MCP Reference.
+
+## MCP Reference
+
+### MCP Tool Reference
+
+Tool names detected at runtime per §Graph-Scheduler Tool Detection. Parameter schema (hot - pilot loop surface, same lifecycle, no split). Heat: graph_start/graph_advance/graph_jump/graph_force_end = execution-hot (every dispatch); graph_status/graph_list/graph_init/graph_clean_completed/graph_clean_all = operation-cold (operator use):
+
+|tool|purpose|key params|
+|-|-|-|
+|graph_start|create run, get first node + snapshot|graphName, args? (args.mode short-circuits $run-mode-confirm)|
+|graph_advance|report result + get next node|runId, nodeId, durationMs, branchTo?, endRun?|
+|graph_status|query run state|runId|
+|graph_list|list all runs|-|
+|graph_force_end|force end run|runId|
+|graph_jump|jump to node|runId, targetPhaseId|
+|graph_init|init graph config|-|
+|graph_clean_completed|clean completed runs|before?|
+|graph_clean_all|clean all runs|-|
+
+`graph_start` returns `{ runId, node, snapshot, resolvedFrom, resolvedPath, description? }`. `graph_advance` / `graph_jump` return `{ snapshot, node }` - `node: null` = graph complete (`fsmState` `completed`). The snapshot (per-node states) accompanies every dispatch - jump navigation + progress display. Run mode comes from the `$run-mode-confirm` prologue output - no output scans, no echo scans, no backend field.
+
+### Return Shapes
+
+```
+graph_start { graphName, args? } → { runId, node: NodeDetail | null, snapshot: GraphSnapshot, resolvedFrom: project|builtin|fallback, resolvedPath: string, description?: string }
+```
+
+Scheduler resolve graph name via merged registry - project entries override builtin (project-first). Return `runId` + first `node` (NodeDetail | null) + run `snapshot` (per-node states - jump navigation + progress display; the activation prefix nodes appear in `nodes` like any run member) + resolution identity (`resolvedFrom` + `resolvedPath` + graph `description`). Agent hold `runId` for all subsequent calls.
+
+### Pilot Commands
+
+|Command|MCP tool|
+|-|-|
+|invoke pilot with `<graph-name>`|`graph_start` -> pilot loop|
+|Status check|`graph_status`|
+|Force end|`graph_force_end`|
+|Jump to node|`graph_jump` (operator command - approval retry/jump routing also uses it, see §Approval Decision Processing)|
+|List history|`graph_list`|
 
 ## Loop Mechanics
 
@@ -77,17 +115,11 @@ Execute->advance cycle:
 
 ## Node Execution
 
-Receive `{ node, snapshot? }` from graph_advance/graph_start. Delegate to `atom-phase-handler` - single-node dispatch by node.type. See `atom-phase-handler` for full schema and dispatch rules.
-
-Node types - dispatched by type (main/approval/gate; handlerSkill constant `atom-phase-handler`):
-
-- `node.type = "main"` -> handler executes inline (with inline context assembly when channels present)
-- `node.type = "approval"` -> handler assembles the decision card (per atom-phase-handler §approval type) and returns IApprovalDecision -> pilot routes per §Approval Decision Processing
-- `node.type = "gate"` -> handler evaluates rework jumps (per atom-phase-handler §gate type) and returns IApprovalDecision -> pilot routes per §Gate Decision Routing - no approval(), no pause
+Receive `{ node, snapshot? }` from graph_advance/graph_start. Delegate to `atom-phase-handler` - single-node dispatch by node.type (handlerSkill constant `atom-phase-handler`). Dispatch rules: see `atom-phase-handler` §Dispatch Rules (main/approval/gate). Approval/gate nodes return IApprovalDecision (shape: see atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape) -> pilot routes per §Approval Decision Processing / §Gate Decision Routing.
 
 ## Approval Decision Processing
 
-After handler returns `{ status, output, durationMs }` for an approval node, parse `output` as `IApprovalDecision { action, target?, note?, value?, label? }` - `label`/`value` record the chosen option (observability - downstream gate jump conditions and AI recommendations consume `value`), unused by pilot routing.
+After handler returns `{ status, output, durationMs }` for an approval node, parse `output` as `IApprovalDecision` (shape + fields: see atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape - single home) - `label`/`value` record the chosen option (observability - downstream gate jump conditions and AI recommendations consume `value`), unused by pilot routing.
 
 |action|MCP call|note|
 |-|-|-|
@@ -118,7 +150,7 @@ The AI recommendation or the human choice completes the run: `graph_advance(runI
 
 ## Gate Decision Routing
 
-After handler returns `{ status, output, durationMs }` for a gate node, parse `output` as `IApprovalDecision { action, target?, label? }`:
+After handler returns `{ status, output, durationMs }` for a gate node, parse `output` as `IApprovalDecision` (shape: see atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape):
 
 - Hit -> `action: "jump"`, `target` = the matched jump's `to` (an upstream terminal node), `label` = the jump's `when` text (display/observability).
 - No hit -> `action: "continue"`, no target - pass through, zero forward effect.

@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import {
   DEFAULT_CONVENTIONS,
   fileChannelCoveredBy,
+  isConventionFile,
   isGlobShape,
   isWorkflowArtifactGlob,
   mergeChannelScopes,
@@ -677,6 +678,12 @@ function checkForwardCoverage(
     }
   }
   for (const f of skill.files) {
+    // Convention-layer files are platform-shipped, default-loaded into every
+    // phase, absence-tolerant - coverage guaranteed by construction, never an
+    // obligation. Skills may declare them, omit them, or annotate them; none
+    // of these forms affects loading. Non-convention entries keep full
+    // obligation semantics (deletion is never silent).
+    if (isConventionFile(f)) continue;
     // Coverage matching delegates to resolve-channels' shared primitive —
     // forward and reverse observe identical path/glob semantics.
     const covered = channels.some((c) => fileChannelCoveredBy(c, f));

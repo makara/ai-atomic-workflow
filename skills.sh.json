@@ -4,10 +4,12 @@
   "groupings": [
     {
       "title": "Graph Workflow",
-      "description": "Graph-workflow domain — built-in skills for graph lifecycle orchestration (CRUD-driven loop via graph-scheduler MCP tools)",
+      "description": "Core graph-execution skill system — atom-pilot lifecycle loop, atom-phase-handler node dispatch, entry/reference skills, and format references for graphs, skills, docs, and domains.",
       "skills": [
+        "atom-adr-maintain",
         "atom-doc-lifecycle",
         "atom-doc-maintain",
+        "atom-domain-spec",
         "atom-graph-design",
         "atom-graph-spec",
         "atom-graph-writer",
@@ -16,11 +18,14 @@
         "atom-pilot",
         "atom-scope-interview",
         "atom-skill-spec",
-        "setup-atomic-workflow",
-        "atom-domain-spec",
         "atom-spec-maintain",
-        "atom-adr-maintain"
+        "setup-atomic-workflow"
       ]
+    },
+    {
+      "title": "Graph Workflow Extra",
+      "description": "Optional release-prep pipeline — analyze proposes the next version and changelog inventory from git history; apply performs the confirmed release writes. Not required for normal operation.",
+      "skills": ["release-prep-analyze", "release-prep-apply"]
     }
   ]
 }

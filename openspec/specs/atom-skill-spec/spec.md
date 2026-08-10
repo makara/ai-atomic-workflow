@@ -93,21 +93,22 @@ Given packages/graph-workflow/skills/atom-skill-spec/SKILL.md When reading the i
 
 ### Requirement: Content Quality Metrics quantified
 
-atom-skill-spec SHALL specify quantified content-quality norms for SKILL.md bodies: length bands, why/how ratio targets, content-carrier selection, evidence-gated completion criteria, branch skip conditions, wrapper delegation contracts, single-source scope including sibling files, positive-first phrasing, and vocabulary discipline (avoid-lists + rejected framings).
+atom-skill-spec SHALL specify quantified content-quality norms for SKILL.md bodies: length bands, why/how ratio targets, content-carrier selection, evidence-gated completion criteria, branch skip conditions, wrapper delegation contracts, single-source scope including sibling files, positive-first phrasing, and vocabulary discipline (avoid-lists + rejected framings). Length Bands are diagnostic; placement follows Loading Efficiency (Pareto Placement), which governs.
 
 #### Scenario: Length bands enforced
 
 - **WHEN** an agent authors or reviews a SKILL.md body
-- **THEN** the target band SHALL be 400–1,500 words (reference skills ≤ 1,000)
+- **THEN** the target band SHALL be 500-2,000 words; reference skills SHALL be <=1,500; platform primitives (atom-kernel, atom-phase-handler) SHALL be <=1,400
 - **THEN** a body under 200 words SHALL be legal only as a wrapper skill with a delegation contract
-- **THEN** a body over 1,500 words SHALL trigger disclosure split (context pointer to sibling file) before acceptance
+- **THEN** a body over 2,000 words SHALL trigger disclosure split (context pointer to sibling file) before acceptance
+- **THEN** bands describe sizes, never placement — placement follows Loading Efficiency (Pareto Placement), which governs
 
 #### Scenario: Why/how distribution norms
 
 - **WHEN** an agent authors a SKILL.md body
 - **THEN** the body SHALL open with a thesis sentence (why the skill exists)
 - **THEN** each decision rule SHALL carry at most one line of rationale
-- **THEN** the why/how lexical ratio SHALL target 1:5–1:40 — outside the band triggers review of why scattering or absence
+- **THEN** the why/how lexical ratio SHALL target 1:5-1:40 — outside the band triggers review of why scattering or absence
 
 #### Scenario: Content carrier selection
 
@@ -124,7 +125,7 @@ atom-skill-spec SHALL specify quantified content-quality norms for SKILL.md bodi
 - **WHEN** a skill defines a step or phase
 - **THEN** the step SHALL end with a completion criterion that is checkable
 - **THEN** when the step involves runnable behavior, the criterion SHALL name the evidence (e.g. paste command invocation + output)
-- **THEN** vague criteria ("extremely extensive", "fix anything…", "when answered") SHALL be rewritten to observable signals
+- **THEN** vague criteria ("extremely extensive", "fix anything...", "when answered") SHALL be rewritten to observable signals
 
 #### Scenario: Branch skip conditions declared
 
@@ -170,38 +171,71 @@ atom-skill-spec SHALL specify quantified content-quality norms for SKILL.md bodi
 - **WHEN** a skill references another skill or file
 - **THEN** the target SHALL exist within the skill set at authoring time — dangling pointers SHALL be deleted or localized
 
-### Requirement: Runtime constraints — writing-great-skills alignment
+### Requirement: Pareto Placement Priority
 
-atom-skill-spec SHALL load `writing-great-skills` before use and SHALL maintain an alignment table mapping each content-quality rule to its writing-great-skills concept with gap markers (supplements where the baseline lacks quantified norms; corrections where it misses patterns).
+The skill spec SHALL rank Loading Efficiency (Pareto placement) above the length-bands word-count norm: Pareto placement governs skill structure; Length Bands are diagnostic and secondary. Conflict SHALL resolve to Loading Efficiency — an in-band body with hot content behind a pointer fails review; length bands NEVER justify inlined cold content.
 
-#### Scenario: Alignment table present
+#### Scenario: Placement governs over word count
 
-- **WHEN** an agent loads atom-skill-spec
-- **THEN** a table SHALL exist mapping content-quality rules to writing-great-skills concepts with gap markers
-- **THEN** corrections SHALL be marked as supplements, never replacements
+- **WHEN** a SKILL.md body is within word band but its hot content lives in a sibling file
+- **THEN** review fails on placement (Loading Efficiency violation) regardless of band compliance
+
+#### Scenario: Bands never justify cold inline
+
+- **WHEN** a SKILL.md body is over band and the surplus is cold content
+- **THEN** the surplus SHALL move to a sibling — band pressure SHALL NOT be relieved by keeping cold content in SKILL.md
+
+#### Scenario: Metrics section orders LE first
+
+- **WHEN** reading the Content Quality Metrics section of the spec's SKILL.md
+- **THEN** Loading Efficiency (Pareto Placement) appears before Length Bands
+
+### Requirement: Hot-content Non-Transferability
+
+The ~20% of a skill's content serving ~80% of activations SHALL be non-transferable: it MUST reside in the SKILL.md body; moving it to a sibling is a violation. The pointer-cost rule applies to cold content only.
+
+#### Scenario: Hot content in SKILL.md mandatory
+
+- **WHEN** reviewing a skill whose hot 20% (every-dispatch execution-critical content) sits in a sibling file
+- **THEN** review fails — hot content SHALL be restored to the SKILL.md body, not referenced
+
+#### Scenario: Pointer rule cold-only
+
+- **WHEN** a sibling pointer replaces cold content (edge cases, full tables, examples)
+- **THEN** it is legal under Loading Efficiency — the non-transferability rule does not apply
 
 ### Requirement: Loading Efficiency Pareto Placement
 
-The skill spec SHALL require that SKILL.md body carries the hot path — execution-critical references and specs needed on every dispatch — while low-frequency content (edge cases, full field tables, complete examples) SHALL live in sibling files behind `(see sibling §X)` pointers.
+The skill spec SHALL require that SKILL.md body carries the hot path — execution-critical references and specs needed on every dispatch — while low-frequency content (edge cases, full field tables, complete examples) SHALL live in sibling files behind `(see sibling §X)` pointers. This rule is the primary structural rule, outranking the length bands (see Pareto Placement Priority).
 
 #### Scenario: Hot-path content in SKILL.md
 
 - **WHEN** a rule or reference is needed on every dispatch of the skill
-- **THEN** its single home is the SKILL.md body
+- **THEN** its single home is the SKILL.md body — and it is non-transferable (see Hot-content Non-Transferability)
 
 #### Scenario: Cold content behind pointers
 
 - **WHEN** content is reached only by some branches or rare activations
 - **THEN** it lives in a sibling file and SKILL.md carries only a `(see sibling §X)` pointer
 
+#### Scenario: Hot-path rule primary
+
+- **WHEN** an agent decides where content lives
+- **THEN** reachability + frequency (Loading Efficiency) decide first; word-count band is checked after placement
+
 ### Requirement: Pareto 20/80 Rule of Thumb
 
-The skill spec SHALL state the loading-efficiency rule of thumb: approximately 20% of a skill's content serves approximately 80% of activations, and that 20% MUST reside in SKILL.md; pointer indirection costs less per activation than inlined cold content.
+The skill spec SHALL state the loading-efficiency rule of thumb: approximately 20% of a skill's content serves approximately 80% of activations, and that 20% MUST reside in SKILL.md — it is non-transferable (see Hot-content Non-Transferability); pointer indirection costs less per activation than inlined cold content.
 
 #### Scenario: Placement by frequency
 
 - **WHEN** placing new content into a skill
 - **THEN** placement follows usage frequency: every-dispatch content in SKILL.md, rare content in siblings
+
+#### Scenario: Rule of thumb enforceable
+
+- **WHEN** an agent places the hot 20% in a sibling
+- **THEN** it is a spec violation (non-transferability), not a style suggestion
 
 ### Requirement: Checkable Placement Criterion
 
@@ -223,16 +257,16 @@ The §Structure placement rule SHALL reference the Loading Efficiency subsection
 
 ### Requirement: Reference Band Offset
 
-Adding the loading-efficiency requirement SHALL NOT push the skill spec itself out of the reference band (≤1,000 body words); equivalent content SHALL be trimmed as offset.
+Adding the loading-efficiency priority rules SHALL NOT push the skill spec itself out of the reference band (<=1,500 body words); equivalent content SHALL be trimmed as offset.
 
 #### Scenario: Spec stays in band
 
-- **WHEN** the loading-efficiency rule is added to atom-skill-spec
-- **THEN** the body word count stays ≤1,000
+- **WHEN** the loading-efficiency priority rules are added to atom-skill-spec
+- **THEN** the body word count stays <=1,500
 
 ### Requirement: Character Standardization
 
-The skill spec SHALL require standard ASCII characters in prose wherever an equivalent exists: `—`/`–` -> `-`, `→` -> `->`, `≤` -> `<=`, `≥` -> `>=`, `×` -> `x`, `…` -> `...`. Literal content inside code fences and backticks SHALL be exempt (code samples stay verbatim).
+The skill spec SHALL require standard ASCII characters in prose wherever an equivalent exists: `—`/`–` -> `-`, `→` -> `->`, `≤` -> `<=`, `≥` -> `>=`, `×` -> `x`, `…` -> `...`. Literal content inside code fences and backticks SHALL be exempt (code samples stay verbatim). `§` is allowed as a section-pointer marker (`§X`) — a family convention, never substituted.
 
 #### Scenario: Prose special char replaced
 
@@ -246,26 +280,37 @@ The skill spec SHALL require standard ASCII characters in prose wherever an equi
 
 #### Scenario: Grep-checkable rule
 
-- **WHEN** a reviewer checks a skill for special-char violations
-- **THEN** a grep for prose occurrences (outside fences) returns zero hits
+- **WHEN** auditing a skill body for special characters
+- **THEN** a grep for the substitution list (outside fences/backticks) finds zero hits
+- **THEN** a grep for un-backticked `§` outside section-pointer references finds zero hits
+
+#### Scenario: Section pointer allowed
+
+- **WHEN** a skill body uses `§` in a section-pointer reference (outside code fences)
+- **THEN** it is preserved — no ASCII substitution
 
 ### Requirement: Raised Length Bands
 
-The skill spec SHALL use reference band <=1,200 words and general band 400-1,800 words (raised from <=1,000 / 400-1,500); bodies over 1,800 words SHALL be disclosure-split to siblings.
+The skill spec SHALL use reference band <=1,500 words and general band 500-2,000 words (raised from <=1,000 / 500-1,500); bodies over 2,000 words SHALL be disclosure-split to siblings. Platform primitives (atom-kernel, atom-phase-handler — every-dispatch hot contracts, HLT content never migrated or simplified) SHALL use the platform-primitive reference band <=1,400 words.
 
 #### Scenario: Reference band margin
 
 - **WHEN** measuring a reference skill body (fence-inclusive, frontmatter-stripped)
-- **THEN** <=1,200 words is in-band
+- **THEN** <=1,500 words is in-band
+
+#### Scenario: Platform-primitive band margin
+
+- **WHEN** measuring a platform-primitive skill body (atom-kernel, atom-phase-handler; fence-inclusive, frontmatter-stripped)
+- **THEN** <=1,400 words is in-band
 
 #### Scenario: General band margin
 
 - **WHEN** measuring a non-reference skill body
-- **THEN** 400-1,800 words is in-band
+- **THEN** 500-2,000 words is in-band
 
 #### Scenario: Split threshold raised
 
-- **WHEN** a body exceeds 1,800 words
+- **WHEN** a body exceeds 2,000 words
 - **THEN** disclosure split to sibling is required (was >1,500)
 
 ### Requirement: Language Convention Deferral
@@ -303,7 +348,7 @@ The SKILL.md format spec SHALL replace family enumeration with the tier property
 
 ### Requirement: Skill document terminology surface = valid surface
 
-Skill bodies (`packages/graph-workflow/skills/**`) MUST NOT contain finding-number references (`(F\d+)` form — referencing docs/reports/ content, violating atom-skill-spec §Reference Constraints' deployment-independence commitment) or references to deleted concepts (e.g. `skip-checkpoint mode` — the concept was removed along with Routing Modes and the glossary has been marked obsolete). Referenced facts MUST be inlined and expressed in neutral wording.
+Skill bodies (`packages/graph-workflow/skills/**`) MUST NOT contain finding-number references (`(F\d+)` form — referencing docs/reports/ content, violating atom-skill-spec §Reference Constraints' deployment-independence commitment) or references to deleted concepts (e.g. `skip-checkpoint mode` — the concept was removed along with Routing Modes). Referenced facts MUST be inlined and expressed in neutral wording. Glossary references SHALL point to the CONTEXT.md convention channel (project glossary) — the retired docs/glossary.md SHALL NOT be referenced.
 
 #### Scenario: No finding-number references
 
@@ -314,3 +359,120 @@ Skill bodies (`packages/graph-workflow/skills/**`) MUST NOT contain finding-numb
 
 - **WHEN** searching `packages/graph-workflow/skills/` for `skip-checkpoint` text
 - **THEN** zero hits — kernel §Decision Request and pilot §Entry no longer reference the deleted Routing Modes concepts
+
+#### Scenario: No retired glossary reference
+
+- **WHEN** a skill body references the project glossary
+- **THEN** it SHALL reference the CONTEXT.md convention channel, never `docs/glossary.md` (retired)
+
+### Requirement: Runtime constraints — writing-for-agents alignment
+
+atom-skill-spec SHALL load `writing-for-agents` before use (the successor of `writing-great-skills`) and SHALL maintain an alignment table mapping each content-quality rule to its writing-for-agents concept with gap markers (supplements where the baseline lacks quantified norms; corrections where it misses patterns). The spec SHALL NOT reference `writing-great-skills` anywhere in its body — no backward-compatibility residue.
+
+#### Scenario: Alignment table present
+
+- **WHEN** an agent loads atom-skill-spec
+- **THEN** a table SHALL exist mapping content-quality rules to writing-for-agents concepts with gap markers
+- **THEN** corrections SHALL be marked as supplements, never replacements
+
+#### Scenario: Concept remapping covers wfa vocabulary
+
+- **WHEN** the alignment table maps a rule to a concept
+- **THEN** same-name concepts (sprawl, no-op, negation, pruning, completion criterion, context pointer) SHALL map directly
+- **THEN** wrapper-contract SHALL note the wfa router-skills relation
+- **THEN** structure rules SHALL reference the wfa information-hierarchy ladder
+
+#### Scenario: wfa new concepts absorbed
+
+- **WHEN** atom-skill-spec defines content-quality metrics
+- **THEN** it SHALL cover the wfa levers absent from wgs: leading words, two loads (context/cognitive), demand/legwork, premature completion, co-location/scattering, sediment, and environment-as-source-of-truth
+- **THEN** each absorbed concept SHALL carry a quantified or checkable form, consistent with the existing metric style
+
+#### Scenario: Reference-constraint context declared
+
+- **WHEN** an agent reads §Reference Constraints
+- **THEN** the spec SHALL state that external-reference freedom is the wfa document-layer principle, while the skill-dependency layer resolves within the skillsDir per project constraints (spec priority over baseline)
+
+#### Scenario: Dependency load succeeds
+
+- **WHEN** an agent follows the Runtime constraints line
+- **THEN** `writing-for-agents` SHALL resolve within the skill set — the declaration SHALL name only skills that exist
+
+### Requirement: Shipped skill set self-compliance
+
+packages/graph-workflow/skills SHALL comply with the atom-skill-spec rules they ship: a rule SHALL live in exactly one home (SKILL.md or one sibling — duplication is a violation, `see sibling §X` pointers are the only legal reuse); frontmatter SHALL use only the four documented invocation combos; skill-internal pointers SHALL resolve to existing files or sections within the skill set.
+
+#### Scenario: Alignment intro single-sited
+
+- **WHEN** searching packages/graph-workflow/skills for the alignment intro sentence "Every Content Quality Metrics rule maps to a wfa concept"
+- **THEN** exactly one occurrence exists (in ALIGNMENT.md)
+- **AND** atom-skill-spec/SKILL.md references the table only via `(see sibling ALIGNMENT.md §Mapping)`
+
+#### Scenario: Frontmatter combos sanctioned
+
+- **WHEN** reading the frontmatter of a graph-dispatch skill under packages/graph-workflow/skills
+- **THEN** every skill with `user-invocable: false` also declares `disable-model-invocation: true` (injection-only row)
+- **AND** no skill declares the unsanctioned combo "omit disable-model-invocation + user-invocable: false"
+
+#### Scenario: Tool-reference pointers resolve
+
+- **WHEN** a skill body references atom-pilot's MCP tool reference
+- **THEN** it names the existing file `atom-pilot MCP-REFERENCE.md` (or a section within it)
+- **AND** no pointer names the nonexistent section "atom-pilot §MCP Tool Reference"
+
+### Requirement: Band-limiting rule strengthened
+
+Every atom execution skill (atom-graph-spec, atom-kernel, atom-phase-handler, atom-pilot) SHALL follow the band-limited structure: SKILL.md = contracts + pointers (hot-path loading surface); reference files = cold detail. Cold-detail distribution SHALL be uniform across primitives (no primitive with inline cold detail while a sibling has a cold file).
+
+#### Scenario: Band-limiting audit
+
+- **WHEN** a skill author audits an atom skill's structure
+- **THEN** SKILL.md stays within the reference length band and cold detail resolves to named reference files; no primitive mixes inline + file cold detail
+
+### Requirement: Vocabulary disambiguation delegated to glossary
+
+Skill bodies SHALL NOT define overloaded vocabulary (channel/contract/block, route vs routing, entry node vs prologue, retryCount); disambiguation lives in CONTEXT.md glossary, and skills reference terms without re-defining them.
+
+#### Scenario: Term meaning queried
+
+- **WHEN** a consumer needs the meaning of an overloaded term
+- **THEN** CONTEXT.md glossary is the single disambiguation site; skill bodies use the term without a second definition
+
+### Requirement: Contract entries support trailing parenthetical annotations
+
+The `## Context Requirements` machine-parseable contract SHALL accept a trailing parenthetical annotation on list entries in all three subsections (`### From upstream`, `### Reference skills`, `### Files`): `- <value> ( <annotation> )`. The annotation is prose — it SHALL be stripped at parse and SHALL NOT participate in matching (channel coverage, exact-match, glob resolution). An entry's value is everything before the annotation; annotations never turn a valid entry into a parse error or an unmatched string.
+
+#### Scenario: Annotated Files entry parses to its path
+
+- **WHEN** a skill declares `- ./CONTEXT.md (project glossary per domain-modeling CONTEXT-FORMAT.md)` in `### Files`
+- **THEN** the contract parses the entry as `./CONTEXT.md`
+- **AND** coverage matching resolves against `./CONTEXT.md` — the annotation causes no load failure
+
+#### Scenario: Annotation on upstream and reference entries
+
+- **WHEN** a skill declares `- up (review output)` in `### From upstream` or `- codebase-design (vocabulary)` in `### Reference skills`
+- **THEN** the entry parses to `up` / `codebase-design` respectively — matching unaffected
+
+#### Scenario: Placeholder detection sees the stripped value
+
+- **WHEN** a skill declares `- <configurable> (decided at authoring)`
+- **THEN** the placeholder check applies to `<configurable>` — the entry SHALL still be rejected as a placeholder
+
+### Requirement: Convention-layer files are not contract obligations
+
+Files entries matching the platform convention layer (`DEFAULT_CONVENTIONS`: `./CONTEXT.md`, `docs/domains.md`) SHALL NOT be contract obligations. Convention files are platform-shipped, default-loaded into every phase, and absence-tolerant — coverage by graph channels is guaranteed by construction. A skill SHALL be free to declare a convention file, omit it, or annotate it; none of these forms SHALL affect graph loading. Forward coverage SHALL exempt convention-layer entries, and channel resolution SHALL classify convention paths as convention files. Non-convention Files entries SHALL keep full obligation semantics — an uncovered non-convention entry remains a load error.
+
+#### Scenario: Declared convention file never fails coverage
+
+- **WHEN** a skill declares `./CONTEXT.md` (clean or annotated) in `### Files` and no graph phase declares a `./CONTEXT.md` channel
+- **THEN** forward coverage SHALL pass — the platform convention layer supplies the file
+
+#### Scenario: Omitted convention file is legal
+
+- **WHEN** a skill's `### Files` omits convention files entirely
+- **THEN** loading SHALL succeed — omission is the sanctioned form, not a gap
+
+#### Scenario: Non-convention obligation intact
+
+- **WHEN** a skill declares a non-convention file (e.g. `docs/adr/*.md`) and no dispatching phase channel covers it
+- **THEN** forward coverage SHALL report the missing channel — the obligation surface excludes only convention files

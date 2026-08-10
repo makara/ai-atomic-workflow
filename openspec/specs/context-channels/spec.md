@@ -265,8 +265,8 @@ The contract validation test suite SHALL include table-driven cases for: hardcod
 
 #### Scenario: Flow-propagated channels observe the same scope
 
-- **WHEN** flow channels (ADR 0069 input interface) propagate to flow entry child nodes and the target nodeId belongs to the current run's node set
-- **THEN** the propagated `node:` channel SHALL resolve normally
+- **WHEN** channels reach flow entry child nodes through the two-scope model (ADR 0107 — the four-scope hierarchy and flow-phase channel propagation to entry children are removed) and the target nodeId belongs to the current run's node set
+- **THEN** the `node:` channel SHALL resolve normally
 - **AND** when the target is not in the current run's node set (running the subgraph standalone) → warning + strip
 
 #### Scenario: CLI validate shares the same predicate

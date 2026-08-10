@@ -70,3 +70,40 @@ Display format strings SHALL live in exactly one home — `atom-pilot/DISPLAY.md
 
 - **WHEN** reading atom-pilot SKILL.md §Result Report
 - **THEN** it SHALL contain pointers to DISPLAY.md (see DISPLAY.md §Final Report / §Approval decisions) — no duplicated `📉 ctx:` / `🔧 tools:` format strings
+
+### Requirement: Single home for MCP tool contract
+
+The graph-scheduler MCP tool contract (params, return shapes, pilot commands) SHALL live inside atom-pilot SKILL.md; a separate MCP-REFERENCE.md file SHALL NOT exist.
+
+#### Scenario: Pilot loads tool contract
+
+- **WHEN** a pilot invocation needs graph-scheduler tool parameters or return shapes
+- **THEN** they resolve within atom-pilot SKILL.md §MCP Reference, with no MCP-REFERENCE.md file present
+
+### Requirement: Marker aggregation references emission spec
+
+Display aggregation of `[CONSTRAINT VIOLATION]` / `[TOOL USAGE VIOLATION]` markers SHALL reference the emission spec in atom-phase-handler SKILL.md rather than re-listing marker strings.
+
+#### Scenario: Marker list maintained once
+
+- **WHEN** a marker string changes
+- **THEN** only the emission spec in atom-phase-handler SKILL.md is edited; atom-pilot DISPLAY references it
+
+### Requirement: Pilot Routing Pointerization
+
+atom-pilot SKILL §Approval Decision Processing / §Gate Decision Routing / §Node Execution SHALL carry action-to-MCP-call routing as a summary table with pointers to the shape single home (atom-kernel APPROVAL-CARDS.md) and the handler dispatch rules (atom-phase-handler) — no restated IApprovalDecision field lists, no restated mode semantics, no restated dispatch bullets.
+
+#### Scenario: No shape restatement in pilot
+
+- **WHEN** reading atom-pilot SKILL §Approval Decision Processing
+- **THEN** the IApprovalDecision action rows reference the canonical shape home by pointer — no field enumeration
+
+#### Scenario: Node execution pointerized
+
+- **WHEN** reading atom-pilot SKILL §Node Execution
+- **THEN** the three type bullets (main/approval/gate) are a pointer to atom-phase-handler §Dispatch Rules, with only the handlerSkill constant stated locally
+
+#### Scenario: Run-mode tail pointerized
+
+- **WHEN** reading atom-pilot SKILL §Run Mode flags
+- **THEN** the "absence never auto" tail is a pointer to the canonical mode sites — no restatement

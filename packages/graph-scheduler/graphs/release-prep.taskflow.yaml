@@ -1,0 +1,63 @@
+name: release-prep
+phases:
+  # Proposal — read-only analysis (version from git tags, never package.json;
+  # deterministic + idempotent pre-tag; never git tag/commit/push).
+  - id: propose
+    type: main
+    dependsOn: []
+    skill: release-prep-analyze
+    task: |
+      Execute pre-release analysis per release-prep-analyze.
+
+      Proposal rule: version derives from git tag history, never package.json;
+      deterministic + idempotent pre-tag. NEVER execute git tag/commit/push.
+
+      Output contract: last_tag, diff_summary, bump, proposed_version,
+      tag_proposal, changelog_inventory, basis, idempotent.
+
+  # Confirmation — grilling interview (never auto-gated): every planned
+  # operation confirmed before any write.
+  - id: plan-grill
+    type: main
+    dependsOn: [propose]
+    skill: grilling
+    task: |
+      Execute grilling conversation per grilling skill.
+
+      Confirm EVERY planned operation before any write: version value (from
+      propose output — adjustable), version bump surfaces (release-line: root
+      + workspace packages + marketplace manifests; presentation excluded),
+      changelog fold scope, README targets, release boundary (working tree
+      only — tag/commit user-executed).
+
+      Output contract: confirmed_plan, decisions.
+
+  # Writes — confirmed plan in, verified release-ready working tree out.
+  - id: apply
+    type: main
+    dependsOn: [plan-grill]
+    skill: release-prep-apply
+    task: |
+      Execute pre-release writes per release-prep-apply.
+
+      Apply the confirmed plan (node:plan-grill): overwrite versions on
+      release-line surfaces, fold CHANGELOG [Unreleased] -> [v<confirmed>]
+      per release-prep-apply's fold contract, sync README lists vs ground
+      truth. Overwrite-style, idempotent. NEVER execute git tag/commit/push.
+
+      Output contract: surfaces_updated, changelog_written, readmes_updated,
+      verify.
+
+  # Final approval — continue completes the run (report prints the tag/commit
+  # commands; user executes manually); jump re-runs a target phase.
+  - id: release-review
+    type: approval
+    dependsOn: [apply]
+    channels:
+      - node:plan-grill
+    task: |
+      Release-ready?
+
+      Recommendation follows the apply verification: verify all pass →
+      continue (run completes — final report prints the tag/commit commands,
+      user executes them manually); any verify fail → jump to apply.

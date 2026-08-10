@@ -24,7 +24,7 @@ A tool result or file content larger than 8KB (≈2K tokens) SHALL be compressed
 
 ### Requirement: Every file edit SHALL register cache invalidation while jcodemunch is in use
 
-**MODIFIED** — Every file edit SHALL be followed immediately by `jcodemunch register_edit` with the edited paths **while jcodemunch is in use by the execution**. Executions that do not use jcodemunch SHALL report `n/a: jcodemunch not in use`; missing registration while jcodemunch is in use is a `violated` entry in the self-report.
+Every file edit SHALL be followed immediately by `jcodemunch register_edit` with the edited paths **while jcodemunch is in use by the execution**. Executions that do not use jcodemunch SHALL report `n/a: jcodemunch not in use`; missing registration while jcodemunch is in use is a `violated` entry in the self-report.
 
 #### Scenario: Edit registers immediately while jcodemunch in use
 
@@ -43,82 +43,43 @@ A tool result or file content larger than 8KB (≈2K tokens) SHALL be compressed
 - **THEN** the register_edit line SHALL report `n/a: jcodemunch not in use`
 - **AND** no violation SHALL be recorded for missing registration
 
-### Requirement: Task classes SHALL prefer the declared tool tiers
+### Requirement: Task classes SHALL prefer the scenario's designated adapter
 
-**MODIFIED** — Tool-tier preference SHALL come from the HLT Registry chains (atom-kernel §High-Level Tool Registry, SSE two-tier structure): core classes (locate/read/write/verify/run) execute via their declared chain — locate = serena symbol ops (`find_symbol`, `find_referencing_symbols`, `find_implementations`) when its LSP covers the file's language, serena FS-tier tools otherwise; write = serena replace/symbol/create tools; run = platform shell (`bash`, rtk prefix per project constraints); review work SHALL dispatch sub-agent review (index-backed queries optional while jcodemunch is in use). Channel file entries SHALL be consumed per the HLT read chain — structural overview (serena `get_symbols_overview`) before full reads, sliced reads (line selectors) preferred, and any unavoidable read result > 8KB compressed via `headroom_compress` before reasoning.
+Task tool preference SHALL come from the HLT Registry scenario table (atom-kernel §High-Level Tool Registry): each operation executes via its scenario's designated adapter — in-project code locate = jcodemunch chain head + serena LSP ground-truth confirmation; in-project unindexed text (markdown/plain) locate = serena `search_for_pattern`; write/verify (in-project) = serena replace/symbol/diagnostics tools; special types / out-of-project = platform-native read/write; run = platform shell (`bash`, rtk prefix per project constraints); compress = headroom-ai; review work SHALL dispatch sub-agent review (index-backed queries on indexed repos). Channel file entries SHALL be consumed per the HLT read chain — structural overview (serena `get_symbols_overview`) before full reads, sliced reads.
 
-#### Scenario: Code-touching main node opens with plan_turn
+#### Scenario: Code-touching main node opens with the scenario locate adapter
 
-- **WHEN** a main node's task touches code
-- **THEN** the node SHALL open with a serena locate call (symbol tier for LSP-covered languages, FS tier otherwise)
+- **WHEN** a main node's task touches in-project code
+- **THEN** the node SHALL open with a jcodemunch locate call (chain head) followed by serena LSP ground-truth confirmation
 - **AND** the Tool usage check SHALL carry the `used:` line with evidence
 
-#### Scenario: Code-touching main node opens with serena locate
+#### Scenario: Unindexed text locate uses serena
 
-- **WHEN** a main node's task touches code
-- **THEN** the node SHALL open with a serena locate call (symbol tier for LSP-covered languages, FS tier otherwise)
-- **AND** the Tool usage check SHALL carry the `used:` line with evidence
+- **WHEN** a main node's task touches in-project markdown or plain text
+- **THEN** the node SHALL use serena `search_for_pattern`
+- **AND** jcodemunch SHALL be declared `n/a: not indexed`
 
-#### Scenario: Core tier unavailable fails loudly
+#### Scenario: Core adapter unavailable fails loudly
 
-- **WHEN** serena is unavailable (server down, project unactivated)
-- **THEN** the serena-backed core-class step SHALL fail naming serena as the missing dependency
-- **AND** no cross-tool fallback SHALL occur
+- **WHEN** a scenario's designated adapter is unavailable (server down, project unactivated, unindexed)
+- **THEN** the step SHALL fail naming the adapter as the missing dependency
+- **AND** no cross-adapter fallback SHALL occur
 - **AND** the Tool usage check SHALL record `n/a: <reason>`
 
-#### Scenario: Tier unavailable degrades with reason
+#### Scenario: Adapter unavailable degrades with reason
 
-- **WHEN** serena is unavailable (server down, project unactivated)
-- **THEN** the serena-backed core-class step SHALL fail naming serena as the missing dependency
-- **AND** no cross-tool fallback SHALL occur
+- **WHEN** a scenario's designated adapter is unavailable
+- **THEN** the step SHALL fail naming the adapter
+- **AND** no cross-adapter fallback SHALL occur
 - **AND** the Tool usage check SHALL record `n/a: <reason>`
-
-#### Scenario: LSP-covered locate starts at the serena tier
-
-- **WHEN** the target file's language has serena LSP coverage
-- **THEN** the locate chain SHALL use serena symbol ops
-- **AND** a fixed jcodemunch-first order SHALL NOT be the chain (capability-tiered within serena, never fixed cross-tool first)
-
-#### Scenario: Map-header materialization no longer agent-checkable
-
-- **WHEN** a node dispatch carries channel file patterns
-- **THEN** the scheduler SHALL NOT embed map headers (materialization machinery removed — ADR 0121)
-- **AND** the Tool usage check SHALL report consumption obligations only (overview-first, sliced reads, compress-after-read)
-
-#### Scenario: Channel file consumption follows the HLT read chain
-
-- **WHEN** a node consumes channel file entries
-- **THEN** the agent SHALL prefer structural overviews and sliced reads
-- **AND** any unavoidable read result > 8KB SHALL be compressed via `headroom_compress` before reasoning
-- **AND** the Tool usage check SHALL report consumption obligations with evidence
-
-#### Scenario: Large channel entries consume per the HLT read chain
-
-- **WHEN** a main node's channels include file entries (globs / bare paths) aggregating ≥ 8KB
-- **THEN** the dispatched NodeDetail SHALL NOT carry map headers (materialization removed)
-- **AND** the agent SHALL consume per the HLT read chain (overview-first, sliced reads, compress-after-read)
-
-#### Scenario: Channel file entries consume via verbatim or HLT read chain
-
-- **WHEN** a main node's channels include file entries (globs / bare paths)
-- **THEN** entries aggregating < 8KB SHALL be injected verbatim as `## File:` blocks
-- **AND** entries aggregating ≥ 8KB SHALL NOT arrive as scheduler-side map headers (removed)
-- **AND** the agent SHALL read file content on demand (structural overviews, sliced reads)
-- **AND** any read result > 8KB SHALL be compressed via `headroom_compress` MCP before reasoning (compress entry trigger — no separate pipeline)
-
-#### Scenario: No condense-context invocation
-
-- **WHEN** a node consumes channel file entries
-- **THEN** the `condense-context` CLI SHALL NOT be invoked (removed)
-- **AND** the Tool usage check channel-file row SHALL report consumption obligations (overview-first, sliced reads, compress-after-read) with evidence
 
 ### Requirement: Main nodes SHALL self-report tool usage
 
-Every main node output SHALL end with a `Tool usage check:` section — one line per declared operation class (phase `operations:` ∪ skill `Operation classes`): chain-head tool-call evidence or an `n/a: <reason>` line. The marker is generated by the check, never self-issued: missing evidence for a declared class → automatic `[TOOL USAGE VIOLATION: N]`; an output with no `Tool usage check:` block counts all declared classes. The check SHALL cover agent-side obligations only — channel file consumption (overview-first, sliced reads, compress-after-read) per the HLT registry entries.
+Every main node output SHALL end with a `Tool usage check:` section — one line per declared scenario (operation class x target domain; phase `operations:` ∪ skill `Operation classes`): the scenario's designated adapter chain-head tool-call evidence or a named `n/a: <structural reason>` line. n/a reasons SHALL name the cause (`not indexed` / `project-root-bound` / `no LSP coverage` / `proxy down` / `threshold not met`). The marker is generated by the check, never self-issued: missing evidence for a declared scenario → automatic `[TOOL USAGE VIOLATION: N]`; an output with no `Tool usage check:` block counts all declared scenarios. The check SHALL cover agent-side obligations only — channel file consumption (overview-first, sliced reads, compress-after-read) per the HLT registry entries.
 
 #### Scenario: Clean usage reports used lines
 
-- **WHEN** a node complied with every declared class
+- **WHEN** a node complied with every declared scenario
 - **THEN** the output SHALL end with `Tool usage check:` listing `used:`/`n/a:` lines only
 
 #### Scenario: Violation markers reach the approval gate
@@ -129,14 +90,20 @@ Every main node output SHALL end with a `Tool usage check:` section — one line
 
 #### Scenario: Declared class without evidence is marked
 
-- **WHEN** a node declares `locate` but its output carries no locate-chain tool evidence and no n/a reason
+- **WHEN** a node declares `locate (in-project code)` but its output carries no locate-chain tool evidence and no n/a reason
 - **THEN** the output SHALL be prefixed with `[TOOL USAGE VIOLATION: 1]` automatically
 
 #### Scenario: Missing check block counts as full violation
 
 - **WHEN** a node output lacks a `Tool usage check:` section
-- **THEN** all declared classes SHALL be counted as violations
+- **THEN** all declared scenarios SHALL be counted as violations
 - **AND** the output SHALL be prefixed with `[TOOL USAGE VIOLATION: <N>]`
+
+#### Scenario: Structural n/a satisfies the check
+
+- **WHEN** a declared scenario's adapter is structurally impossible for the target (unindexed, project-root-bound, no LSP coverage, proxy down)
+- **THEN** the check SHALL record `n/a` with the named reason
+- **AND** no violation SHALL be recorded
 
 #### Scenario: Large channel entries consume per the HLT read chain
 
@@ -194,3 +161,35 @@ The HLT Registry SHALL be validated for completeness: every entry has contract, 
 - **WHEN** the registry is validated
 - **THEN** every core entry SHALL have chain length exactly 1 — serena for serena-backed classes, platform shell for run
 - **AND** a core entry with a multi-tool or non-declared chain SHALL be a validation error
+
+### Requirement: Registry Injection SHALL carry the scenario key
+
+Registry Injection blocks SHALL carry the scenario key — `## Registry: <tool> — scenario: <domain> x <operation> -> <adapter>` — so the dispatched node receives adapter assignment with the entry. Undeclared classes SHALL degrade to the SKILL.md core scenario rows. Injection SHALL be the assignment authority; the executor SHALL NOT re-classify by judgment.
+
+#### Scenario: Declared class injection carries scenario key
+
+- **WHEN** a node declares an operation class with a registry entry
+- **THEN** the injected `## Registry:` block SHALL include the scenario key (domain x operation -> adapter)
+- **AND** the executor SHALL use the injected assignment without re-classification
+
+#### Scenario: Undeclared class degrades to core rows
+
+- **WHEN** a node declares no operation class for an operation it performs
+- **THEN** the executor SHALL resolve the adapter from the SKILL.md core scenario rows
+- **AND** no cold read SHALL be required for core operations
+
+### Requirement: Hot param surfaces SHALL serve the tool usage check
+
+The Tool usage check SHALL reference the hot parameter surfaces for evidence (chain-head tool calls with hot params resolvable from SKILL.md/injection). Headroom compress evidence SHALL reference the MCP contract.
+
+#### Scenario: Hot param evidence
+
+- **WHEN** a check records a hot tool call as used
+- **THEN** the evidence SHALL be verifiable against the hot param surface
+- **AND** no cold schemas read SHALL be required
+
+#### Scenario: Compress evidence via MCP contract
+
+- **WHEN** a check records headroom compress evidence
+- **THEN** the evidence SHALL reference the MCP contract tools
+- **AND** proxy deployment SHALL NOT alter the contract reference

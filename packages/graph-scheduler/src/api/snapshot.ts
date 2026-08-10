@@ -170,7 +170,7 @@ export function buildNodeDetail(input: NodeDetailInput): Effect.Effect<INodeDeta
         handlerSkill: HANDLER_SKILL,
         skill: phase.skill,
         operations: phase.operations,
-        retryAttempt: input.nodeState.retryCount,
+        retryCount: input.nodeState.retryCount,
       };
 
       // Adapt FsmNodeState to IFsmNodeState for handler consumption

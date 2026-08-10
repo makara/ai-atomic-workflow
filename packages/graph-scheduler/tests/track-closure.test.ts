@@ -84,12 +84,13 @@ describe('doc-update graph removed', () => {
     expect(() => readFileSync(join(PKG_ROOT, 'graphs', 'doc-update.taskflow.yaml'))).toThrow();
   });
 
-  it('registry lists 9 graphs with estate-maintain, without doc-update', () => {
+  it('registry lists 10 graphs with estate-maintain + release-prep, without doc-update', () => {
     const registry = JSON.parse(readFileSync(join(PKG_ROOT, 'graphs', 'registry.json'), 'utf-8')) as {
       graphs: Array<{ name: string }>;
     };
     const names = registry.graphs.map((g) => g.name);
-    expect(names).toHaveLength(9);
+    expect(names).toHaveLength(10);
+    expect(names).toContain('release-prep');
     expect(names).toContain('estate-maintain');
     expect(names).not.toContain('doc-update');
     expect(names).toContain('openspec-apply');

@@ -27,7 +27,7 @@ YAML field names shown below. Scheduler resolves to internal NodeDetail fields a
 |`route`|`route`|string?|all|Route membership - declared route id. Flows propagate their id to children (flatten); absent = implicit default route (always active). See §Routes.|
 |`jumps`|`jumps`|Jump[]?|`gate`|Rework jumps - `[{when, to}]`: `when` is a natural-language condition (agent-judged), `to` an explicit BACKWARD target node id (upstream terminal - validator-enforced). Required non-empty on gate; forbidden on all other types (loud rejection).|
 |`routing`|`routingActions`|Route[]?|`approval`|Decision routing with nested `actions` array - declared ONLY in branch-route scenarios; each action declares `target` (node or route id) + `value` (stable machine id) + label/description. See §Approval Routing Actions. Approval card header derives from `task`'s first line (fallback `Decision Required`) - no separate topic field.|
-|`join`|`join`|`'any'` literal|any phase|`join: any` - phase fires when any upstream completes. Existence of `join` IS the any-mode declaration (`z.literal('any')`); absent = all. Explicit `join: all` -> schema rejection. Validator: `join: any` requires direct upstreams spanning >=2 routes.|
+|`join`|`join`|`'any'` literal|any phase|`join: any` - phase fires when any upstream completes. Existence of `join` IS the any-mode declaration; absent = all. Schema + validator rules: see ROUTING.md §Join Mode Rules (single home).|
 
 ## Flow Phase Fields
 
@@ -55,7 +55,7 @@ Auto-supplied fields (NEVER write in YAML):
 
 - `handlerSkill` (string) - constant `atom-phase-handler` for main/approval/gate (no registry).
 - `skill` (string) - resolved from `skill` field; the execution skill for the phase's work.
-- `retryAttempt` (number) - runtime counter. 0-based. The node's own jump re-execution count; gate jump bounds reference the TARGET node's `retryCount` (single counter - see §Gate Jump Conditions).
+- `retryCount` (number) - runtime counter. 0-based. The node's own jump re-execution count; gate jump bounds reference the TARGET node's `retryCount` (single counter - see §Gate Jump Conditions).
 
 Run mode and project constraints are NOT NodeDetail fields - they arrive via the activation prologue node outputs (§Activation Prologue). `constraints`/`runMode` declared in YAML -> schema rejection with migration hints.
 
@@ -69,7 +69,7 @@ Run mode and project constraints are NOT NodeDetail fields - they arrive via the
 
 ## Approval Routing Actions (branch-route only)
 
-YAML format uses `routing` with nested `actions` array. Each action maps to one approval() option. Written actions are declared ONLY for explicit branch-route selection - the default card is Accept (AI recommendation) + free input + AI-generated contextual options.
+YAML format uses `routing` with nested `actions` array. Each action maps to one approval() option. Written actions are declared ONLY for explicit branch-route selection - default card composition: see ROUTING.md §Approval Decision Confirmation (single home).
 
 |Field (YAML)|NodeDetail|Type|Purpose|
 |-|-|-|-|
@@ -79,7 +79,7 @@ YAML format uses `routing` with nested `actions` array. Each action maps to one 
 |`label`|`label`|string|Option label displayed in approval()|
 |`description`|`description`|string|Option description displayed in approval()|
 
-No static default field exists - Run Mode auto executes the AI recommendation (agent-judged from the judgment context - per §Jump Semantics - plus snapshot + run mode), never a declared action.
+No static default field exists - Run Mode auto executes the AI recommendation (judgment basis: §Jump Semantics + snapshot + run mode), never a declared action.
 
 ## HLT Operations Declaration
 
@@ -90,11 +90,11 @@ A main phase MAY declare `operations: [<tool-name>, ...]` - closed-set members o
 Context delivery has three tiers, one field each:
 
 - **Convention layer** (platform-shipped, NO declaration) - exact files `CONTEXT.md` + `docs/domains.md`, default-loaded into every phase, absence-tolerant (missing -> empty + warning, never fail). No directory-class entries, no glob entries.
-- **Project layer** - `.graph-scheduler/config.json` `context:` - project-declared layout, existence-validated (exact-file missing -> load error; glob zero-match -> warning — lazy doc creation legal).
-- **Graph channels** - graph top-level `context:` + phase `channels:`. Graph-level file globs target workflow runtime artifacts (`.graph-scheduler/`, `.taskflow/`) ONLY — project file globs belong in config.json, conventions are never hand-declared. `node:<id>` entries are read edges to non-`dependsOn` streams (dependsOn remains the scheduling edge; direct outputs arrive as context).
+- **Project layer** - `.graph-scheduler/config.json` `context:` - project-declared layout, existence-validated (exact-file missing -> load error; glob zero-match -> warning - lazy doc creation legal).
+- **Graph channels** - graph top-level `context:` + phase `channels:`. Graph-level file globs target workflow runtime artifacts (`.graph-scheduler/`, `.taskflow/`) ONLY - project file globs belong in config.json, conventions are never hand-declared. `node:<id>` entries are read edges to non-`dependsOn` streams (dependsOn remains the scheduling edge; direct outputs arrive as context).
 
 ```
-effective = [convention layer, config `context:` defaults, graph `context:`, phase `channels:`] — dedup, order preserved
+effective = [convention layer, config `context:` defaults, graph `context:`, phase `channels:`] - dedup, order preserved
 ```
 
 A phase-level `channels` entry type derives from the dispatched skill's contract - type comes from the contract tables, never guessed (main; the same resolution path serves approval/gate - uniform, no per-type rules):
@@ -111,19 +111,11 @@ A phase-level `channels` entry type derives from the dispatched skill's contract
 
 **Graph/config-level entries** (`context:`) require an explicit `skill:`/`node:` prefix or a file-glob shape - a bare name is a load-time error (no execution-skill contract exists at those scopes). `node:` targets validate against the flattened node set at load; run-scope gating still applies at dispatch. A `node:` entry in `context:` **promotes** the named node's output stream into the global channel - every phase receives it as an ambient upstream block; the owning node skips its own promoted stream (self-read undefined). Flow phases SHALL NOT declare `channels` (schema rejection - move ambient entries to graph `context:`, data reads to the consuming phase). A child graph's `context:` applies to its own flattened phases; the parent's global channel reaches child phases via the dispatch merge - no flow-level propagation exists.
 
-The removed `preText`/`reads` fields are rejected globally (see §Field Closure) - the approval card = `task` full text (first line header) + recommendation + options + free input; cross-level judgment references migrate to `channels: [node:<id>]`.
+The removed `preText`/`reads` fields are rejected globally - see §Gate Type (single home).
 
 ## Skill-Contract Channel Derivation
 
 Phases whose work consumes a spec skill SHALL declare the executing `skill:` (e.g. graph production: spec -> `atom-graph-design`, implement -> `atom-graph-writer`); the skill's `## Context Requirements` reference tables derive the phase's spec channels (`skill:atom-graph-spec`) deterministically. Graph-level `context:` remains the ambient fallback layer (dual-track: skill contract + graph context). This is the systematic replacement for per-graph hand-declared spec channels - a phase with a declared skill keeps its task text to Directive + output contract (see §Skill Dedup Deletion Test).
-
-## Sub-Agent Reference Inheritance
-
-When a main phase dispatches sub-agents (e.g. code-review axis agents), the `## Reference:` blocks SHALL be forwarded into each sub-agent's context (task() context text or a local:// handoff file). Reference skills are shared down the tree - sub-agents receive the same reference content the phase got (a reviewer re-reading atom-graph-spec is a defect, not diligence).
-
-## Output Stream Isolation (run-scoped)
-
-Node output streams SHALL be scoped per run: `.taskflow/outputs/<runId>/<nodeId>.output.txt`. A run's dispatches read/write within its own directory - stale outputs from other runs are invisible. `<runId>` comes from the dispatch snapshot; missing snapshot (standalone dispatch) -> un-scoped fallback with a warning. Graph tasks SHALL NOT hardcode output paths (validation error - the path is a runtime convention, see §Language Constraints).
 
 ## Constraints
 

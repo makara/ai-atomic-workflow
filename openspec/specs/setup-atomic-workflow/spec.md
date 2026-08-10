@@ -240,3 +240,22 @@ The optional groupings SHALL cover the graph-workflow skills and MCP instruction
 
 - **WHEN** setup-atomic-workflow re-runs on a fully scaffolded project
 - **THEN** the inventory SHALL report existed for all pieces, including docs/ — no writes, no errors
+
+### Requirement: Seed literals single-sourced
+
+setup-atomic-workflow/SKILL.md SHALL NOT re-encode seed layout values (dbPath, taskflowDir, registryPaths) as body literals — `./seeds/config.json` is the single source; the body SHALL reference it by pointer and may describe the seed's role without duplicating its values.
+
+#### Scenario: No literal duplication
+
+- **WHEN** reading setup-atomic-workflow/SKILL.md body
+- **THEN** the seed values exist only in `seeds/config.json` (and its provenance source `createDefaultConfig()`)
+- **AND** body references to the seed use `./seeds/config.json`
+
+### Requirement: Portable provenance references
+
+setup-atomic-workflow/SKILL.md SHALL reference code provenance by name, never by project-specific file path — the body SHALL NOT hardcode paths outside the skill set, convention layer, and workflow artifacts.
+
+#### Scenario: Name-only provenance
+
+- **WHEN** searching setup-atomic-workflow/SKILL.md for file paths
+- **THEN** no project-specific source paths appear — provenance is named (`createDefaultConfig()`)

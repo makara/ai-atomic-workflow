@@ -61,6 +61,30 @@ The `atom-adr-maintain` skill SHALL reference ADR estate through the tiered chan
 - **WHEN** the project layer supplies `docs/adr/*.md` and `openspec/specs/**/*.md`
 - **THEN** the skill SHALL run the full estate alignment against those channels
 
+### Requirement: CONTEXT.md alignment
+
+The maintainer SHALL align CONTEXT.md as part of the ADR estate pass — CONTEXT.md is the project glossary (per domain-modeling CONTEXT-FORMAT.md: `# Context Name` + description + `## Language` terms with `_Avoid_`), and its alignment SHALL verify structure and term-reality consistency alongside the ADR estate.
+
+#### Scenario: CONTEXT.md in Files contract
+
+- **WHEN** the skill's Files contract is read
+- **THEN** `./CONTEXT.md` SHALL be present (convention layer — absence-tolerant, zero-match degrades to n/a)
+
+#### Scenario: CONTEXT-FORMAT structure verified
+
+- **WHEN** CONTEXT.md exists and is aligned
+- **THEN** it SHALL match CONTEXT-FORMAT.md structure (`## Language` heading with bold terms + `_Avoid_` lists) and SHALL NOT contain architecture-reference sections (Status/Architecture/Execution model/Constraints/Docs map)
+
+#### Scenario: Term-ADR cross-reference
+
+- **WHEN** a live ADR introduces a domain term
+- **THEN** the term SHALL be resolvable in CONTEXT.md (or explicitly out of scope per CONTEXT-FORMAT project-specificity rule), and the finding SHALL be reported when absent
+
+#### Scenario: Dead-citation repoint covers CONTEXT.md terms
+
+- **WHEN** a CONTEXT.md term is superseded by an ADR decision
+- **THEN** the repoint SHALL update the CONTEXT.md term entry (or remove it when the concept is retired) and the finding SHALL be reported
+
 ### Requirement: Upstream contract concrete
 
 atom-adr-maintain SHALL declare `From upstream: entry, requirement` in its context contract — `entry` (graph trigger classification + workstream selection) and `requirement` (confirmed domain-design requirements). The contract SHALL NOT reference planned, annotated, or self-named nodes as upstream.

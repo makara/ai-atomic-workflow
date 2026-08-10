@@ -11,6 +11,7 @@
  * - bare entry in contract From upstream table  → upstream node output
  * - bare entry in contract Reference skills     → reference skill
  * - bare entry in contract Files table or glob shape → file globs
+ * - convention-layer file (DEFAULT_CONVENTIONS member) → file (implicit coverage)
  * - entry duplicating a dependsOn node          → redundant declaration (warning)
  * - entry matching nothing                      → error (no fallback search)
  *
@@ -37,6 +38,18 @@ export interface IContextContract {
 const PLACEHOLDER_RE = /<.*>/;
 
 /** Fence-line detection — line starts with ```, optionally followed by a non-space language tag. */
+/**
+ * Trailing parenthetical annotation on a contract entry - `- <value> ( <annotation> )`.
+ * The annotation is prose, stripped at parse, never part of the matched value.
+ * Single-level parens only (nested-paren annotations are not stripped - loud failure).
+ */
+const ANNOTATION_RE = /\s*\(([^()]*)\)\s*$/;
+
+/** Strip a trailing parenthetical annotation from a contract entry value. */
+export function stripAnnotation(entry: string): string {
+  return entry.replace(ANNOTATION_RE, '');
+}
+
 function isFenceLine(t: string): boolean {
   if (!t.startsWith('```')) return false;
   const rest = t.slice(3);
@@ -76,7 +89,7 @@ function parseSubsection(
     if (mask[i]) continue;
     const t = lines[i].trim();
     if (t.startsWith('### ') || t.startsWith('## ')) break;
-    if (t.startsWith('- ')) out.push(t.slice(2).trim());
+    if (t.startsWith('- ')) out.push(stripAnnotation(t.slice(2).trim()));
   }
   return out.filter(Boolean);
 }
@@ -173,6 +186,17 @@ export function isGlobShape(entry: string): boolean {
  * constant is the sole convention-layer source.
  */
 export const DEFAULT_CONVENTIONS: readonly string[] = ['./CONTEXT.md', 'docs/domains.md'];
+
+/**
+ * Is a file entry a platform convention-layer path? Normalized membership in
+ * DEFAULT_CONVENTIONS - the sole convention-layer source. Convention files are
+ * platform-shipped, default-loaded into every phase, absence-tolerant: they are
+ * implicit coverage, never a contract obligation.
+ */
+export function isConventionFile(entry: string): boolean {
+  const f = normFile(entry);
+  return DEFAULT_CONVENTIONS.some((c) => normFile(c) === f);
+}
 
 /**
  * Workflow runtime artifact namespaces — the only file-glob targets legal in
@@ -290,9 +314,10 @@ export function stripCrossRunChannels(
  * Type derivation order:
  * 1. explicit `skill:`/`node:` prefix — always wins
  * 2. bare entry matching contract From upstream / Reference skills / Files tables
- * 3. glob-shape entry → file
- * 4. entry duplicating dependsOn → redundant-declaration warning, implicit coverage
- * 5. no match → error (no fallback search — deterministic)
+ * 3. convention-layer file (DEFAULT_CONVENTIONS member) → file — implicit coverage
+ * 4. glob-shape entry → file
+ * 5. entry duplicating dependsOn → redundant-declaration warning, implicit coverage
+ * 6. no match → error (no fallback search — deterministic)
  */
 export function resolveChannels(input: IResolveInput): IResolveResult {
   const channels = input.channels ?? [];
@@ -366,7 +391,15 @@ export function resolveChannels(input: IResolveInput): IResolveResult {
       continue;
     }
 
-    // 3 — glob shape → file
+    // 2d - convention-layer file (platform-shipped, default-loaded, absence-tolerant)
+    // classified as a file without obligation - explicit branch before glob-shape
+    // fallback documents the convention semantics.
+    if (isConventionFile(entry)) {
+      files.push(entry);
+      continue;
+    }
+
+    // 3 - glob shape -> file
     if (isGlobShape(entry)) {
       files.push(entry);
       continue;

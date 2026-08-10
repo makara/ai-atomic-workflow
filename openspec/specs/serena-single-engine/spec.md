@@ -8,31 +8,37 @@ Core-class execution contract where serena is the sole tool: locate/read/write/v
 
 ### Requirement: Core classes SHALL be serena single-tool with no fallback
 
-write/verify SHALL be serena sole-tool chains (create_text_file, replace_content, replace_in_files, replace_symbol_body, rename_symbol, insert_before/after_symbol, safe_delete_symbol, get_diagnostics_for_file, read_file). locate/read SHALL NOT be serena-headed (query plane owns locate; read locates via query plane when target unknown). run SHALL use the platform shell (`bash`, rtk prefix per project constraints); serena `execute_shell_command` is not part of the tool surface. No fallback tool SHALL exist for serena-backed classes: serena unavailable (server down, project unactivated, LSP missing) SHALL produce a loud failure naming the missing dependency, never a silent degrade.
+Serena SHALL be the sole mutation + ground-truth engine for in-project targets. write/verify SHALL be serena sole-tool chains (create_text_file, replace_content, replace_in_files, replace_symbol_body, rename_symbol, insert_before/after_symbol, safe_delete_symbol, get_diagnostics_for_file, read_file). locate/read SHALL NOT be serena-headed on indexed targets (query plane owns locate; read locates via query plane when target unknown); on unindexed text (markdown/plain), locate SHALL use serena `search_for_pattern`. run SHALL use the platform shell (`bash`, rtk prefix per project constraints); serena `execute_shell_command` is not part of the tool surface. Out-of-project and special-type scenarios designate the platform-native surface (serena project-root-bound, strict UTF-8 — structural n/a). No fallback tool SHALL exist for serena-backed classes: serena unavailable (server down, project unactivated, LSP missing) SHALL produce a loud failure naming the missing dependency, never a silent degrade.
 
 #### Scenario: Core class executes via serena only
 
-- **WHEN** a step references a serena-backed mutation-plane tool
+- **WHEN** a step references a serena-backed mutation-plane tool on an in-project target
 - **THEN** the tool SHALL execute through serena only
 - **AND** no non-serena tool SHALL appear in the serena-backed mutation-plane chain
 
 #### Scenario: Serena missing fails loudly
 
-- **WHEN** serena is unavailable during a serena-backed mutation-plane step
+- **WHEN** serena is unavailable during a serena-backed in-project mutation step
 - **THEN** the step SHALL fail naming serena as the missing dependency
 - **AND** no fallback execution SHALL occur
 
 #### Scenario: Core chain length is enforced
 
 - **WHEN** the registry is validated
-- **THEN** every mutation-plane entry SHALL name serena tools only
-- **AND** a mutation-plane entry naming a non-serena tool SHALL be a validation error
+- **THEN** every in-project mutation entry SHALL name serena tools only
+- **AND** an in-project mutation entry naming a non-serena tool SHALL be a validation error
 
 #### Scenario: Run executes through the platform shell
 
 - **WHEN** a step runs a command
 - **THEN** it SHALL execute through the platform shell with the rtk prefix per project constraints
 - **AND** the run chain SHALL name the platform shell only
+
+#### Scenario: Structural n/a outside serena reach
+
+- **WHEN** a target is outside the project root or not UTF-8 text
+- **THEN** serena SHALL be declared `n/a` with the structural reason (project-root-bound / UTF-8 text only)
+- **AND** the scenario's designated adapter SHALL apply without fallback
 
 ### Requirement: Serena covers all languages via its own FS tier
 
@@ -82,17 +88,17 @@ The run class SHALL execute through the platform shell (`bash`) with the project
 - **THEN** each edit SHALL be followed by `jcodemunch register_edit`
 - **AND** missing registration SHALL be a `violated` entry
 
-### Requirement: Enforcement view SHALL record the OMP adapter prototype
+### Requirement: Enforcement view SHALL record the scenario-table contract
 
-The enforcement view of core-class registry entries SHALL remain deferred (per-platform application recorded in the view, not shipped as a generic-layer feature). The OMP adapter prototype (`.omp/extensions/hlt-policy.ts`) SHALL exist as the mechanical form of the enforcement seam — tool_call gate, setActiveTools crop, lifecycle signals — without altering the deferred status of the view.
+The enforcement view of registry entries SHALL remain deferred (per-platform application recorded in the view, not shipped as a generic-layer feature). The enforcement contract SHALL be scenario-table-driven: each tool call resolves (target path + type) -> scenario -> designated adapter; calls whose tool is not the scenario's adapter SHALL be denied naming the designated adapter. The seam-validation prototype (`.omp/extensions/hlt-policy.ts`) SHALL be treated as validation-only evidence — it SHALL NOT enter packages or formal docs as authoritative design; formal implementation SHALL be built per platform extension API without prototype inheritance.
 
-#### Scenario: Prototype present, view stays deferred
+#### Scenario: View stays deferred, contract recorded
 
-- **WHEN** the adapter prototype is present and active in an OMP session
-- **THEN** the registry enforcement view SHALL still read deferred (per-platform)
-- **AND** the prototype SHALL be documented as the seam's mechanical form in the arch-review report
+- **WHEN** enforcement is described in a formal document
+- **THEN** the registry enforcement view SHALL read deferred (per-platform)
+- **AND** the document SHALL describe the scenario-table contract, never the prototype as authoritative
 
 #### Scenario: Adapter lifecycle documented in the report
 
 - **WHEN** the adapter prototype's lifecycle (arm on dispatch, disarm on terminal signals incl. agent_end fail-safe) is implemented
-- **THEN** the arch-review report round 2 SHALL record the implementation evidence
+- **THEN** the arch-review report SHALL record the implementation evidence

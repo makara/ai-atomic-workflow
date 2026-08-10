@@ -59,7 +59,7 @@ Verbose + raw MCP JSON, `retryCount` per node, internal state changes.
 
 ## Tools stats
 
-**Tools stats** - aggregate tool-usage violations across node outputs (`[TOOL USAGE VIOLATION: N]` markers - count per node): `🔧 tools` row in the final report table - `<V> violations · headroom <S>% saved · proxy <state>` - savings from `headroom_stats`; proxy `<state>` = the three-state health gate defined in atom-kernel §Tool Schemas -> ## headroom (Health gate - `ok` / `cold` / `down`, markers `[HEADROOM COLD]` / `[HEADROOM PROXY DOWN]`). Violations list the nodes.
+**Tools stats** - aggregate tool-usage violations across node outputs (markers per atom-phase-handler §Markers - count per node): `🔧 tools` row in the final report table - `<V> violations · headroom <S>% saved · proxy <state>` - savings from `headroom_stats`; proxy `<state>` = the three-state health gate defined in atom-kernel §Tool Schemas -> ## headroom (Health gate - `ok` / `cold` / `down` - marker strings per atom-phase-handler §Markers). Violations list the nodes.
 
 ## Approval decisions
 

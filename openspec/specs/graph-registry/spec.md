@@ -8,13 +8,14 @@ Multi-registry merge (built-in + project). Assets: `packages/graph-scheduler/src
 
 ### Requirement: Registry Completeness
 
-The graph registry SHALL list exactly the built-in graphs that exist as taskflow definitions. The registry SHALL contain 9 graphs: e2e-minimal, arch-review, arch-review-loop, adopt-with-docs, graph-generate, spec-implement, openspec-apply, openspec-engineer, estate-maintain. The obsolete `implement` and `review-machinery` graphs SHALL NOT be registered. The `grill-with-docs` name SHALL NOT appear (renamed to adopt-with-docs). The deleted `artifact-workflow` and `skill-workflow` graphs SHALL NOT be registered (skeleton + thin composition deleted — ADR 0101). The `graph-workflow` name SHALL NOT appear (retired — the maker journey is `graph-generate`, ADR 0108). The deleted `doc-update` graph SHALL NOT be registered (doc-maintenance split — closure owns lifecycle, estate owns maintenance).
+The graph registry SHALL list exactly the built-in graphs that exist as taskflow definitions. The registry SHALL contain 10 graphs: e2e-minimal, arch-review, arch-review-loop, adopt-with-docs, graph-generate, spec-implement, openspec-apply, openspec-engineer, estate-maintain, release-prep. The obsolete `implement` and `review-machinery` graphs SHALL NOT be registered. The `grill-with-docs` name SHALL NOT appear (renamed to adopt-with-docs). The deleted `artifact-workflow` and `skill-workflow` graphs SHALL NOT be registered (skeleton + thin composition deleted — ADR 0101). The `graph-workflow` name SHALL NOT appear (retired — the maker journey is `graph-generate`, ADR 0108). The deleted `doc-update` graph SHALL NOT be registered (doc-maintenance split — closure owns lifecycle).
 
 #### Scenario: Registry matches graph files
 
 - **WHEN** the registry is loaded
-- **THEN** every built-in graph file has an entry and every entry resolves to an existing file — 9 names each way
+- **THEN** every built-in graph file has an entry and every entry resolves to an existing file — 10 names each way
 - **AND** estate-maintain SHALL be registered with its taskflow path
+- **AND** release-prep SHALL be registered with its taskflow path
 - **AND** no entry references grill-with-docs, refine, implement-loop-gate, doc-update, or two-tier language
 
 #### Scenario: Implement graph absent
@@ -57,6 +58,12 @@ The graph registry SHALL list exactly the built-in graphs that exist as taskflow
 
 - **WHEN** the registry is loaded
 - **THEN** arch-review-loop SHALL be present with its taskflow path
+
+#### Scenario: release-prep registered
+
+- **WHEN** the registry is loaded
+- **THEN** `release-prep` SHALL be present with its taskflow path
+- **AND** its description SHALL describe the release preparation topology (propose → plan-grill → apply → release-review)
 
 #### Scenario: Entry shape consistency
 
@@ -101,13 +108,19 @@ Agent registry entries SHALL encode the handler skill in their `skill` field, an
 
 ### Requirement: Registry description reflects current topology
 
-The `description` of a built-in graph registry entry (`packages/graph-scheduler/graphs/registry.json`) SHALL accurately reflect that graph's current topology — covering all of its phase responsibilities, SHALL NOT reference deleted or renamed phases, and SHALL NOT omit newly added phases. The arch-review entry SHALL describe standalone requirement production (scope → report → accept); the arch-review-loop entry SHALL describe the three-phase composition (requirement → adopt → implement, single loop); the adopt-with-docs entry SHALL describe requirement adoption + spec production (adopt-scope → adopting → adopt-accept → spec-propose).
+The `description` of a built-in graph registry entry (`packages/graph-scheduler/graphs/registry.json`) SHALL accurately reflect that graph's current topology — covering all of its phase responsibilities, SHALL NOT reference deleted or renamed phases, and SHALL NOT omit newly added phases. The arch-review entry SHALL describe standalone requirement production (scope → report → accept); the arch-review-loop entry SHALL describe the three-phase composition (requirement → adopt → implement, single loop); the adopt-with-docs entry SHALL describe requirement adoption + spec production (adopt-scope → adopting → adopt-accept → spec-propose); the release-prep entry SHALL describe the release preparation pipeline (propose → plan-grill → apply → release-review).
 
 #### Scenario: graph-workflow description covers the concrete maker graph
 
 - **WHEN** a consumer reads the graph-generate description
 - **THEN** it SHALL describe the concrete maker journey (entry → spec → spec-accept → implement → review → gate → accept, single kind, single operation, attached doc at .graph-scheduler/docs/)
 - **AND** it SHALL NOT reference `graph-workflow` or retired names
+
+#### Scenario: release-prep description covers the pipeline
+
+- **WHEN** a consumer reads the release-prep description
+- **THEN** it SHALL describe the four-phase release preparation pipeline (propose → plan-grill → apply → release-review, skills release-prep-analyze / release-prep-apply)
+- **AND** it SHALL NOT reference retired graph names
 
 #### Scenario: Deleted graph descriptions absent
 

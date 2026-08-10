@@ -85,6 +85,9 @@ function createTestRuntime(fixture: Fixture): Promise<SchedulerRuntime> {
       dbPath: ':memory:',
       taskflowDir: fixture.taskflowDir,
       registryPaths: [fixture.registryPath],
+      // context: [] — hermetic: ambient .graph-scheduler/config.json
+      // (gitignored, cwd-dependent) must not leak into channel assertions.
+      context: [],
     }),
   );
 }
@@ -98,7 +101,7 @@ function nodeStatus(snapshot: { nodes: ReadonlyArray<{ nodeId: string; status: s
 async function startSkippingPrologue(
   rt: SchedulerRuntime,
   graphName: string,
-): Promise<{ runId: string; node: { nodeId: string; retryAttempt: number } | null }> {
+): Promise<{ runId: string; node: { nodeId: string; retryCount: number } | null }> {
   const start = await rt.graphStart(graphName);
   let node = start.node;
   while (node?.nodeId.startsWith('$')) {
@@ -179,12 +182,12 @@ describe('gate jump transport seam', () => {
     expect(nodeStatus(r3.snapshot, 'gate')).toBe('pending');
     // Gate-only graph: no approval → no $run-mode-confirm (approval-only synthesis)
     expect(r3.node!.nodeId).toBe('$load-constraints');
-    expect(r3.node!.retryAttempt).toBe(1);
+    expect(r3.node!.retryCount).toBe(1);
 
     // After the prefix, the reset target re-dispatches with its retry visible
     const r4 = await rt.graphAdvance(runId, '$load-constraints', 0);
     expect(r4.node!.nodeId).toBe('writer');
-    expect(r4.node!.retryAttempt).toBe(1);
+    expect(r4.node!.retryCount).toBe(1);
     expect(nodeStatus(r4.snapshot, 'writer')).toBe('active');
 
     await rt.dispose();

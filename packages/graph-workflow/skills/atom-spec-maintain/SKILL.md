@@ -68,8 +68,8 @@ Produce the drift list, one entry per finding, each with evidence (path + claim 
 
 |Drift|Meaning|Resolution|
 |-|-|-|
-|Orphan spec dir|Spec dir with no domain row|Real capability (decision recorded, e.g. ADR) -> register domain row; historical artifact -> retire via REMOVED delta|
-|Missing spec|Registered active domain with no spec dir|Spec gap - create spec (maintenance change) or drop the row (domain not real)|
+|Orphan spec dir|Spec dir with no domain row|Per §1:1 Mapping Rule (register or retire)|
+|Missing spec|Registered active domain with no spec dir|Per §1:1 Mapping Rule (create or drop)|
 |Count mismatch|Claimed counts disagree with disk|Fix the claim at its source|
 |Stale reference|Citation of retired/archived contract|Repoint to the superseding record or owning module|
 
@@ -87,7 +87,7 @@ Spec content repairs SHALL be transported as an openspec change with **delta spe
 
 ## 1:1 Mapping Rule
 
-`openspec/specs/` dirs SHALL match docs/domains.md domain IDs one-to-one:
+`openspec/specs/` dirs SHALL match docs/domains.md domain IDs one-to-one (rule home: atom-domain-spec §Validation - single home; operation below):
 
 - Orphan dir (no domain row): register (real capability) or retire (REMOVED delta; dir removed from main specs after sync).
 - Registered domain without spec: spec gap - create or drop.
@@ -95,12 +95,12 @@ Spec content repairs SHALL be transported as an openspec change with **delta spe
 
 ## Verification
 
-After every pass, run:
+Evidence commands - rules live at their single homes, pointers only:
 
-1. `openspec validate` on the change (if any) - errors block archive.
-2. Diff check: spec dirs vs domain IDs - symmetric difference empty.
-3. Counts: openspec/specs dir count matches domains.md spec claims.
-4. Report drift + outcomes in the output - never silently patch.
+1. `openspec validate "<change>"` (if any) - errors block archive.
+2. `ls openspec/specs/` vs docs/domains.md domain IDs - symmetric difference empty (rule home: atom-domain-spec §Validation).
+3. `ls openspec/specs/ | wc -l` vs domains.md spec claims - match.
+4. Drift + outcomes in the output - never silently patch.
 
 ## Output
 

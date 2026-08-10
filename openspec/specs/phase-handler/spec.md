@@ -798,3 +798,17 @@ The NodeDetail construction input contract (object parameter type) SHALL be decl
 
 - **WHEN** construction executes after the declaration location is migrated
 - **THEN** the construction signature, output contract, and runtime behavior remain identical to before the migration (except for removed fields)
+
+### Requirement: NodeDetail Field Name retryCount
+
+The NodeDetail base field for the node's re-execution counter SHALL be named `retryCount` (per CONTEXT.md glossary + ADR 0046; `retryAttempt` is deprecated/removed wording). Runtime NodeDetail construction and the snapshot adapter SHALL use `retryCount`; documentation SHALL match (NODE-SCHEMA.md, atom-graph-spec PHASESCHEMA.md / SKILL.md).
+
+#### Scenario: Runtime field renamed
+
+- **WHEN** reading packages/graph-scheduler/src/phase-handler/types.ts NodeDetail and snapshot.ts adapter
+- **THEN** the field is `retryCount` (no `retryAttempt` remains)
+
+#### Scenario: Docs agree
+
+- **WHEN** scanning NODE-SCHEMA.md §Base Fields and atom-graph-spec for the field
+- **THEN** every site names `retryCount` (snapshot `retryCount` remains the gate-bound counter)

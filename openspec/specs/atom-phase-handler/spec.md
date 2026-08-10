@@ -239,3 +239,72 @@ The handler SHALL prepend a `## Decision UI` block to main-node context (alongsi
 
 - **WHEN** an interview turn has no recommendation
 - **THEN** the card SHALL appear in any run mode — the injection block does not change interview semantics
+
+### Requirement: Error handling table in SKILL.md
+
+The handler error-handling table (scenario -> response) SHALL live in atom-phase-handler SKILL.md; DECISION-CARDS.md SHALL NOT contain an error-handling section.
+
+#### Scenario: Error semantics located once
+
+- **WHEN** a consumer looks up handler error semantics
+- **THEN** they resolve to SKILL.md §Error Handling; DECISION-CARDS.md holds only card content, gate evaluation, and persist rules
+
+### Requirement: Marker emission spec single home
+
+The marker emission spec (all marker strings: `[CONSTRAINT VIOLATION]`, `[TOOL USAGE VIOLATION]`, `[FILE MISSING]`, headroom health markers, with emission-side rules) SHALL live in atom-phase-handler SKILL.md.
+
+#### Scenario: Marker list changed
+
+- **WHEN** a marker string spelling changes
+- **THEN** atom-phase-handler SKILL.md is the single edited site; downstream consumers reference it
+
+### Requirement: Run stream path single home
+
+The run-scoped output stream path (`.taskflow/outputs/<runId>/<nodeId>.output.txt`) and its fallback semantics SHALL be defined once in CONTEXT-ASSEMBLY.md; schema files SHALL NOT restate the path.
+
+#### Scenario: Stream path changed
+
+- **WHEN** the output stream path format changes
+- **THEN** only CONTEXT-ASSEMBLY.md §Run-Scoped Output Streams is edited
+
+### Requirement: NODE-SCHEMA owns runtime shapes only
+
+NODE-SCHEMA.md SHALL define NodeDetail, GraphSnapshot, IApprovalDecision, and the fsmState status-value table (idle/running/completed/terminated); it SHALL NOT restate completion mechanisms (owned by atom-graph-spec ROUTING + atom-pilot SKILL.md).
+
+#### Scenario: Completion defined once
+
+- **WHEN** a consumer needs run completion semantics
+- **THEN** they resolve to atom-graph-spec ROUTING §Completion + atom-pilot SKILL §Run Completion; NODE-SCHEMA holds the status-value table only
+
+### Requirement: Mode-Source Canonical Sites
+
+The run-mode source rule (`## Run Mode` block, absence never auto) SHALL be stated at exactly two canonical sites: atom-kernel §approval() (decision semantics) and atom-phase-handler CONTEXT-ASSEMBLY.md §Prologue Context Blocks (block sourcing). All other files SHALL reference these by pointer and SHALL NOT restate the rule.
+
+#### Scenario: Two-site rule
+
+- **WHEN** scanning phase-handler SKILL.md, DECISION-CARDS.md, NODE-SCHEMA.md, or atom-pilot SKILL.md for run-mode semantics
+- **THEN** each carries only pointers to the canonical sites — no restatement
+
+#### Scenario: Schema carries no behavior rule
+
+- **WHEN** reading NODE-SCHEMA.md §GraphSnapshot
+- **THEN** no run-mode consumption rule appears — schema files carry field shapes only
+
+### Requirement: Error Handling Unique Rows Only
+
+atom-phase-handler SKILL §Error Handling SHALL contain only rows whose content is not stated elsewhere in the skill family: main-phase-requires-task, channel-resolution failure, task() dispatch failure. Rows duplicating flow steps (unknown type, judge failure, auto-without-recommendation, prologue degradation) SHALL be absent — those live at their flow-step sites.
+
+#### Scenario: Duplicate rows deleted
+
+- **WHEN** reading phase-handler SKILL §Error Handling
+- **THEN** rows 4-7 of the pre-convergence table (unknown type / judge fails / auto no-recommendation / prologue missing) are absent
+- **AND** no other file restates them
+
+### Requirement: Judge Failure Single Home
+
+The conservative judge-failure rule (failure -> no hit -> pass through; never fabricate a jump) SHALL be stated once: atom-kernel §judge() + its failure table. All other sites SHALL pointerize.
+
+#### Scenario: Single-site conservative rule
+
+- **WHEN** scanning phase-handler DECISION-CARDS.md §Gate Jump Evaluation or atom-pilot SKILL §Error Handling for the conservative rule
+- **THEN** only a `per atom-kernel §judge()` pointer exists

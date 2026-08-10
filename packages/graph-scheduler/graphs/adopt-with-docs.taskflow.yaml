@@ -35,12 +35,12 @@ phases:
       (appended_to set); absent → record_path grilling-derived — never asked.
       No-content rule: adopt-scope output shows idea_goal: none (user confirmed
       nothing to adopt) → append NO record (no appendix section), change_name
-      empty, doc_updates empty, adr_created false — zero side effects.
+      empty, adr_created false — zero side effects.
       Domain-modeling side effects (user-confirmed, never autonomous):
       CONTEXT.md term updates; ADR decision — always asked, three-condition
       test shapes the recommendation, never the decision.
 
-      Output contract: consensus, change_name, doc_updates, adr_created,
+      Output contract: consensus, change_name, adr_created,
       adr_path, input_document, appended_to, record_path.
 
   # Adoption approval — Continue → spec production; re-adopt/restart dynamic.

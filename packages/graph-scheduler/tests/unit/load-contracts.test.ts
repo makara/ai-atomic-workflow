@@ -70,6 +70,8 @@ describe('load-time contract validation', () => {
         registryPaths: [join(fixture.taskflowDir, 'registry.json')],
         // Explicit — fixtures use main-type phases; config.json lookup is cwd-dependent
         // (package-local config has no agentRegistry), so the test must not rely on it.
+        // context: [] — hermetic: ambient project-layer entries must not warn.
+        context: [],
       });
       const res = yield* Effect.either(Effect.tryPromise(() => rt.graphStart('bad-approval')));
       yield* Effect.tryPromise(() => rt.dispose());
@@ -117,6 +119,8 @@ describe('load-time contract validation', () => {
         registryPaths: [join(fixture.taskflowDir, 'registry.json')],
         // Explicit — fixtures use main-type phases; config.json lookup is cwd-dependent
         // (package-local config has no agentRegistry), so the test must not rely on it.
+        // context: [] — hermetic: ambient project-layer entries must not warn.
+        context: [],
       });
       const res = yield* Effect.either(Effect.tryPromise(() => rt.graphStart('warny')));
       yield* Effect.tryPromise(() => rt.dispose());
@@ -158,6 +162,8 @@ describe('load-time contract validation', () => {
         registryPaths: [join(fixture.taskflowDir, 'registry.json')],
         // Explicit — fixtures use main-type phases; config.json lookup is cwd-dependent
         // (package-local config has no agentRegistry), so the test must not rely on it.
+        // context: [] — hermetic: ambient project-layer entries must not warn.
+        context: [],
       });
       const res = yield* Effect.either(Effect.tryPromise(() => rt.graphStart('clean-graph')));
       yield* Effect.tryPromise(() => rt.dispose());

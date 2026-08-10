@@ -12,7 +12,7 @@ last_updated: '2026-08-08'
 
 # Atom-Doc-Maintain
 
-Document estate maintenance deep module. One contract `maintain({ trigger, scope })` -> `{ changes, validation, updated }`. Estate triggers only - closure triggers refused (see §Trigger Classification). CHANGELOG never maintained - separate flow (see §Document Types).
+Document estate maintenance deep module. One contract `maintain({ trigger, scope })` -> `{ changes, validation, updated }`. Estate triggers only - closure triggers refused (see §Trigger Classification). CHANGELOG excluded - see §Document Types (single home).
 
 ## Context Requirements
 
@@ -37,9 +37,6 @@ Document estate maintenance deep module. One contract `maintain({ trigger, scope
 - verify
 
 ### Files
-
-- ./CONTEXT.md
-- docs/domains.md
 
 ## Entry
 
@@ -73,22 +70,22 @@ Classification SHALL be derived from the event - never inferred from an intervie
 
 |Class|Documents|Maintenance rule|
 |-|-|-|
-|`index`|docs/domains.md - domain standard + bidirectional asset mapping|Evolution four-step per domains.md; every asset maps to exactly one domain; spec dirs match domain IDs 1:1; format per atom-domain-spec (split principles, count bound, layering, provenance, evolution, head-position Design Requirements block, linkage rule)|
-|`derived-view`|CONTEXT.md, README.md (+ zh mirrors)|`source → transform → verify`: CONTEXT from packages state (counts, names); README regenerated from docs/readme-blueprint.md. CHANGELOG - separate flow (see §Document Types)|
-|`normative`|docs/ family - design, conventions, constraints, glossary, etc.|Targeted edits only - never re-derivation; terminology updates per domain-modeling (glossary + CONTEXT.md)|
+|`index`|docs/domains.md - domain standard + bidirectional asset mapping|Evolution four-step per domains.md; mapping rules per atom-domain-spec (split principles, count bound, layering, provenance, evolution, head-position Design Requirements block, linkage rule - single home)|
+|`derived-view`|README.md (+ zh mirrors)|`source -> transform -> verify`: README regenerated from docs/readme-blueprint.md. CHANGELOG excluded - see §Document Types|
+|`normative`|docs/ family - design, conventions, constraints, etc. + CONTEXT.md (glossary - checked per §Base Documents)|Targeted edits only - never re-derivation; terminology updates per domain-modeling (CONTEXT.md terms + _Avoid_ lists)|
 |`contract`|openspec/specs/<domain>/spec.md|OpenSpec delta flow only (ADDED/MODIFIED/REMOVED) - maintenance never edits main specs directly|
 
-Base documents (CONTEXT.md, README.md) SHALL be checked on every `domain-change` pass even when no other class is affected. CONTEXT.md + docs/domains.md arrive via the platform convention layer (default-loaded, absence-tolerant) - absent channel -> n/a line, never fabricated counts.
+Base documents (CONTEXT.md, README.md) SHALL be checked on every `domain-change` pass even when no other class is affected. CONTEXT.md + docs/domains.md arrive via the platform convention layer (default-loaded, absence-tolerant) - absent channel -> n/a line, never fabricated counts. CONTEXT.md is checked as the glossary (structure per CONTEXT-FORMAT.md + term currency), NOT as a derived view.
 
 ## Consistency Gate
 
 Every pass SHALL run the gate and report into `validation` - never silently patch. Evidence per check (command -> expected):
 
-- **Mapping** - assets <-> domains bidirectional agreement: every asset maps to exactly one domain; every domain has >=1 asset; openspec/specs dirs match domain IDs 1:1. Evidence: `find docs/ -name "*.md"` vs `docs/domains.md` asset list; `ls openspec/specs/` vs domain IDs.
+- **Mapping** - rule per atom-domain-spec §Validation (single home: 1:1 asset/domain + spec-dir matching); Evidence: `find docs/ -name "*.md"` vs `docs/domains.md` asset list; `ls openspec/specs/` vs domain IDs.
 - **Links** - relative file/skill/anchor references resolve (no dangling targets). Evidence: `grep -rEo '(docs|packages)/[a-z0-9/._-]+\.md' docs/` -> each target exists.
 - **Counts** - stated counts (ADR/reports/skills/graphs) match directory facts. Evidence: `ls docs/adr/ | wc -l` vs stated ADR count; `ls packages/graph-workflow/skills/ | wc -l` vs stated skill count.
-- **Derived** - derived views match source state (counts, names, paths). Evidence: `diff <(ls packages/graph-workflow/skills/) CONTEXT.md skill list` -> empty.
-- **Linkage** (per atom-domain-spec) - spec/ADR associations appear only inside domain list tables of docs/domains.md. Evidence: `grep -nE 'ADR [0-9]{4}|openspec/specs' docs/domains.md` -> every hit lands in Overview or a detail table row.
+- **Derived** - derived views match source state (counts, names, paths). Evidence: `diff <(grep -oE '\[[^]]+\]\([^)]+\)' README.md) <(grep -oE '\[[^]]+\]\([^)]+\)' docs/readme-blueprint.md)` -> empty (derived README matches blueprint); CONTEXT.md excluded from the derived check (glossary - checked via §Base Documents).
+- **Linkage** - rule per atom-domain-spec §Linkage Rule (single home: spec/ADR associations appear only inside domain list tables). Evidence: `grep -nE 'ADR [0-9]{4}|openspec/specs' docs/domains.md` -> every hit lands in Overview or a detail table row.
 
 ADR lifecycle invariants SHALL NOT be checked here - atom-doc-lifecycle owns them.
 

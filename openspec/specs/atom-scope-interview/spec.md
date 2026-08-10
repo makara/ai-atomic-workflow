@@ -27,3 +27,21 @@ The `atom-scope-interview` entry procedure SHALL treat `CONTEXT.md` lookup as co
 
 - **WHEN** the convention layer supplies CONTEXT.md
 - **THEN** the entry procedure SHALL use its vocabulary for scope proposals
+
+### Requirement: Coined Term Defined
+
+atom-scope-interview SHALL define `canonical spelling` locally (one line) when the term is used — a coined term with no definition site is a violation (Leading Words rule).
+
+#### Scenario: Term defined in-skill
+
+- **WHEN** reading the skill's §Input declaration table
+- **THEN** `canonical spelling` carries a one-line local definition or a pointer to its owning spec
+
+### Requirement: Degradation Pointerized
+
+The `as-needed` behavior flag SHALL reference atom-kernel §interview() Zero-question degradation by pointer — no restatement of the concept.
+
+#### Scenario: Pointer only
+
+- **WHEN** reading the Behavior flags declaration
+- **THEN** the zero-question degradation concept appears as `per atom-kernel §Zero-question degradation` — no restated mechanics

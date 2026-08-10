@@ -79,7 +79,7 @@ function findTable(md: string, headerAnchor: string): Table | undefined {
 function baseNodeDetailKeys(): Set<string> {
   // `agent` is a main-type field documented in the base table — tolerated
   // here (assertKeysCovered allows it via the type-specific whitelist).
-  return new Set(['nodeId', 'type', 'dependsOn', 'handlerSkill', 'skill', 'agent', 'operations', 'retryAttempt']);
+  return new Set(['nodeId', 'type', 'dependsOn', 'handlerSkill', 'skill', 'agent', 'operations', 'retryCount']);
 }
 
 function nodeDetailKeys(): Set<string> {
@@ -97,7 +97,7 @@ function nodeDetailKeys(): Set<string> {
     'channels',
     'jumps',
     'route',
-    'retryAttempt',
+    'retryCount',
   ]);
 }
 
@@ -118,7 +118,7 @@ function assertKeysCovered(keys: Set<string>): void {
     channels: true,
     jumps: true,
     route: true,
-    retryAttempt: true,
+    retryCount: true,
   };
   const baseRecord: Record<keyof IBaseNodeDetail, true> = {
     nodeId: true,
@@ -127,7 +127,7 @@ function assertKeysCovered(keys: Set<string>): void {
     handlerSkill: true,
     skill: true,
     operations: true,
-    retryAttempt: true,
+    retryCount: true,
   };
   const detailKeys = new Set(Object.keys(detailRecord));
   const baseKeys = new Set(Object.keys(baseRecord));

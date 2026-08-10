@@ -10,8 +10,9 @@ Binding constraints on domain design (split, boundary, kind, naming) - standing 
 - No Doc-Family domain kind - documentation standards are carried by skills and other documents.
 - No Virtual domain kind - virtual specs deduplicate into their corresponding entity domains.
 - Deleted-domain spec content: non-packages content deleted outright; packages-related content merges into the corresponding entity domain spec.
-- domains.md, openspec/specs, and docs/adr content pure English — all prose (titles, headings, paragraphs, tables, list items, link text); code/identifiers/paths untouched.
+- CONTEXT.md, domains.md, openspec/specs, and docs/adr content pure English — all prose (titles, headings, paragraphs, tables, list items, link text); code/identifiers/paths untouched.
 - Existing non-English content in domains.md, openspec/specs, and docs/adr translated to English.
+- Merged source domains are deleted entirely with no residual references in estate documents; ADR decision records stay exempt as historical evidence.
 
 ## Split Standard
 
@@ -19,7 +20,7 @@ Binding constraints on domain design (split, boundary, kind, naming) - standing 
 
 |Rule|Content|
 |-|-|
-|R1|Each skill = one domain (`packages/graph-workflow/skills/` 14)|
+|R1|Each skill = one domain (`packages/graph-workflow/skills/` 16)|
 |R2|Each graph = one domain (`packages/graph-scheduler/graphs/` 9)|
 |R3|Each engine feature point = one domain (graph-scheduler module family, e.g. fsm / run-record / approval / gate / routing / constraints / channels / prologue)|
 |R4|Domain index scope per Design Requirements (packages/-owned + necessary supporting domains)|
@@ -34,11 +35,11 @@ Binding constraints on domain design (split, boundary, kind, naming) - standing 
 |-|-|-|
 |`skill`|Built-in skill domain|17|
 |`graph`|Built-in graph domain|9|
-|`engine-feature`|Engine feature-point domain|25|
+|`engine-feature`|Engine feature-point domain|26|
 
 ### Status Tags
 
-`active` (current) / `retired` (superseded or removed capability — keeps a row marked retired for trace) / `deprecated` (legacy — takes no row, annotation only). Legacy skills under root `skills/` (9 SKILL.md on disk) noted as a whole, not listed as index rows.
+`active` (current) / `retired` (superseded or removed capability — keeps a row marked retired for trace) / `deprecated` (legacy — takes no row, annotation only). Legacy skills under root `skills/` (9 SKILL.md — removed from disk 2026-08-04) noted as a whole, not listed as index rows.
 
 ## Dependency Rules
 
@@ -69,6 +70,8 @@ Binding constraints on domain design (split, boundary, kind, naming) - standing 
 |atom-spec-maintain|skill|Skill domain|active|supporting|
 |atom-adr-maintain|skill|Skill domain|active|supporting|
 |setup-atomic-workflow|skill|Skill domain|active|supporting|
+|release-prep-analyze|skill|Skill domain|active|core|
+|release-prep-apply|skill|Skill domain|active|core|
 |e2e-minimal|graph|Graph domain|active|core|
 |arch-review|graph|Graph domain|active|core|
 |arch-review-loop|graph|Graph domain|active|core|
@@ -103,10 +106,11 @@ Binding constraints on domain design (split, boundary, kind, naming) - standing 
 |mutation-plane|engine-feature|Engine-feature domain — mutation + ground-truth plane (ADR 0128): serena sole engine for write/verify classes|active|core|
 |query-plane|engine-feature|Engine-feature domain — query plane (ADR 0128): jcodemunch first-class for locate/search/analyze, read-only|active|core|
 |atomic-step-flows|engine-feature|Engine-feature domain — atomic steps follow fixed cross-plane flows (ADR 0128): index → confirm → mutate → register → verify|active|core|
+|hlt-heat-layering|engine-feature|Engine-feature domain|active|core|
 
-51 domains total (17 skill — 15 active + 2 retired — + 9 graph + 25 engine-feature — 23 active + 2 retired). Status: 47 active + 4 retired.
+54 domains total (19 skill — 17 active + 2 retired — + 9 graph + 26 engine-feature — 24 active + 2 retired). Status: 50 active + 4 retired.
 
-## Skill Domains (17 · 15 active + 2 retired)
+## Skill Domains (19 · 17 active + 2 retired)
 
 |Domain ID|Description|Asset|Aggregate specs|Dependencies|Subdomain|
 |-|-|-|-|-|-|
@@ -127,8 +131,10 @@ Binding constraints on domain design (split, boundary, kind, naming) - standing 
 |atom-spec-maintain|openspec/specs estate maintenance contract — reverse-analysis triple diff (actual capabilities ↔ domains.md ↔ spec dirs) → minimal change (delta specs only) → openspec-sync-specs → archive; spec dirs ↔ domain IDs 1:1|`packages/graph-workflow/skills/atom-spec-maintain/SKILL.md`|`openspec/specs/atom-spec-maintain/spec.md`|atom-domain-spec, atom-doc-maintain||supporting|
 |atom-adr-maintain|ADR estate alignment contract — status verification vs decision reality; stale chains folded via atom-doc-lifecycle fold machinery; index rebuild; archive hygiene; dead citations repointed|`packages/graph-workflow/skills/atom-adr-maintain/SKILL.md`|`openspec/specs/atom-adr-maintain/spec.md`|atom-doc-lifecycle, atom-doc-maintain||supporting|
 |setup-atomic-workflow|Project graph config initialization|`packages/graph-workflow/skills/setup-atomic-workflow/SKILL.md`|`openspec/specs/setup-atomic-workflow/spec.md`|—||supporting|
+|release-prep-analyze|Pre-release analysis — version proposal from git tag history (never package.json) + changelog inventory from one diff scan; deterministic + idempotent pre-tag, never executes git tag/commit/push|`packages/graph-workflow/skills/release-prep-analyze/SKILL.md`|`openspec/specs/release-prep/spec.md`|atom-kernel||core|
+|release-prep-apply|Pre-release writes — version bump on release-line surfaces, CHANGELOG fold per spec, README list sync vs ground truth; overwrite-style, idempotent, per-domain verification|`packages/graph-workflow/skills/release-prep-apply/SKILL.md`|`openspec/specs/release-prep/spec.md`|atom-kernel||core|
 
-Domain spec: one per domain (47 registered; graph-generate carries the merged maker-journey requirements (former workflow-scenarios aggregate); retired atom-mcp-contract, atom-atomic-step, context-delivery-fidelity, structural-channel-materialization specs deleted with retirement; channel-tiers orphan retired with its three-tier content merged into channels-context-model; domains without an independent behavior contract register Purpose only).
+Domain spec: one per domain (48 registered; graph-generate carries the merged maker-journey requirements (former workflow-scenarios aggregate); retired atom-mcp-contract, atom-atomic-step, context-delivery-fidelity, structural-channel-materialization specs deleted with retirement; channel-tiers orphan retired with its three-tier content merged into channels-context-model; merged source domains of hlt-heat-layering deleted entirely (rows removed, spec dirs removed by specs-sync); readme-estate orphan retired — doc-family content, no Doc-Family domain kind per Design Requirements, spec dir removed by specs-sync; domains without an independent behavior contract register Purpose only).
 
 ## Graph Domains (9 · Status active)
 
@@ -144,7 +150,7 @@ Domain spec: one per domain (47 registered; graph-generate carries the merged ma
 |graph-generate|Graph production — the maker journey (name states the operation): concrete 7-phase graph (entry → spec → spec-accept → implement → review → gate → accept); single kind (graph), single operation (create); entry confirms graph name + topology scope + save location (default `.graph-scheduler/graphs/`), no CONTEXT.md dependency; implement writes `.taskflow.yaml` + registry entry + attached doc (`.graph-scheduler/docs/<name>.md`); no skill co-production|`packages/graph-scheduler/graphs/graph-generate.taskflow.yaml`; produces `.graph-scheduler/graphs/`, `.graph-scheduler/docs/`|`openspec/specs/graph-generate/spec.md` (maker-journey requirements — merged from workflow-scenarios)|atom-scope-interview, atom-graph-spec||core|
 |estate-maintain|Estate maintenance graph — entry (trigger classification: domain-change/skill-change/proactive + workstream selection) → domains-index (atom-doc-maintain) / specs-sync (atom-spec-maintain) / adr-align (atom-adr-maintain) → review (consistency gate + reverse-validation + read-only deployment-mirror check) → accept|`packages/graph-scheduler/graphs/estate-maintain.taskflow.yaml`|`openspec/specs/estate-maintain/spec.md`|atom-scope-interview, atom-doc-maintain, atom-spec-maintain, atom-adr-maintain, atom-domain-spec, atom-doc-lifecycle||core|
 
-## Engine-Feature Domains (23 active · 2 retired)
+## Engine-Feature Domains (24 active · 2 retired)
 
 |Domain ID|Description|Asset|Aggregate specs|Dependencies|Subdomain|
 |-|-|-|-|-|-|
@@ -152,7 +158,7 @@ Domain spec: one per domain (47 registered; graph-generate carries the merged ma
 |fsm|Pure-function state machine core (START/COMPLETE/JUMP/FORCE_END)|`packages/graph-scheduler/src/fsm/transition.ts`, `packages/graph-scheduler/src/fsm/events.ts`, `packages/graph-scheduler/src/fsm/effects.ts`, `packages/graph-scheduler/src/fsm/state-machine.ts`|`openspec/specs/fsm/spec.md`|— (pure functions, zero dependencies)||core|
 |graph-definition|Graph definition loading/validation/flattening/topology/contract checks/routing semantics + data shapes (zod schemas + shared types)|`packages/graph-scheduler/src/graph-definition.ts`, `packages/graph-scheduler/src/flow-flatten.ts`, `packages/graph-scheduler/src/topology.ts`, `packages/graph-scheduler/src/types.ts`, `packages/graph-scheduler/src/schemas/phase.ts`, `packages/graph-scheduler/src/schemas/node-state.ts`, `packages/graph-scheduler/src/schemas/config.ts`, `packages/graph-scheduler/src/schemas/index.ts`, `packages/graph-scheduler/src/schemas/registry-entry.ts`, `packages/graph-scheduler/src/schemas/taskflow.ts`, `packages/graph-scheduler/src/schemas/effect-wrapper.ts`|`openspec/specs/graph-definition/spec.md`|graph-registry, context-channels||core|
 |graph-registry|Multi-registry merging (built-in + project)|`packages/graph-scheduler/src/registry-loader.ts`|`openspec/specs/graph-registry/spec.md`|—||core|
-|graph-generate-identity|Maker-graph identity — graph name states the operation, top-level `description`, registry project-first precedence with `resolvedFrom`, load-probe validation, runId-scoped outputs|`packages/graph-scheduler/src/registry-loader.ts` (project-first shadowing), `packages/graph-scheduler/src/graph-loader.ts` (resolvedFrom/resolvedPath/description), `packages/graph-scheduler/src/api/crud.ts` (graph_start identity fields), `packages/graph-scheduler/src/scheduler-runtime.ts` (identity banner types)|`openspec/specs/graph-generate-identity/spec.md`|graph-registry, graph-mcp-api||core|
+|graph-generate-identity|Maker-graph identity — graph name states the operation, top-level `description`, registry project-first precedence with `resolvedFrom`, load-probe validation, runId-scoped outputs|`packages/graph-scheduler/src/registry-loader.ts` (project-first shadowing), `packages/graph-scheduler/src/api/graph-loader.ts` (resolvedFrom/resolvedPath/description), `packages/graph-scheduler/src/api/crud.ts` (graph_start identity fields), `packages/graph-scheduler/src/scheduler-runtime.ts` (identity banner types)|`openspec/specs/graph-generate-identity/spec.md`|graph-registry, graph-mcp-api||core|
 |phase-handler|Three handler types (main/approval/gate) + decision persistence|`packages/graph-scheduler/src/phase-handler/types.ts`, `packages/graph-scheduler/src/phase-handler/main-handler.ts`, `packages/graph-scheduler/src/phase-handler/approval-handler.ts`, `packages/graph-scheduler/src/phase-handler/gate-handler.ts`, `packages/graph-scheduler/src/phase-handler/index.ts`, `packages/graph-scheduler/src/phase-handler/errors.ts`|`openspec/specs/phase-handler/spec.md`|context-channels||core|
 |approval|approval() decision primitive — the single mode-aware single-decision UI that absorbs question() (ADR 0133); card format rules + mode dispatch (manual card / auto with recommendation executes / auto no-recommendation card); implementation in phase-handler (approval-handler.ts) + atom-kernel (§approval() contract)|`openspec/specs/approval/spec.md`|phase-handler||core|
 |auto-decision-rationale|Auto-approval decision rationale — `rationale` field persisted on the Run Mode auto path (observable output basis, F6); manual choices omit it|`packages/graph-scheduler/src/phase-handler/types.ts` (IApprovalDecision.rationale), `packages/graph-scheduler/src/phase-handler/approval-handler.ts` (auto path persistence)|`openspec/specs/auto-decision-rationale/spec.md`|phase-handler||core|
@@ -169,26 +175,28 @@ Domain spec: one per domain (47 registered; graph-generate carries the merged ma
 |tool-usage-contract|Tool usage contract — deterministic triggers (8KB output → headroom_compress; register_edit while jcodemunch in use; serena-only core tiers per HLT Registry); class-based Tool usage check (per declared class, auto violation markers, missing block = all-class violation); pilot tools stats; headroom three-state health gate|Shared assets — behavior spec of the tool-usage feature point; implementation in atom-kernel (§HLT Registry) + atom-phase-handler (§Tool Usage Check — class-based) + atom-pilot (Tools stats)|`openspec/specs/tool-usage-contract/spec.md`|atom-kernel, atom-phase-handler, atom-pilot||core|
 |high-level-tool|High-Level Tool Registry (ADR 0119/0123) — two-tier structure: core classes (locate/read/write/verify/run) chain length exactly 1, sole tool serena, zero fallback; utility classes (compress/review/archive/graph-ops/register_edit) optional with use cases + n/a rules; entry anatomy (contract: I/O + verify + conditional index obligations; chain: intra-serena tiering; enforcement: per-platform views, deferred; tier marker); step = registered tool call `{ intent, tool, args, bound }` (legacy 8-field shape rejected); phase `operations:` + skill `Operation classes` feed handler injection + class-based verification|Shared assets — behavior spec of the HLT feature point; implementation in atom-kernel (§HLT Registry + §Tool Schemas) + atom-graph-spec (operations field) + atom-skill-spec (Operation classes subsection) + atom-phase-handler (Registry Injection) + graph-scheduler (hlt-classes.ts, PhaseSchema)|`openspec/specs/high-level-tool/spec.md`|atom-kernel, atom-graph-spec, atom-skill-spec, atom-phase-handler||core|
 |serena-single-engine|Serena single-engine execution (ADR 0123) — core-class contract: locate/read/write/verify/run chains length exactly 1, sole tool serena, zero fallback (unavailable → loud failure); intra-serena tiering (symbol LSP / FS all languages) closes the coverage gap inside one dependency; run via platform shell (`bash`, rtk prefix) per the run chain (ADR 0125); register_edit conditional on jcodemunch use|Shared assets — behavior spec of the serena-single-engine feature point; implementation in atom-kernel (§HLT Registry core entries + §Tool Schemas) + .graph-scheduler/constraints.md (rule 8)|`openspec/specs/serena-single-engine/spec.md`|high-level-tool, tool-usage-contract, atom-kernel||core|
-|omp-adapter|OMP platform adapter prototype — HLT enforcement seam on the OMP extension surface: tool_call fail-closed gate + setActiveTools crop + lifecycle signals (dispatch carriers arm; approval/gate/null + force_end + agent_end disarm — restriction lifecycle ⊆ driving run lifecycle); subagent-delegation boundary recorded (platform hooks main-agent-scoped); xd:// device-partition classification|`.omp/extensions/hlt-policy.ts`, `.omp/extensions/hlt-policy.test.ts`|`openspec/specs/omp-adapter/spec.md`|serena-single-engine, high-level-tool, atom-kernel||core|
+|omp-adapter|OMP platform adapter prototype (always-on, ADR 0139) — HLT enforcement seam on the OMP extension surface: scenario-table enforcement always-resident and non-disableable (no armed window, no setActiveTools crop, no disarm); tool_call fail-closed gate classifies (target path + type) -> scenario -> designated adapter; sub-agents covered (platform hooks where reachable, prompt inject carries discipline); caveman + rtk prompts injected ONCE per agent start via before_agent_start (main + sub-agents); per-LLM-call append deleted (provider cache stable); validation-only, never in packages/formal docs|`.omp/extensions/hlt-policy.ts`, `.omp/extensions/hlt-policy.test.ts`|`openspec/specs/omp-adapter/spec.md`|serena-single-engine, high-level-tool, atom-kernel||core|
 |mutation-plane|Mutation + ground-truth plane — serena sole engine for write/verify classes in the HLT registry (ADR 0128); LSP-accurate semantics, safety-guarded editing, diagnostics-backed verification|Shared assets — behavior spec of the two-plane feature point; implementation owned by high-level-tool / serena-single-engine|`openspec/specs/mutation-plane/spec.md`|high-level-tool, serena-single-engine||core|
 |query-plane|Query plane — jcodemunch first-class engine for locate/search/analyze in the HLT registry (ADR 0128); read-only by charter; results carry confidence/freshness metadata|Shared assets — behavior spec of the two-plane feature point; implementation owned by high-level-tool|`openspec/specs/query-plane/spec.md`|high-level-tool||core|
 |atomic-step-flows|Atomic steps follow fixed cross-plane flows (ADR 0128) — every atomic operation (query/read/create/delete/edit/verify/review) follows a fixed cross-plane tool sequence: index → confirm → mutate → register → verify; predictable and auditable execution|Shared assets — behavior spec of the cross-plane flow feature point; implementation owned by high-level-tool / serena-single-engine|`openspec/specs/atomic-step-flows/spec.md`|high-level-tool, serena-single-engine||core|
+|hlt-heat-layering|HLT heat-layering — usage-scenario-keyed registry (ADR 0138) + content heat/positioning/allocation + four-family MCP heat layering (ADR 0139): tool assignment derived from real usage scenarios (target domain × operation), each scenario names exactly one adapter with its obligations and n/a rules, no fallback, no judgment surface; core scenario rows hot in atom-kernel, full table cold in HLT-REGISTRY.md, allocation single-home; serena/jcodemunch hot parameter surfaces (schemas single-home in SERENA-SCHEMAS.md / JCODEMUNCH-SCHEMAS.md), graph-scheduler hot declaration (atom-pilot §MCP Reference with heat annotation), headroom MCP-authoritative contract; Registry Injection carries the scenario key|Shared assets per HLT convention: `packages/graph-workflow/skills/atom-kernel/SKILL.md`, `packages/graph-workflow/skills/atom-kernel/HLT-REGISTRY.md`, `packages/graph-workflow/skills/atom-kernel/SERENA-SCHEMAS.md`, `packages/graph-workflow/skills/atom-kernel/JCODEMUNCH-SCHEMAS.md`|`openspec/specs/hlt-heat-layering/spec.md`|atom-kernel, atom-pilot, atom-phase-handler, high-level-tool, omp-adapter||core|
 
 ## Asset Reverse Mapping (Asset → Domain)
 
 |Asset|Domain|
 |-|-|
-|`packages/graph-workflow/skills/<name>/SKILL.md` (14)|Same-named skill domain|
+|`packages/graph-workflow/skills/<name>/SKILL.md` (16)|Same-named skill domain|
 |`packages/graph-scheduler/graphs/<name>.taskflow.yaml` (9) + `registry.json`|Same-named graph domain; registry.json additionally noted under graph-registry|
-|`packages/graph-scheduler/src/fsm/` (4 files), `packages/graph-scheduler/src/topology.ts`, `packages/graph-scheduler/src/flow-flatten.ts`, `packages/graph-scheduler/src/graph-definition.ts`, `packages/graph-scheduler/src/types.ts`, `packages/graph-scheduler/src/schemas/` (7 files), `packages/graph-scheduler/src/context/` (3 files), `packages/graph-scheduler/src/phase-handler/` (6 files), `packages/graph-scheduler/src/lib/db/` (4 files), `packages/graph-scheduler/src/api/` (7 files), `packages/graph-scheduler/src/prologue.ts`, `packages/graph-scheduler/src/registry-loader.ts`, `packages/graph-scheduler/src/scheduler-runtime.ts`, `packages/graph-scheduler/src/runtime-start.ts`, `packages/graph-scheduler/src/debug.ts`, `packages/graph-scheduler/src/filesystem.ts`|Corresponding engine-feature domain (see detail tables)|
+|`packages/graph-scheduler/src/fsm/` (4 files), `packages/graph-scheduler/src/topology.ts`, `packages/graph-scheduler/src/flow-flatten.ts`, `packages/graph-scheduler/src/graph-definition.ts`, `packages/graph-scheduler/src/types.ts`, `packages/graph-scheduler/src/schemas/` (7 files), `packages/graph-scheduler/src/context/` (2 files), `packages/graph-scheduler/src/phase-handler/` (6 files), `packages/graph-scheduler/src/lib/db/` (4 files), `packages/graph-scheduler/src/api/` (7 files), `packages/graph-scheduler/src/prologue.ts`, `packages/graph-scheduler/src/registry-loader.ts`, `packages/graph-scheduler/src/scheduler-runtime.ts`, `packages/graph-scheduler/src/runtime-start.ts`, `packages/graph-scheduler/src/debug.ts`, `packages/graph-scheduler/src/filesystem.ts`, `packages/graph-scheduler/src/hlt-classes.ts` (high-level-tool), `packages/graph-scheduler/src/config-service.ts` (channels-context-model)|Corresponding engine-feature domain (see detail tables)|
 |`docs/domains.md`|governance asset — no domain row (index format governed by atom-domain-spec, maintenance by atom-doc-maintain)|
-|`README.md` (root), `CHANGELOG.md` (root), `docs/README.zh-CN.md`, `docs/CHANGELOG.zh-CN.md`, `docs/readme-blueprint.md`, `docs/glossary.md`, `docs/workflow.md`, `docs/philosophy.md`, `docs/design.md`, `docs/conventions.md`, `docs/requirements.md`, `docs/feedback.md`, `docs/constraints.md`, `docs/core-requirements.md`, `docs/specs/` (27 files), `docs/platform/` (README.md + 10 subdirectories), `docs/dev/`, `docs/designs/`, `docs/grill/`, `docs/tickets/`, `docs/agents/` (4 files)|governance assets — no domain row|
+|`README.md` (root), `CHANGELOG.md` (root), `docs/README.zh-CN.md`, `docs/CHANGELOG.zh-CN.md`, `docs/readme-blueprint.md`, `CONTEXT.md`, `docs/workflow.md`, `docs/philosophy.md`, `docs/design.md`, `docs/conventions.md`, `docs/requirements.md`, `docs/feedback.md`, `docs/constraints.md`, `docs/core-requirements.md`, `docs/specs/` (40 files), `docs/platform/` (README.md + 10 subdirectories), `docs/designs/`, `docs/grill/`, `docs/tickets/`, `docs/agents/` (3 files)|governance assets — no domain row|
 |`docs/adr/`|governance assets — no domain row (lifecycle per atom-doc-lifecycle / atom-adr-maintain)|
 |`standards/`|governance assets — no domain row (rules carried by CODING-STANDARDS files + constraints channel)|
 |`docs/reports/`|arch-review / arch-review-loop (artifacts)|
 |`docs/adopt/`|adopt-with-docs (artifacts)|
+|`packages/graph-workflow/skills/atom-kernel/SKILL.md` (§HLT Registry core scenario rows + hot surface + compact tables), `packages/graph-workflow/skills/atom-kernel/HLT-REGISTRY.md` (full table, cold archive), `packages/graph-workflow/skills/atom-kernel/SERENA-SCHEMAS.md`, `packages/graph-workflow/skills/atom-kernel/JCODEMUNCH-SCHEMAS.md` (single-home parameter tables), `.omp/extensions/hlt-policy.ts` (scenario-table enforcement), `packages/graph-workflow/skills/atom-phase-handler/SKILL.md` (Registry Injection), `packages/graph-workflow/skills/atom-pilot/SKILL.md` (§MCP Reference)|hlt-heat-layering (shared assets)|
 |`.taskflow/outputs/`|run-record / phase-handler (runtime artifacts)|
-|Root `skills/` (9 SKILL.md, retired; 17 historical directories)|Takes no row — noted as a whole as retired|
+|Root `skills/` (9 SKILL.md, retired; 17 historical directories — removed from disk 2026-08-04)|Takes no row — noted as a whole as retired|
 
 **Completeness rule**: every asset maps to exactly one domain (or explicitly noted as shared/artifact); every domain has at least one asset; any asset without a domain = documentation defect. Domain IDs strictly match asset names; asset paths written in full path form so validation is mechanical.
 
@@ -205,5 +213,5 @@ Companion: this file forbids building a `docs/domains/` directory tree; a new as
 
 ## Linkages
 
-- glossary "domain index" entry (docs/glossary.md) — defines this file's responsibility and boundary.
+- glossary "domain index" entry (CONTEXT.md) — defines this file's responsibility and boundary.
 - CONTEXT.md Docs map — references this file.

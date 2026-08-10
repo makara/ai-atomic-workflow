@@ -23,6 +23,13 @@ phases:
 
       Loop jump-backs target this node.
 
+      Scope proposal: a report exists (report_input: existing, or the
+      previous round's arch-review output shows round >= 1) AND the user
+      gives no explicit new scope → MUST propose scope = verify the
+      implementation results against the report (evidence-backed) and
+      surface new problems; never re-propose the prior round's scope
+      verbatim.
+
       Output contract: scope, focus, output, report_input
       (fresh|existing), report_path, scope_complete.
 

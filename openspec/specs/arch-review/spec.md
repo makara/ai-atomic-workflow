@@ -34,9 +34,15 @@ The review-machinery standalone graph SHALL be deleted — its single `arch-revi
 
 ### Requirement: Report-input semantics
 
-The arch-review node SHALL keep the report-input semantics: `report_input: fresh` writes a new report at the confirmed path; `report_input: fresh` with an existing file at `report_path` (round ≥ 2) transitions to re-review; `report_input: existing` re-reads the report and updates it in place. The round marker SHALL increment.
+The arch-review node SHALL keep the report-input semantics: `report_input: fresh` writes a new report at the confirmed path; `report_input: fresh` with an existing file at `report_path` (round ≥ 2) transitions to re-review; `report_input: existing` re-reads the report and updates it in place. The round marker SHALL increment. When a report already exists (`report_input: existing`, or the previous round's arch-review output shows `round >= 1`) and the user gives no explicit new scope, the entry SHALL propose a scope that verifies the actual implementation results against the report (evidence-backed) and surfaces new problems — the prior round's scope SHALL NOT be re-proposed verbatim.
 
 #### Scenario: Round ≥ 2 updates in place
 
 - **WHEN** the report file already exists at report_path
 - **THEN** arch-review reads it, marks implementation progress per Top Rec item, updates it in place, and increments the round marker
+
+#### Scenario: Existing report without new scope proposes verification
+
+- **WHEN** a report already exists (report_input: existing, or the previous round shows round >= 1) and the user gives no explicit new scope
+- **THEN** the entry SHALL propose the verification scope — check actual implementation results against the report (evidence-backed) and surface new problems
+- **AND** the prior round's scope SHALL NOT be re-proposed verbatim

@@ -356,7 +356,7 @@ The standalone `atom-mcp-contract` skill is deleted from the skills package; its
 
 ### Requirement: Constraints and docs re-point
 
-`.graph-scheduler/constraints.md` references `atom-kernel §High-Level Tool Registry` for MCP tool usage and main-node execution; CONTEXT.md skills table lists no atom-atomic-step or atom-mcp-contract row and the execution-model paragraph references the registry; built-in skill count reflects the deletions (11).
+`.graph-scheduler/constraints.md` references `atom-kernel §High-Level Tool Registry` for MCP tool usage and main-node execution; the built-in skill inventory SHALL be sourced from packages state (packages/graph-workflow/skills) with no atom-atomic-step or atom-mcp-contract entry, and the built-in skill count SHALL reflect the directory (14). CONTEXT.md SHALL be the project glossary (domain-modeling CONTEXT-FORMAT.md) — glossary-only, no architecture-reference pointer to any external file.
 
 #### Scenario: Constraint rule valid
 
@@ -365,8 +365,16 @@ The standalone `atom-mcp-contract` skill is deleted from the skills package; its
 
 #### Scenario: CONTEXT.md accurate
 
-- **WHEN** CONTEXT.md skills table is read
-- **THEN** atom-atomic-step and atom-mcp-contract are absent, the execution-model paragraph points at atom-kernel §High-Level Tool Registry, and the built-in skill count is 11
+- **WHEN** CONTEXT.md is read
+- **THEN** it SHALL contain only glossary content per CONTEXT-FORMAT.md (`## Language` terms + `_Avoid_`), with no architecture-reference sections (Status/Architecture/Execution model/Constraints/Docs map)
+
+#### Scenario: Technical overview accurate
+
+- **WHEN** built-in skills are inventoried
+- **THEN** the count (14) reflects packages/graph-workflow/skills directory state
+- **AND** atom-atomic-step and atom-mcp-contract are absent from the inventory
+- **AND** the execution-model paragraph references atom-kernel §High-Level Tool Registry
+- **AND** no external docs file is read as the inventory source
 
 ### Requirement: ASP spec files removed
 
@@ -470,3 +478,115 @@ The interview() solve-mode chain SHALL be defined once — the Internal Flow dia
 #### Scenario: single solve-mode chain
 
 Given packages/graph-workflow/skills/atom-kernel/SKILL.md When searching for the solve-mode chain (confirm → research → think → interview loop) Then it is fully stated only in the Internal Flow diagram; Mode Selection + Mode Comparison reference it
+
+### Requirement: Hot rules stay in SKILL.md
+
+atom-kernel SKILL.md SHALL retain every-dispatch operational rules (serena-sole mutation plane, evidence-loop bound, protocol obligations, approval() mode dispatch) in the body; cold reference tables (platform spellings, judge()/todo() contracts, registry detail) SHALL live in siblings behind pointers. Verbatim duplication between SKILL.md and siblings SHALL NOT exist — each fact has one home.
+
+#### Scenario: Hot rules present
+
+- **WHEN** reading atom-kernel SKILL.md
+- **THEN** the serena-sole rule, evidence-loop bound, protocol obligations, and 3-branch mode dispatch appear in the body
+
+#### Scenario: No verbatim duplication
+
+- **WHEN** searching atom-kernel SKILL.md and its siblings for identical sentences
+- **THEN** zero verbatim duplicates — the same fact appears in exactly one file
+
+#### Scenario: Reference band met
+
+- **WHEN** measuring atom-kernel SKILL.md body (frontmatter-stripped)
+- **THEN** <=1,400 words (platform-primitive reference band per atom-skill-spec Raised Length Bands, change 2026-08-09-skills-spec-compliance-platform-band)
+
+### Requirement: HLT-REGISTRY single home for platform spellings and cold primitives
+
+Platform Spellings, judge() detail, and todo() detail SHALL live once in HLT-REGISTRY.md; atom-kernel SKILL.md carries contract-level pointers only.
+
+#### Scenario: Cold primitive detail located once
+
+- **WHEN** a consumer loads judge() or todo() cold detail
+- **THEN** it resolves to HLT-REGISTRY.md; SKILL.md holds the pointer with no inline restatement
+
+### Requirement: Headroom schema merged into registry file
+
+Headroom tool schemas (compress/retrieve/stats, hash contract, health gate) SHALL live inside HLT-REGISTRY.md; no standalone HEADROOM-SCHEMAS.md file exists.
+
+#### Scenario: Headroom contract resolved
+
+- **WHEN** a consumer needs the headroom tool contract
+- **THEN** it resolves within HLT-REGISTRY.md
+
+### Requirement: Decision shape delegated to handler schema
+
+The decision record shape consumed by graph execution (IApprovalDecision incl. rationale) SHALL be defined once in atom-phase-handler NODE-SCHEMA.md; atom-kernel approval() references it instead of declaring a parallel shape.
+
+#### Scenario: Decision shape single-sourced
+
+- **WHEN** the decision record gains or loses a field
+- **THEN** only atom-phase-handler NODE-SCHEMA.md is edited; kernel approval() wording references it
+
+### Requirement: Approval card format rules single home
+
+The 8 card format rules SHALL live once in APPROVAL-CARDS.md; card content mapping lives in atom-phase-handler DECISION-CARDS.md; neither file restates the other's content.
+
+#### Scenario: Format vs content separation
+
+- **WHEN** a card format rule changes
+- **THEN** only APPROVAL-CARDS.md is edited; DECISION-CARDS.md content mapping is untouched
+
+### Requirement: Approval Decision Shape Single Home
+
+The IApprovalDecision shape and its card-selection mapping SHALL have exactly one authoritative definition site: atom-kernel/APPROVAL-CARDS.md (the card-format sibling). Consumer files (atom-phase-handler NODE-SCHEMA.md, DECISION-CARDS.md, atom-pilot SKILL.md) SHALL reference it by name and pointer, never restate the field list or JSON shapes.
+
+#### Scenario: Shape home is APPROVAL-CARDS.md
+
+- **WHEN** an agent needs the decision shape (fields, JSON forms)
+- **THEN** the single home is atom-kernel/APPROVAL-CARDS.md
+- **AND** the two legacy renderings (APPROVAL-CARDS `{label?, value?, note?, custom?}` vs NODE-SCHEMA `{action, target?, note?, rationale?, label?, value?}`) SHALL be reconciled in one mapping table at that home
+
+#### Scenario: Consumers pointerize
+
+- **WHEN** scanning NODE-SCHEMA.md, DECISION-CARDS.md, or atom-pilot SKILL.md for IApprovalDecision field definitions
+- **THEN** each SHALL carry only a `per APPROVAL-CARDS.md §<section>` pointer — no restated field lists
+
+### Requirement: Graph-Scheduler Output Sink Qualifier
+
+atom-kernel §graph-scheduler SHALL state the output-sink rule with the main-node qualifier: node output stays in the agent session and is never passed to graph_advance, EXCEPT approval/gate output (IApprovalDecision) which the pilot parses and routes. The blanket "never passed" phrasing SHALL NOT appear without the exception.
+
+#### Scenario: Qualified rule present
+
+- **WHEN** reading atom-kernel §graph-scheduler
+- **THEN** the output rule names the main-node default and the approval/gate exception (matching atom-pilot §Loop Mechanics)
+
+### Requirement: Platform-Primitive Band Compliance
+
+atom-kernel SKILL.md body SHALL stay within the platform-primitive band <=1,400 words (fence-inclusive, frontmatter-stripped). Cold branches reachable only by some activations SHALL live in siblings: interview() solve-mode additions + internal flow SHALL move to sibling INTERVIEW-DETAIL.md; the Legacy 8-field rejection clause SHALL live at HLT-REGISTRY §Protocol. The hot surface (approval()/task()/interview() rules 1-8 + Mode Selection/judge()/todo() contracts, HLT core scenario rows) SHALL remain in SKILL.md (non-transferable per Hot-content Non-Transferability).
+
+#### Scenario: Body in band
+
+- **WHEN** measuring atom-kernel SKILL.md body (fence-inclusive, frontmatter-stripped)
+- **THEN** <=1,400 words
+
+#### Scenario: Solve-mode cold in sibling
+
+- **WHEN** locating interview() solve-mode mechanics (rules 9-11, internal flow)
+- **THEN** they live in INTERVIEW-DETAIL.md — SKILL.md carries rules 1-8 + §Mode Selection + a pointer
+
+#### Scenario: Description trimmed
+
+- **WHEN** reading the skill's frontmatter description
+- **THEN** it carries trigger phrases only (compact, no long enumerations)
+
+### Requirement: Headroom and Register_Edit Single Homes
+
+The headroom compress contract SHALL be stated once (HLT-REGISTRY §headroom); the >8KB trigger and the register_edit post-edit obligation SHALL each have one authoritative site (compress entry chain / JCODEMUNCH-SCHEMAS §register_edit). Other files SHALL carry pointers only.
+
+#### Scenario: Headroom single-sited
+
+- **WHEN** scanning atom-kernel SKILL.md + HLT-REGISTRY for the headroom contract
+- **THEN** one full statement (HLT-REGISTRY §headroom) — the §Entry: compress duplicate is absent
+
+#### Scenario: Register_edit single-sited
+
+- **WHEN** scanning SKILL.md / HLT-REGISTRY / JCODEMUNCH-SCHEMAS for the register_edit obligation
+- **THEN** one full statement (JCODEMUNCH-SCHEMAS) — other sites carry pointers

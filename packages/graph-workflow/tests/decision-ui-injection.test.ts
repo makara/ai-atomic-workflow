@@ -25,23 +25,24 @@ describe('semantic injection layer — no upstream fork, Decision UI block prese
 
   it('repo-local deployment copies are byte-identical to the .refs mirror', () => {
     const agents = resolve(__dirname, '../../../.agents/skills');
-    const home = join(process.env.HOME ?? '/Users/makarawang', '.agents/skills');
+    // skills-lock.json pins the upstream set; deployment is repo-local only
+    // (.agents/skills) — home-dir copies are never assumed or touched.
+    const lock = JSON.parse(readFileSync(resolve(__dirname, '../../../skills-lock.json'), 'utf-8'));
     for (const [name, rel] of Object.entries(UPSTREAM_SKILLS)) {
       const mirror = join(REFS, rel, 'SKILL.md');
-      for (const root of [agents, home]) {
-        const deployed = join(root, name, 'SKILL.md');
-        expect(existsSync(mirror), `${name} mirror exists`).toBe(true);
-        expect(existsSync(deployed), `${name} deployed copy exists at ${root}`).toBe(true);
-        expect(read(deployed), `${name} deployed == mirror at ${root}`).toBe(read(mirror));
-      }
+      const deployed = join(agents, name, 'SKILL.md');
+      expect(lock.skills[name], `${name} locked in skills-lock.json`).toBeTruthy();
+      expect(existsSync(mirror), `${name} mirror exists`).toBe(true);
+      expect(existsSync(deployed), `${name} deployed copy exists at ${agents}`).toBe(true);
+      expect(read(deployed), `${name} deployed == mirror at ${agents}`).toBe(read(mirror));
     }
   });
 
   it('handler SKILL.md main step 1 prepends the ## Decision UI block', () => {
     const handler = read(join(SKILLS, 'atom-phase-handler/SKILL.md'));
     const mainSection = handler.slice(handler.indexOf('### main type'));
-    expect(mainSection).toMatch(/## Decision UI/);
-    expect(mainSection).toMatch(/confirmation-point interpretation rule/);
+    expect(mainSection).toMatch(/run-mode block always; decision-UI block main-only/);
+    expect(mainSection).toMatch(/see CONTEXT-ASSEMBLY\.md §Main Inline Context Assembly/);
   });
 
   it('CONTEXT-ASSEMBLY.md defines the Decision UI block format + prepend order', () => {
@@ -57,8 +58,13 @@ describe('semantic injection layer — no upstream fork, Decision UI block prese
     expect(kernel).toMatch(/approval\(\) - Decision UI/);
     expect(kernel).toMatch(/see APPROVAL-CARDS\.md/);
     const cards = read(join(SKILLS, 'atom-kernel/APPROVAL-CARDS.md'));
-    expect(cards).toMatch(/## Main-Node Checkpoints/);
-    expect(cards).toMatch(/Upstream skill content is never modified/);
+    expect(cards).toMatch(/approval\(\) - Card Format, Mode Dispatch/);
+    // Checkpoint interpretation rule is single-sourced in the handler's
+    // context assembly (round-4 no-fork ruling) — cards points at the
+    // approval() contract, assembly declares the injection semantics.
+    const assembly = read(join(SKILLS, 'atom-phase-handler/CONTEXT-ASSEMBLY.md'));
+    expect(assembly).toMatch(/confirmation-point interpretation rule/);
+    expect(assembly).toMatch(/upstream skills stay untouched/);
   });
 
   it('no upstream skill content was modified in packages sources (zero fork residue)', () => {

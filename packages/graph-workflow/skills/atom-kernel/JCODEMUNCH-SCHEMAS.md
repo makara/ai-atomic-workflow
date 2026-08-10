@@ -10,7 +10,7 @@ Jcodemunch tool parameter tables. Pure reference - loaded via pointer from atom-
 |`file_paths`|yes|string[]|Edited files|
 |`reindex`|no|boolean|Also reindex files|
 
-Required after every mutation while the index is mounted (unconditional - mutation-plane obligation); skipping = stale BM25/search caches. Index unmounted -> `n/a: jcodemunch not in use` (never silent).
+Required after every mutation on indexed targets (in-project code + indexed non-code-text subtypes) while the index is mounted - unconditional within scope; skipping = stale BM25/search caches. Unindexed target (markdown/plain text, out-of-project) -> `n/a: not indexed`; index unmounted -> `n/a: jcodemunch not in use` (never silent).
 
 Example: `{"repo": "ai-atomic-workflow", "file_paths": ["src/app.ts", "src/lib.ts"]}`
 
@@ -150,3 +150,24 @@ Registry entries (HLT-REGISTRY.md) reference these tools; compact param tables (
 |`top_n`|no|number|Results to return (default 20)|
 |`days`|no|number|Churn look-back window (default 90)|
 |`min_complexity`|no|number|Min cyclomatic complexity (default 2)|
+
+### search_text - full-text search over indexed corpus
+
+|Param|Req|Type|Notes|
+|-|-|-|-|
+|`repo`|yes|string|Repository identifier|
+|`query`|yes|string|Regex or literal pattern (<=500 chars, ReDoS-guarded)|
+|`is_regex`|no|boolean|Treat query as regex|
+|`context_lines`|no|number|Lines of context per match|
+|`limit`|no|number|Max results|
+
+### get_file_content - cached content reads
+
+|Param|Req|Type|Notes|
+|-|-|-|-|
+|`repo`|yes|string|Repository identifier|
+|`path`|yes|string|File path within indexed repo|
+|`start_line`|no|number|0-based slice start|
+|`end_line`|no|number|Inclusive slice end|
+
+Non-indexed file -> `File not found` + verdict (never silent).

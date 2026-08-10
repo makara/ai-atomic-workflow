@@ -12,7 +12,7 @@
 |`skill`|string?|all|Execution skill - phase `skill` field; the skill that executes this phase's work (main type)|
 |`agent`|string[]?|main|Agent hints - priority-ordered sub-agent type preferences. Advisory: consumed by skills when they dispatch sub-agents (first available wins, fallback platform default). Arrives as `## Agent hints:` block.|
 |`operations`|string[]?|main|Operation classes - phase `operations:` declaration (HLT closed set). Union with the skill's `Operation classes` default feeds SKILL.md §Registry Injection + class-based verification.|
-|`retryAttempt`|number|yes|Current retry count, 0-based - the node's own jump re-execution count (never zeroed). Gate jump bounds reference the TARGET node's `retryCount` from the snapshot (single counter - atom-graph-spec §Gate Jump Conditions).|
+|`retryCount`|number|yes|Current retry count, 0-based - the node's own jump re-execution count (never zeroed). Gate jump bounds reference the TARGET node's `retryCount` from the snapshot (single counter - atom-graph-spec §Gate Jump Conditions).|
 |`dependsOn`|string[]?|all|Upstream node IDs - scheduling only (topological order, JUMP closure, join resolution). Direct dependsOn outputs arrive as context for ALL types (main parity - gate/approval judgment context included)|
 
 ## Type-Specific Fields
@@ -49,20 +49,13 @@ No `default` field exists - Run Mode auto executes the AI recommendation, never 
 
 ## IApprovalDecision
 
-|Field|Type|Purpose|
-|-|-|-|
-|`action`|`'continue' \| 'retry' \| 'jump' \| 'end'`|Chosen routing action. Gate path: hit -> `'jump'` (target carries the rework target); no hit -> `'continue'` (pass through, no target).|
-|`target?`|string|Target nodeId or route id. Gate hit -> the matched jump's `to` - pilot passes it as `graph_advance` `branchTo` (backward reset). Approval branch-route -> the chosen option's target (node or route id) - pilot passes it as `branchTo` (route activation). Approval retry/jump -> selected option target - pilot routes via `graph_jump`.|
-|`note?`|string|Free-text from approval() custom input - semantics vary by action. Run Mode auto path sets `'run mode: auto'`.|
-|`rationale?`|string|Recommendation basis summary - the auditable why behind a decision. Run Mode auto path: one-line judgment-context basis (observable output fields / decision values that drove the recommendation). Manual choices omit it (the human IS the basis). Never replaces note/label semantics.|
-|`label?`|string|Chosen routing option label - distinguishes same-action options. Gate path: the jump's `when` text (observability). Run Mode auto path = the recommendation's label.|
-|`value?`|string|Chosen routing option `value` - stable machine identifier; downstream gate jump conditions and AI recommendations consume the decision value. Absent on gate decisions (jumps carry no value).|
+Field list + JSON shapes + card-selection mapping: see atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape (single home - ADR 0141). Never restated here.
 
 ---
 
 # GraphSnapshot (optional - progress info)
 
-`snapshot` optional. Present in `graph_start`, `graph_advance`, `graph_jump`, `graph_force_end` responses - uniform API self-containment. For jump navigation + progress display - never triggers execution. Run Mode consumption does NOT use the snapshot (mode comes from the `$run-mode-confirm` prologue output file; the prologue nodes appear in `nodes` like any run member).
+`snapshot` optional. Present in `graph_start`, `graph_advance`, `graph_jump`, `graph_force_end` responses - uniform API self-containment. For jump navigation + progress display - never triggers execution.
 
 |Field|Type|Purpose|
 |-|-|-|
@@ -79,12 +72,14 @@ No `default` field exists - Run Mode auto executes the AI recommendation, never 
 
 ## fsmState Logic
 
-|fsmState|Meaning|Action|
-|-|-|-|
-|`idle`|Run created, no nodes started|Wait for first node|
-|`running`|Nodes executing|Normal - continue loop|
-|`completed`|Run drained (no active, no eligible) or approval `end` action|`node` = null - exit loop, build result report|
-|`terminated`|Run force-ended (irreversible)|Exit loop with error report|
+Run-level FSM status values (FsmStatus) - mechanism detail: atom-graph-spec ROUTING §Completion + atom-pilot §Run Completion.
+
+|fsmState|Meaning|
+|-|-|
+|`idle`|Run created, no node dispatched yet|
+|`running`|Nodes dispatching; run in progress|
+|`completed`|Run finished (natural drain or approval end action)|
+|`terminated`|Run force-ended (`graph_force_end`)|
 
 ## Progress Fields
 
@@ -95,11 +90,4 @@ No `default` field exists - Run Mode auto executes the AI recommendation, never 
 
 # IApprovalDecision JSON Shapes
 
-Collected user choice + custom text -> `IApprovalDecision` JSON (incl. chosen action `value`):
-
-- continue: `{ "action": "continue", "value": "<chosen value>", "note": "<custom text if any>", "label": "<chosen option label>" }` (branch-route may add `"target": "<node-or-route id>"`)
-- retry: `{ "action": "retry", "target": "<from option target if present>", "value": "<chosen value>", "note": "<custom text if any>", "label": "<chosen option label>" }`
-- jump: `{ "action": "jump", "target": "<nodeId>", "value": "<chosen value>", "label": "<chosen option label>" }`
-- end: `{ "action": "end", "value": "<chosen value>", "note": "<custom text if any>", "label": "<chosen option label>" }`
-  - If custom text resolves to valid nodeId -> override target with it, `note` unset.
-  - Otherwise -> custom text becomes `note`.
+Collected choice + custom text -> `IApprovalDecision` JSON (incl. chosen action `value`): see atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape (single home).

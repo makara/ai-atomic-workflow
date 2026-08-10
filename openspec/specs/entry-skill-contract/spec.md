@@ -92,3 +92,12 @@ The project modifies skills only inside `packages/` (source of truth: `packages/
 
 - **WHEN** a change updates a skill
 - **THEN** only the packages/ copy is modified; deployment copies are not edited
+
+### Requirement: Contract vocabulary aligned to glossary
+
+Entry-skill contract declarations (Topics, Output contract, Behavior flags) SHALL use the glossary-aligned vocabulary: `channel` for delivery edges, `contract` for declarations, `block` for assembled prompt artifacts; no skill body re-defines these terms.
+
+#### Scenario: Contract declaration wording
+
+- **WHEN** an entry skill declares its Context Requirements
+- **THEN** it uses glossary terms without local re-definition; CONTEXT.md is the single disambiguation site

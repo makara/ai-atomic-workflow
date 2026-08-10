@@ -8,11 +8,11 @@ Closed-loop review + implementation (entry → review → implement → loop-gat
 
 ### Requirement: Report Output Convention
 
-arch-review's scope-detect phase SHALL recommend `docs/reports/<YYYY-MM-DD>-arch-review-<topic>.md` (date-prefix naming) and enforce explicit confirmation.
+arch-review's scope-entry phase SHALL recommend `docs/reports/<YYYY-MM-DD>-arch-review-<topic>.md` (date-prefix naming) and enforce explicit confirmation.
 
 #### Scenario: Date-prefix recommended and confirmed once
 
-- **WHEN** scope-detect runs the interview
+- **WHEN** scope-entry runs the interview
 - **THEN** the recommended path uses a date prefix (not a suffix) — located under `docs/reports/`
 - **AND** the output path MUST pass explicit user confirmation (the recommended value may be overridden)
 - **AND** once confirmed, it is applied — the path is not asked again within the closed-loop cycle
@@ -26,7 +26,7 @@ arch-review-loop SHALL be a three-stage composition: requirement (flow arch-revi
 - **WHEN** a backward reset targets requirement/scope-entry (loop-gate branchTo)
 - **THEN** the whole input stage SHALL reset and re-acquire — mode re-confirmed, constraints re-loaded, scope re-confirmed (per-round semantics, ADR 0075 D1 preserved as the general rule's corollary); the producer re-runs and the adopt stage re-runs as its downstream stage
 
-#### Scenario: No scope-detect echo
+#### Scenario: No scope-entry echo
 
 - **WHEN** the loop's requirement stage executes
 - **THEN** the arch-review node SHALL read the entry output directly — no echo node exists

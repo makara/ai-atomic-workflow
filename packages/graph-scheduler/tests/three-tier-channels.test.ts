@@ -124,6 +124,37 @@ describe('three-tier channel model — coverage via convention/project layers', 
     }
   });
 
+  it('annotated convention entry passes — annotation stripped, exemption applies (reported defect)', async () => {
+    const { dir, cleanup } = makeSkillsDir({
+      picker: SKILL_FILES_CONTRACT('- ./CONTEXT.md (project glossary per domain-modeling CONTEXT-FORMAT.md)'),
+    });
+    try {
+      const graph = baseGraph({ phases: [{ id: 'p', type: 'main', dependsOn: [], skill: 'picker', task: 'x' }] });
+      const { errors, warnings } = await validateEntrySkillContracts([{ filePath: 'g.yaml', graph }], dir, {
+        checkOrphans: false,
+      });
+      expect(errors.some((e) => e.includes('declares file'))).toBe(false);
+      expect(warnings.some((e) => e.includes('declares file'))).toBe(false);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('convention file omission is legal — no obligation, no error', async () => {
+    const { dir, cleanup } = makeSkillsDir({ picker: SKILL_FILES_CONTRACT('- docs/adr/*.md') });
+    try {
+      const graph = baseGraph({
+        phases: [{ id: 'p', type: 'main', dependsOn: [], skill: 'picker', channels: ['docs/adr/*.md'], task: 'x' }],
+      });
+      const { errors } = await validateEntrySkillContracts([{ filePath: 'g.yaml', graph }], dir, {
+        checkOrphans: false,
+      });
+      expect(errors.some((e) => e.includes('declares file'))).toBe(false);
+    } finally {
+      cleanup();
+    }
+  });
+
   it('satisfies forward coverage through the project layer', async () => {
     const { dir, cleanup } = makeSkillsDir({ picker: SKILL_FILES_CONTRACT('- docs/adr/') });
     try {

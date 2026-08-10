@@ -8,7 +8,7 @@
  * skills, and graph task text may name documents as inputs (functional),
  * so only ADR citations are enforced there.
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -91,7 +91,9 @@ function violations(): string[] {
   const found: string[] = [];
   for (const scope of SCAN_ROOTS) {
     const absRoot = join(REPO_ROOT, scope.root);
-    if (!statSync(absRoot).isDirectory()) continue;
+    // Root may be absent in the current layout (e.g. retired top-level
+    // skills/) — skip, never crash.
+    if (!existsSync(absRoot) || !statSync(absRoot).isDirectory()) continue;
     const files: string[] = [];
     walk(absRoot, files);
     for (const file of files) {

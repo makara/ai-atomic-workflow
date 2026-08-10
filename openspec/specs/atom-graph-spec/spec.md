@@ -215,3 +215,82 @@ The `atom-graph-spec` format reference SHALL state the three-tier channel declar
 
 - **WHEN** a graph author considers adding `./CONTEXT.md` to graph context
 - **THEN** the reference SHALL direct them to the convention layer (no declaration needed)
+
+### Requirement: PHASESCHEMA holds declaration content only
+
+PHASESCHEMA.md SHALL define YAML schema fields, YAML rules, task content spec, and channel declarations; it SHALL NOT restate runtime path conventions or sub-agent reference inheritance (owned by atom-phase-handler CONTEXT-ASSEMBLY.md).
+
+#### Scenario: Runtime convention located once
+
+- **WHEN** a consumer needs the run stream path or reference inheritance rules
+- **THEN** they resolve to CONTEXT-ASSEMBLY.md; PHASESCHEMA.md holds no duplicate wording
+
+### Requirement: ROUTING holds semantics without user-layer restatements
+
+ROUTING.md SHALL define topology, jumps, completion, routes, and approval policy; it SHALL NOT restate run-mode semantics (origin: §Activation Prologue; execution: atom-kernel approval()) or default decision-card composition (owned by atom-phase-handler DECISION-CARDS.md).
+
+#### Scenario: Run mode defined at two fixed sites
+
+- **WHEN** a consumer needs run-mode semantics
+- **THEN** the origin resolves to atom-graph-spec §Activation Prologue and the execution semantics to atom-kernel §approval(); no third site restates them
+
+### Requirement: retryCount single counter name
+
+The node retry counter SHALL be named `retryCount` throughout the schema (auto-supplied field, jump rules, gate conditions); `retryAttempt` SHALL NOT be used as a second name for the same counter.
+
+#### Scenario: Counter name consistent
+
+- **WHEN** a graph author or gate condition references the retry counter
+- **THEN** the name `retryCount` resolves consistently across PHASESCHEMA, ROUTING, and NODE-SCHEMA
+
+### Requirement: Contract entry annotation grammar documented
+
+The Context Requirements Convention SHALL document the list-entry annotation grammar: entries in `### From upstream` / `### Reference skills` / `### Files` MAY carry a trailing parenthetical annotation (`- <value> ( <annotation> )`); the annotation is prose, stripped at parse, never part of the matched value. Graph authors deriving `channels` from a skill contract SHALL derive from the stripped value.
+
+#### Scenario: Annotation grammar in the reference
+
+- **WHEN** a graph author reads the Context Requirements Convention section
+- **THEN** it SHALL state that parenthetical annotations on contract entries are prose — stripped at parse, excluded from matching
+
+#### Scenario: Channel derivation uses stripped value
+
+- **WHEN** a skill contract entry reads `- ./CONTEXT.md (project glossary)`
+- **THEN** channel derivation SHALL match the stripped value `./CONTEXT.md`, not the annotated string
+
+### Requirement: Convention layer is implicit coverage, never an obligation
+
+The Context Requirements Convention SHALL state that convention-layer files (`DEFAULT_CONVENTIONS`: `./CONTEXT.md`, `docs/domains.md`) are platform-shipped, default-loaded into every phase, and absence-tolerant — they are implicit coverage, not per-skill contract obligations. Skills MAY declare them, omit them, or annotate them; graphs SHALL NOT declare them (convention layer supplies them).
+
+#### Scenario: Convention files exempt from obligation
+
+- **WHEN** a graph author checks whether a skill must declare `./CONTEXT.md` in `### Files`
+- **THEN** the reference SHALL state it is not required — the convention layer guarantees delivery
+
+#### Scenario: Graphs never declare conventions
+
+- **WHEN** a graph author considers a `./CONTEXT.md` channel
+- **THEN** the reference SHALL direct them to the convention layer (no declaration needed)
+
+### Requirement: Family Rule Single Homes
+
+The graph-spec family SHALL hold each shared rule at exactly one authoritative site, all other files pointerize (ADR 0141): default-card composition at ROUTING.md §Approval Decision Confirmation; join-mode rejection at ROUTING.md §Join Mode Rules; three-tier channel model at PHASESCHEMA.md §YAML channels Field; removed-field history at PHASESCHEMA §Gate Type.
+
+#### Scenario: Card composition single-sited
+
+- **WHEN** scanning atom-graph-spec SKILL.md §Routing Rules Summary and PHASESCHEMA §Approval Routing Actions for the default-card definition
+- **THEN** each carries only a pointer to ROUTING.md §Approval Decision Confirmation — no restated card composition
+
+#### Scenario: Join rejection single-sited
+
+- **WHEN** scanning atom-graph-spec SKILL.md §Join Mode and PHASESCHEMA §Phase Fields join row
+- **THEN** each points to ROUTING.md §Join Mode Rules — the `z.literal('any')` + schema-rejection detail lives once
+
+#### Scenario: Three-tier model single-sited
+
+- **WHEN** scanning setup-atomic-workflow SKILL.md §Three-tier channel model
+- **THEN** it carries a 2-3 line user-facing summary + pointer to PHASESCHEMA.md §YAML channels Field — no re-derived tier mechanics
+
+#### Scenario: Removed-field history single-sited
+
+- **WHEN** scanning PHASESCHEMA for the removed preText/reads note
+- **THEN** it appears once (at §Gate Type) — the §YAML channels Field duplicate is absent

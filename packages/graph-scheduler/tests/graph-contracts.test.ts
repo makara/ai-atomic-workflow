@@ -43,6 +43,7 @@ const BUILTIN_GRAPHS = [
   'openspec-engineer.taskflow.yaml',
   'spec-implement.taskflow.yaml',
   'estate-maintain.taskflow.yaml',
+  'release-prep.taskflow.yaml',
 ] as const;
 
 function loadGraph(name: string): Record<string, unknown> {

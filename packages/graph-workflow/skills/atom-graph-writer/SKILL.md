@@ -1,6 +1,7 @@
 ---
 name: atom-graph-writer
 description: 'Entry skill for graph YAML generation - loads atom-graph-spec, validates topology, generates valid .taskflow.yaml. Trigger: implement phase in graph-generate graph.'
+disable-model-invocation: true
 user-invocable: false
 version: 1.3.0
 last_updated: '2026-08-07'
@@ -46,22 +47,7 @@ Read from spec output. Extract:
 
 ### Step 2: Generate YAML
 
-Generate YAML per atom-graph-spec conventions - task text per PHASESCHEMA.md §Task Content Spec (Directive + phase-local invariants + canonical `Output contract:` spelling + dedup deletion test) and PHASESCHEMA.md §Output Contract Spelling:
-
-```yaml
-name: <graph_name>
-phases:
-  - id: <id>
-    type: <type>
-    dependsOn: [<ids>]
-    task: |
-      <multi-line task instruction>
-    channels:
-      - skill:<reference-skill>
-      - <file-glob>
-```
-
-Rules - per PHASESCHEMA.md §YAML Format Rules (single source): `task` block scalar `|`, `dependsOn` flow sequence, `channels` block sequence, gate `jumps` when/to pairs, `routing.actions` block sequence, 2-space indentation, `#` comments for non-obvious phase intent.
+Generate YAML per PHASESCHEMA.md §YAML Format Rules + YAML-EXAMPLES.md (single source - no skeleton reproduced here); task text per PHASESCHEMA.md §Task Content Spec (Directive + phase-local invariants + canonical `Output contract:` spelling + dedup deletion test) and §Output Contract Spelling.
 
 Task-text criterion (checkable): exactly one `Output contract:` line per main/approval task; no skill-protocol restatement; approval header <= 30 chars.
 

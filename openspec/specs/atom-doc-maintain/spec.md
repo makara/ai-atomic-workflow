@@ -17,7 +17,7 @@ atom-doc-maintain SHALL expose one contract `maintain({ trigger, scope })` → `
 
 ### Requirement: Document taxonomy and per-class rules
 
-Document classes SHALL be `index` (docs/domains.md), `derived-view` (CONTEXT.md, README.md + mirrors), `normative` (docs/ family), `contract` (openspec/specs/) with per-class maintenance rules (index — bidirectional asset mapping + Design Requirements section; derived-view — source → transform → verify; normative — targeted edits only; contract — OpenSpec delta flow only, never direct edits). The index class SHALL consult atom-domain-spec as its format reference — split principles, count bound, layering, reverse-analysis provenance, and the Design Requirements section standard come from atom-domain-spec, never re-stated inline. CHANGELOG.md and docs/CHANGELOG.zh-CN.md SHALL NOT be maintained by any class — the separate CHANGELOG flow owns them.
+Document classes SHALL be `index` (docs/domains.md), `derived-view` (README.md + mirrors), `normative` (docs/ family incl. CONTEXT.md glossary), `contract` (openspec/specs/) with per-class maintenance rules (index — bidirectional asset mapping + Design Requirements section; derived-view — source → transform → verify; normative — targeted edits only; contract — OpenSpec delta flow only, never direct edits). The index class SHALL consult atom-domain-spec as its format reference — split principles, count bound, layering, reverse-analysis provenance, and the Design Requirements section standard come from atom-domain-spec, never re-stated inline. CONTEXT.md SHALL be maintained as a glossary per domain-modeling (normative — targeted term edits only, never derived regeneration). CHANGELOG.md and docs/CHANGELOG.zh-CN.md SHALL NOT be maintained by any class — the separate CHANGELOG flow owns them.
 
 #### Scenario: CHANGELOG untouched
 
@@ -33,6 +33,16 @@ Document classes SHALL be `index` (docs/domains.md), `derived-view` (CONTEXT.md,
 
 - **WHEN** the domains-index workstream receives confirmed requirements from the requirement node
 - **THEN** the index class SHALL write them into the Design Requirements section per atom-domain-spec
+
+#### Scenario: CONTEXT.md is normative glossary, not derived view
+
+- **WHEN** the derived-view class is inspected
+- **THEN** CONTEXT.md SHALL NOT appear in it — counts/names regeneration follows the derived-view transform (README only)
+
+#### Scenario: Glossary terminology updates
+
+- **WHEN** a term is resolved during maintenance
+- **THEN** the update follows domain-modeling (glossary + CONTEXT.md) — targeted inline edit, never batch regeneration
 
 ### Requirement: Consistency gate
 
@@ -109,3 +119,37 @@ The atom-doc-maintain SKILL.md SHALL declare atom-domain-spec as the format refe
 
 - **WHEN** the index-class consistency gate runs
 - **THEN** its mapping / links / counts / derived checks SHALL follow atom-domain-spec, including the linkage rule (spec/ADR associations only in domain list tables)
+
+### Requirement: Derived-view transform targets README only
+
+The derived-view transform SHALL target README.md (source -> transform -> verify from docs/readme-blueprint) and SHALL NOT reference any external architecture-overview file.
+
+#### Scenario: README regenerated from blueprint
+
+- **WHEN** a domain-change pass runs
+- **THEN** README.md regenerates from docs/readme-blueprint with the source -> transform -> verify gate (counts/names match source state, diff-clean)
+- **AND** CONTEXT.md is untouched by the derived-view transform
+
+#### Scenario: No external derived target
+
+- **WHEN** the derived-view class runs
+- **THEN** it produces README only — no other derived file exists
+
+### Requirement: Estate Rule Homes
+
+The doc-estate family SHALL hold each shared rule at exactly one home (ADR 0141): CHANGELOG exclusion + language clause + CONTEXT.md structure check at atom-doc-maintain; 1:1 asset/domain mapping + linkage rule at atom-domain-spec; fold procedure + ADR status/live-archive semantics at atom-doc-lifecycle. Other estate skills SHALL carry evidence commands + pointers only.
+
+#### Scenario: CHANGELOG exclusion single-sited
+
+- **WHEN** scanning the doc-estate family for the CHANGELOG exclusion rule
+- **THEN** it appears exactly once (atom-doc-maintain §Document Types) — the doc-lifecycle intro and taxonomy-row restatements are absent
+
+#### Scenario: Mapping and linkage single-sited
+
+- **WHEN** scanning atom-doc-maintain §Consistency Gate and atom-spec-maintain §1:1 Mapping Rule for the asset/domain mapping or linkage rules
+- **THEN** each carries evidence commands + pointer to atom-domain-spec §Validation / §Linkage Rule — no restated rule text
+
+#### Scenario: Verification sections are command-only
+
+- **WHEN** reading any estate skill §Verification / §Validation section
+- **THEN** it contains executable evidence commands (grep/validate) and pointers only — rule restatements of the skill's own body are absent

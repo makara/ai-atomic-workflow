@@ -29,7 +29,7 @@ export interface IPhaseHandler {
 
   /**
    * Extend the base NodeDetail with type-specific fields.
-   * Base fields (nodeId, type, handlerSkill, skill, retryAttempt) set by core.
+   * Base fields (nodeId, type, handlerSkill, skill, retryCount) set by core.
    * Handler adds type-specific fields (task, topic, routingActions,
    * channels, jumps, route, etc.).
    */
@@ -48,7 +48,7 @@ export interface IBaseNodeDetail {
   readonly skill?: string;
   /** operation classes — phase operations declaration (HLT closed set); handler injects registry entries + verifies per declared class */
   readonly operations?: string[];
-  readonly retryAttempt: number;
+  readonly retryCount: number;
 }
 
 /**
@@ -83,7 +83,7 @@ export interface INodeDetail {
   readonly jumps?: ReadonlyArray<IJumpCondition>;
   /** Route membership — all phase types (optional; absent = implicit default route) */
   readonly route?: string;
-  readonly retryAttempt: number;
+  readonly retryCount: number;
 }
 
 /**

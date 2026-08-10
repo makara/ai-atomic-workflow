@@ -2,12 +2,12 @@
 
 ## Approval consumption (direct branch)
 
-On approval dispatch, the handler assembles the card content + the AI-judged recommendation, then delegates the mode decision to `approval()` (atom-kernel §approval() - single assembly site for mode semantics):
+On approval dispatch, the handler assembles the card content + the AI-judged recommendation, then delegates the mode decision to `approval()` (atom-kernel §approval() - single assembly site for mode semantics; mode source per CONTEXT-ASSEMBLY.md §Prologue Context Blocks):
 
 1. **`'auto'`** - the recommendation is judged from the judgment context (direct dependsOn outputs + `channels` `node:` targets) + snapshot + run mode (agent judgment, NOT a declared action - no `default` field exists):
-   - Recommendation exists -> approval() auto-executes it: the handler assembles `IApprovalDecision { action, target?, value, label, note: 'run mode: auto', rationale }`. `rationale` = one-line basis summary of the judgment context that drove the recommendation (observable output fields / decision values, e.g. `review output overall: pass; top_rec_remaining: true`) - the auditable recommendation basis. `note` stays `'run mode: auto'`; `rationale` = basis, never substitute for note/label.
-   - No recommendation (judgment fails / context insufficient) -> approval() falls through to the human card even in auto - card shows one line `Run mode: auto — no recommendation; decide manually`. NEVER guess an action.
-2. **`'manual'`** (or missing confirm output - absence never auto - see atom-graph-spec §Activation Prologue) - approval() presents the human decision card as usual. Manual choices omit `rationale` (the human IS the basis) - the field is optional.
+   - Recommendation exists -> approval() auto-executes it: the handler assembles the decision per atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape (`note: 'run mode: auto'`, `rationale` = one-line basis from observable output fields / decision values, e.g. `review output overall: pass; top_rec_remaining: true` - the auditable recommendation basis).
+   - No recommendation (judgment fails / context insufficient) -> approval() falls through to the human card even in auto (card line + never-guess rule per atom-kernel §approval()).
+2. **`'manual'`** (mode semantics per atom-kernel §approval() + CONTEXT-ASSEMBLY.md §Prologue Context Blocks) - approval() presents the human decision card as usual. Manual choices omit `rationale` (the human IS the basis) - the field is optional.
 
 Scope rule: Run Mode controls decision presentation - approval nodes AND approval() checkpoints inside main nodes. Interviews are never auto-gated - structurally, approval() without a recommendation always presents a card. Gate jump semantics unchanged - jump conditions may reference the `## Run Mode: <mode>` context block (e.g. arch-review-loop loop-gate).
 
@@ -22,24 +22,24 @@ Human decision card (approval() manual/absent branch) - field mapping:
   - **AI-generated contextual options** - retry/jump/end/branch-route options judged at execution from the judgment context + `snapshot.nodes` (eligible re-run targets: `status === 'done'` AND `nodeId != currentNodeId`) + run mode. One option per candidate, e.g. `"Retry <nodeId>"`, `"Jump to <nodeId>"`, `"End run"`.
   - **custom:true always present** - free-text text box for user input.
 - `node.task` full text -> pre-call text - display before the card; append the generic sentence `Free input overrides.` (author text carries the card body; the boilerplate is handler-owned).
-- Collect the approval() decision (choice + custom text) -> output as `IApprovalDecision` JSON - shapes: see NODE-SCHEMA.md §IApprovalDecision JSON Shapes.
+- Collect the approval() decision (choice + custom text) -> output as `IApprovalDecision` JSON - shapes: see atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape (single home).
 
 # Gate Jump Evaluation
 
 1. Assemble jump evaluation context (main-style pipeline - judgment context):
    - Direct dependsOn outputs: read `the run stream of <dependsOnId>` -> `## Upstream: <dependsOnId>` blocks (main parity).
    - `channels` `node:` targets: read `the run stream of <nodeTarget>` -> `## Upstream: <nodeTarget>` blocks; missing -> note `<nodeTarget> has no output` in the context (node pending/unactivated; a condition referencing it evaluates false).
-   - Snapshot: per-node states incl. `retryCount` - jump bounds reference the TARGET node's `retryCount` (single counter, JUMP-maintained, never zeroed; every node in the jump closure - target + downstream terminals - increments, so a gate downstream of a rework target carries a non-zero retryAttempt after rework rounds).
+   - Snapshot: per-node states incl. `retryCount` - jump bounds reference the TARGET node's `retryCount` (single counter, JUMP-maintained, never zeroed; every node in the jump closure - target + downstream terminals - increments, so a gate downstream of a rework target carries a non-zero retryCount after rework rounds).
    - Prepend `## Run Mode: <mode>` (from `$run-mode-confirm` output) + constraints blocks (from `$load-constraints` output; same layer as main/approval).
 2. Evaluate jumps in declaration order:
    - judge each condition; the first `"true"` selects its jump; stop. No hit -> pass through.
    - judge() per atom-kernel §judge() - constrained true/false answer; judgment failure -> no hit -> pass through (conservative).
-3. Hit -> `IApprovalDecision { action: "jump", target: <jump.to>, label: <jump.when> }`. No hit -> `{ action: "continue" }` (no target - pass through, zero forward effect).
-4. Judgment failure (ambiguous) -> treat as no hit -> pass through (conservative - never fabricate a jump).
+3. Hit -> `IApprovalDecision { action: "jump", target: <jump.to>, label: <jump.when> }` (shape per atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape). No hit -> `{ action: "continue" }` (no target - pass through, zero forward effect).
+4. Judgment failure (ambiguous) -> treat as no hit -> pass through (conservative rule - single home: atom-kernel §judge()).
 
 # Persist Decision
 
 Persist the decision to `the run stream` (run-scoped output stream - path format: see CONTEXT-ASSEMBLY.md §Run-Scoped Output Streams). Write failure -> mark `[FILE MISSING: output stream for <runId>/<nodeId>]` in output, do not crash.
 
-- **Approval** - full decision JSON incl. `value` + `label` (auto path adds `rationale`; downstream gate jump conditions consume the decision `value` exactly as the human path).
+- **Approval** - full decision JSON (shape + field semantics: see atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape - single home); auto path adds `rationale`; downstream gate jump conditions consume the decision `value` exactly as the human path.
 - **Gate** - decision JSON incl. target + label.

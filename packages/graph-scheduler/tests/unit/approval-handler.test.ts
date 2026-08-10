@@ -159,7 +159,7 @@ describe('approval routingActions', () => {
         nodeId: 'p1',
         type: 'approval',
         handlerSkill: 'atom-phase-handler',
-        retryAttempt: 0,
+        retryCount: 0,
       },
       phase,
       { status: 'active', retryCount: 0 },
@@ -197,7 +197,7 @@ describe('approval routingActions', () => {
         nodeId: 'p1',
         type: 'approval',
         handlerSkill: 'atom-phase-handler',
-        retryAttempt: 0,
+        retryCount: 0,
       },
       phase,
       { status: 'active', retryCount: 0 },
@@ -220,7 +220,7 @@ describe('approvalPhaseHandler.extendNodeDetail', () => {
     skill: 'atom-phase-handler',
     constraints: [],
     runMode: 'manual' as const,
-    retryAttempt: 0,
+    retryCount: 0,
   };
   const nodeState = {
     status: 'active',

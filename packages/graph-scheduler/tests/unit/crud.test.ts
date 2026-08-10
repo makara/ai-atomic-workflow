@@ -55,10 +55,13 @@ async function makeFixture(graphs: Record<string, string>): Promise<Fixture> {
   }
 
   // Builtin registry covers main + approval — no project override needed.
+  // context: [] — hermetic: ambient .graph-scheduler/config.json (gitignored,
+  // cwd-dependent) must not leak project-layer channels into assertions.
   const rt = await Effect.runPromise(
     createRuntime({
       dbPath: ':memory:',
       taskflowDir,
+      context: [],
     }),
   );
 
@@ -324,7 +327,7 @@ describe('graphAdvance branchTo', () => {
     // only $load-constraints re-dispatches (approval-only synthesis).
     const jump = await fix.rt.graphAdvance(runId, 'gate', 10, 'seed');
     expect(jump.node?.nodeId).toBe('$load-constraints');
-    expect(jump.node?.retryAttempt).toBe(1);
+    expect(jump.node?.retryCount).toBe(1);
     expect(jump.snapshot.nodes.find((n) => n.nodeId === 'seed')?.retryCount).toBe(1);
     expect(jump.snapshot.nodes.find((n) => n.nodeId === 'seed')?.status).toBe('pending');
     expect(jump.snapshot.nodes.find((n) => n.nodeId === 'gate')?.status).toBe('pending');
@@ -332,7 +335,7 @@ describe('graphAdvance branchTo', () => {
     // After the prefix, the reset target re-dispatches with its retry visible
     const after = await fix.rt.graphAdvance(runId, '$load-constraints', 10);
     expect(after.node?.nodeId).toBe('seed');
-    expect(after.node?.retryAttempt).toBe(1);
+    expect(after.node?.retryCount).toBe(1);
   });
 
   it('run completes by natural drain — no end marker node', async () => {
@@ -376,7 +379,7 @@ describe('graphAdvance branchTo', () => {
 
     const after = await fix.rt.graphAdvance(runId, '$load-constraints', 10);
     expect(after.node?.nodeId).toBe('w');
-    expect(after.node?.retryAttempt).toBe(1);
+    expect(after.node?.retryCount).toBe(1);
   });
 
   it('approval continue WITHOUT branchTo leaves route members unactivated — run drains (empty-round guarantee)', async () => {
@@ -494,12 +497,12 @@ describe('graphJump', () => {
     const result = await fix.rt.graphJump(runId, 'agent-a');
     expect(result.snapshot.runId).toBe(runId);
     expect(result.node?.nodeId).toBe('$load-constraints');
-    expect(result.node?.retryAttempt).toBe(1);
+    expect(result.node?.retryCount).toBe(1);
 
     // After the prefix, the reset target re-dispatches
     const after = await fix.rt.graphAdvance(runId, '$load-constraints', 10);
     expect(after.node?.nodeId).toBe('agent-a');
-    expect(after.node?.retryAttempt).toBe(1);
+    expect(after.node?.retryCount).toBe(1);
   });
 });
 

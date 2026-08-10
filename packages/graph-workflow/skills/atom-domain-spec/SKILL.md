@@ -83,7 +83,7 @@ Terminology SHALL follow domain-modeling: domain IDs and glossary terms form one
 
 The index SHALL be derived from the actual repository state:
 
-- Every domain row SHALL reference at least one real asset (path, file, or explicitly justified virtual row).
+- Every asset SHALL map to exactly one domain; every domain row SHALL reference at least one real asset (path, file, or explicitly justified virtual row).
 - No asset -> no domain. Forward-designed domains (no physical asset) are forbidden.
 - Bidirectional mapping (domain -> asset, asset -> domain) SHALL be updated together - a one-way update is a defect.
 - The reverse mapping section IS the provenance record: `ls`-checkable, diff-able, machine-verifiable.
@@ -95,17 +95,17 @@ Add/modify/delete a domain follows the four-step procedure (intent -> boundary -
 ## Language and Format
 
 - Domain IDs: kebab-case, strictly matching the asset name (prefix kept).
-- Descriptions: follow the consuming project language conventions (project instructions / constraints) - the skill does not mandate a language.
+- Descriptions: per atom-doc-maintain §Language Constraints (single home).
 - Tables: `Domain ID | Description | Asset | Aggregate specs | Dependencies` in detail sections; `ID | kind | Section | Status` in the overview.
 - Status tags: `active` / `retired` (keeps a row for trace) / `deprecated` (annotation only, no row).
 
 ## Validation
 
-At write or review time, run the mechanical checks:
+Mechanical checks at write/review time - rules live in their sections above; each item = rule pointer + evidence command:
 
-1. Counts: total / active / retired match the overview rows and the disk facts (skills, graphs, feature points, doc families).
-2. Mapping: every asset maps to exactly one domain; every domain has >= 1 asset; `openspec/specs/` dirs match domain IDs 1:1.
-3. Provenance: every row's asset exists; reverse mapping agrees bidirectionally.
-4. Bounds: 10 <= total <= 100; exceeded -> layering rule applies.
-5. Requirements: block at head; bullet-list format; no metadata columns; workstream changes comply with each requirement; consensus evidence in requirement node output.
-6. Linkage: grep spec/ADR references - every hit inside a domain list row; no association elsewhere.
+1. Counts: per §Count Bound and Layering - `grep -cE '^\|' docs/domains.md` rows vs disk facts (skills, graphs, feature points, doc families).
+2. Mapping: per §Reverse-Analysis Provenance - `ls openspec/specs/` vs domain IDs (bidirectional 1:1).
+3. Provenance: per §Reverse-Analysis Provenance - every row's asset exists; reverse mapping agrees bidirectionally.
+4. Bounds: per §Count Bound and Layering - 10 <= total <= 100; exceeded -> layering rule applies.
+5. Requirements: per §Design Requirements - block at head; bullet-list format; no metadata columns; workstream changes comply; consensus evidence in requirement node output.
+6. Linkage: per §Linkage Rule - `grep -nE 'ADR [0-9]{4}|openspec/specs' docs/domains.md` -> every hit inside a domain list row.

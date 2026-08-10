@@ -12,7 +12,7 @@ last_updated: '2026-08-08'
 
 # Atom-Doc-Lifecycle
 
-End-of-workflow lifecycle closure. One contract `close({ change_name, adr_created?, supersedes? })` -> `{ archive_status, adr_changes, index_rebuilt, validation }`. Estate maintenance (taxonomy, gate, format) lives in atom-doc-maintain. CHANGELOG never touched - separate flow.
+End-of-workflow lifecycle closure. One contract `close({ change_name, adr_created?, supersedes? })` -> `{ archive_status, adr_changes, index_rebuilt, validation }`. Estate maintenance (taxonomy, gate, format) lives in atom-doc-maintain. CHANGELOG excluded - per atom-doc-maintain §Document Types (single home).
 
 ## Context Requirements
 
@@ -26,7 +26,7 @@ End-of-workflow lifecycle closure. One contract `close({ change_name, adr_create
 
 ### Reference skills
 
-<!-- none - atom-kernel excluded -->
+<!-- none - atom-kernel excluded (atom-graph-spec §Contract Rules 6 - platform primitives, always available) -->
 
 ### Operation classes
 
@@ -81,13 +81,13 @@ Verify task completion against code evidence before archive. Code = ground truth
 - **Fallback** (no token in description): read delta specs `specs/**/*.md`, extract noun phrases from SHALL behavior sentences, grep those. Still vague -> mark drift "task unverifiable - rewrite description or add spec". Never guess, never check off.
 - **Skip class**: pure doc/verification tasks. Verify assertion itself - parse file, grep zero matches, confirm existence. No code search.
 
-4. **Register evidence**: append one line per verified task to `openspec/changes/<change>/verification.md` (path from upstream `verification_path` field when composed — tasks consume fields, never file globs). Line unique per task id - skip if already registered (idempotent).
+4. **Register evidence**: append one line per verified task to `openspec/changes/<change>/verification.md` (path from upstream `verification_path` field when composed - tasks consume fields, never file globs). Line unique per task id - skip if already registered (idempotent).
 
 ```
-- task <id> — evidence: <file>:<line> — <grep|symbol|version|assert>: "<detail>"
+- task <id> - evidence: <file>:<line> - <grep|symbol|version|assert>: "<detail>"
 ```
 
-Unverified task line: `- task <id> — unverified: <reason>`.
+Unverified task line: `- task <id> - unverified: <reason>`.
 
 5. **Drift gate**: any checked task without evidence (non-skip): write drift report under `## Reverse-Validation Drift (<change>)`, refuse `openspec archive`. No implementation file changes. Output rework suggestion.
 
@@ -103,7 +103,26 @@ JSON output: extract status, message, affected files. Exit code non-zero with no
 
 ## Record Format
 
-ADR records SHALL be structured lifecycle records: a metadata block (`id`, `title`, `date`, `status`, `domain`, `decision`, `supersedes`, `superseded_by`, `related`) followed by a fixed body (Context / Decision / Consequences). Language: per project document-language conventions (single home: atom-doc-maintain §Language Constraints). One decision per record. Status SHALL be one of `proposed` | `accepted` | `superseded` | `deprecated`; transitions `proposed` -> `accepted` -> `superseded` | `deprecated`. Root `docs/adr/` holds only live records (proposed + accepted); `docs/adr/archive/` holds superseded/deprecated records moved verbatim - provenance only, never read as current state. Accepted records SHALL be immutable - a revision requires a new record declaring `supersedes`.
+ADR records = lifecycle records: metadata block + fixed body (Context / Decision / Consequences).
+
+|Field|Rule|
+|-|-|
+|`id`|NNNN - sequential, unique|
+|`title`|kebab-case slug|
+|`date`|YYYY-MM-DD|
+|`status`|one of `proposed` \| `accepted` \| `superseded` \| `deprecated`|
+|`domain`|domain id - one decision per record|
+|`decision`|one-sentence decision statement|
+|`supersedes`|ids of folded predecessors - `none` legal|
+|`superseded_by`|set by fold, never authored|
+|`related`|related ADR ids|
+
+Rules:
+
+1. One decision per record; status transitions `proposed` -> `accepted` -> `superseded` \| `deprecated`.
+2. Root `docs/adr/` holds only live records (proposed + accepted); `docs/adr/archive/` holds superseded/deprecated records moved verbatim - provenance only, never read as current state.
+3. Accepted records SHALL be immutable - a revision requires a new record declaring `supersedes`.
+4. Language: per project document-language conventions (single home: atom-doc-maintain §Language Constraints).
 
 ## Step 3: ADR Decision-Fold
 

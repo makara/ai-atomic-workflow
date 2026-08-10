@@ -34,9 +34,7 @@ Explore output = state summary. Setup always starts from "present current state"
 
 Show findings. For each missing piece, offer recommended default first (atom-kernel approval() rule):
 
-- **dbPath** - `.graph-scheduler/data/graph-scheduler.db` (recommended)
-- **taskflowDir** - `.graph-scheduler/graphs` (recommended)
-- **registryPaths** - `[.graph-scheduler/graphs/registry.json]` (recommended)
+- defaults per `./seeds/config.json` - dbPath / taskflowDir / registryPaths (recommended; seed is single source - no literals duplicated here)
 
 Existing pieces presented as-is - never re-proposed.
 
@@ -75,18 +73,14 @@ Parse failure -> report file path + error. Failed step, not silent pass.
 
 ## Three-tier channel model
 
-The scaffold establishes the project layer; the other two tiers are implicit:
+The scaffold establishes the project layer; the other two tiers are implicit. Tier mechanics + validation semantics (convention layer, project layer, graph channels): see atom-graph-spec PHASESCHEMA.md §YAML channels Field (single home).
 
-1. **Convention layer** (platform-shipped, no declaration needed) — exact files `CONTEXT.md` + `docs/domains.md`, default-loaded into every phase, absence-tolerant (missing -> empty + warning, never fail). Setup does NOT create them; projects create them lazily when they exist.
-2. **Project layer** — `.graph-scheduler/config.json` `context:` is THE project-layout declaration point: declare the project's doc/spec estate (e.g. `docs/adr/*.md`, `openspec/specs/**/*.md`). Existence-validated: exact-file missing -> load error; glob zero-match -> warning (lazy creation legal).
-3. **Graph channels** — graphs declare `node:` streams, `skill:` references, workflow runtime artifacts (`.graph-scheduler/`, `.taskflow/`) only. Project file globs in shipped graphs are load-time errors; conventions are never hand-declared.
-
-Tell users: estate vocabulary flows into phases by declaring project layout in config.json context — never by editing shipped graphs.
+Tell users: estate vocabulary flows into phases by declaring project layout in config.json context - never by editing shipped graphs.
 
 ## Seeds
 
-- `./seeds/config.json` - default project config. Derived from `createDefaultConfig()` in `packages/graph-scheduler/src/scheduler-runtime.ts` - single source of truth. Regenerate seed when the function changes; never hand-edit layout literals.
-- `./seeds/constraints.md` - constraints template with `## Rules` section. Mirrors the init constraint template.
+- `./seeds/config.json` - default project config. Derived from `createDefaultConfig()` (runtime default generator) - single source of truth. Regenerate seed when the function changes; never hand-edit layout literals.
+- `./seeds/constraints.md` - constraints template with `## Rules` section - setup copies it to `.graph-scheduler/constraints.md` (live instance carries provenance note).
 
 ## Done
 

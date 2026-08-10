@@ -8,7 +8,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { mergeChannelScopes, parseContextContract, resolveChannels } from '../../src/context/resolve-channels.js';
+import {
+  isConventionFile,
+  mergeChannelScopes,
+  parseContextContract,
+  resolveChannels,
+  stripAnnotation,
+} from '../../src/context/resolve-channels.js';
 
 const SAMPLE_SKILL = `---
 name: sample-skill
@@ -145,6 +151,66 @@ describe('parseContextContract', () => {
     expect(c.upstream).toEqual(['real-node']);
     expect(c.errors).toEqual([]);
   });
+
+  it('strips trailing parenthetical annotation from Files entries', () => {
+    const c = parseContextContract(`## Context Requirements
+
+### Files
+
+- ./CONTEXT.md (project glossary per domain-modeling CONTEXT-FORMAT.md)
+- docs/adr/*.md
+`);
+    expect(c.files).toEqual(['./CONTEXT.md', 'docs/adr/*.md']);
+    expect(c.errors).toEqual([]);
+  });
+
+  it('strips trailing parenthetical annotation from upstream and reference entries', () => {
+    const c = parseContextContract(`## Context Requirements
+
+### From upstream
+
+- up (review output)
+
+### Reference skills
+
+- codebase-design (vocabulary)
+`);
+    expect(c.upstream).toEqual(['up']);
+    expect(c.references).toEqual(['codebase-design']);
+    expect(c.errors).toEqual([]);
+  });
+
+  it('placeholder detection sees the stripped value - annotated placeholder still rejected', () => {
+    const c = parseContextContract(`## Context Requirements
+
+### Files
+
+- <configurable> (decided at authoring)
+`);
+    expect(c.files).toEqual(['<configurable>']);
+    expect(c.errors.length).toBeGreaterThan(0);
+    expect(c.errors[0]).toContain('placeholder');
+  });
+
+  it('stripAnnotation leaves non-annotated entries unchanged', () => {
+    expect(stripAnnotation('docs/adr/*.md')).toBe('docs/adr/*.md');
+    expect(stripAnnotation('scope-entry')).toBe('scope-entry');
+  });
+});
+
+describe('isConventionFile', () => {
+  it('matches convention-layer paths by normalized membership', () => {
+    expect(isConventionFile('./CONTEXT.md')).toBe(true);
+    expect(isConventionFile('CONTEXT.md')).toBe(true);
+    expect(isConventionFile('docs/domains.md')).toBe(true);
+    expect(isConventionFile('./docs/domains.md')).toBe(true);
+  });
+
+  it('rejects non-convention paths and near-misses', () => {
+    expect(isConventionFile('docs/adr/*.md')).toBe(false);
+    expect(isConventionFile('CONTEXT.mdx')).toBe(false);
+    expect(isConventionFile('README.md')).toBe(false);
+  });
 });
 
 describe('resolveChannels', () => {
@@ -212,6 +278,12 @@ describe('resolveChannels', () => {
     });
     expect(r.upstream).toEqual([]);
     expect(r.warnings.length).toBe(2);
+  });
+
+  it('classifies convention-layer channel as file — implicit coverage, no error', () => {
+    const r = resolveChannels({ channels: ['./CONTEXT.md', 'docs/domains.md'], dependsOn: [], contract });
+    expect(r.files).toEqual(['./CONTEXT.md', 'docs/domains.md']);
+    expect(r.errors).toEqual([]);
   });
 
   it('errors on no-match entry — no fallback search', () => {

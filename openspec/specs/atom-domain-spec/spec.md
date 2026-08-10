@@ -235,3 +235,35 @@ At write or review time, the requirements validation SHALL verify: the Design Re
 - **WHEN** the review gate runs the requirements class
 - **THEN** it SHALL NOT require source/date confirmation records inside docs/domains.md
 - **AND** consensus evidence SHALL come from the requirement node output (node:requirement channel)
+
+### Requirement: Mapping and Linkage Single Home
+
+atom-domain-spec SHALL be the single home for the 1:1 asset/domain mapping rule and the linkage rule (spec/ADR associations appear only inside domain list tables). Consumers (atom-doc-maintain §Consistency Gate, atom-spec-maintain §1:1 Mapping Rule) SHALL carry evidence commands + pointers only.
+
+#### Scenario: Home holds the rules
+
+- **WHEN** reading atom-domain-spec §Validation and §Linkage Rule
+- **THEN** the 1:1 mapping and linkage rules appear there in full
+
+#### Scenario: Consumers pointerize
+
+- **WHEN** scanning atom-doc-maintain and atom-spec-maintain for those rules
+- **THEN** only evidence commands + `per atom-domain-spec §X` pointers appear
+
+### Requirement: Validation Command-Only
+
+atom-domain-spec §Validation SHALL contain one-line pointers per check plus mechanical evidence commands (e.g. grep spec/ADR refs -> every hit in a domain list row) — no restated rule prose from the skill's own body.
+
+#### Scenario: No self-restatement
+
+- **WHEN** reading §Validation
+- **THEN** each item maps to a body section via pointer + command, and no item restates the section's rule text
+
+### Requirement: Language Clause Single-Homed
+
+The language-convention clause SHALL be stated once at atom-doc-maintain §Language Constraints; atom-domain-spec §Language and Format SHALL point to it (or apply it row-specifically without a second phrasing).
+
+#### Scenario: One phrasing
+
+- **WHEN** scanning the estate family for the language-convention rule
+- **THEN** exactly one phrasing exists — no second "follow the consuming project language conventions" variant

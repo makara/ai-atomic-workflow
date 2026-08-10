@@ -2,97 +2,68 @@
 
 ## Purpose
 
-Prototype-level enforcement-lifecycle contract for the OMP adapter: HLT-registry restrictions exist only while a graph run dispatches main-node work in the main agent, and never outlive the driving run — zero impact on normal user usage.
+Prototype-level enforcement-lifecycle contract for the OMP adapter: scenario-table enforcement of HLT-registry restrictions applies at all times — not scoped to graph lifecycle, including sub-agents, and is not disableable. Enforcement covers only scenarios with a designated adapter row; platform-native tools on in-project non-code text targets are never denied (permissive cells). Caveman + rtk prompts are injected once per agent start. The `.omp/extensions` prototype stays a validation-only seam artifact.
 
 ## Requirements
 
-### Requirement: Restriction scope SHALL be the driving run lifecycle
+### Requirement: Enforcement SHALL be always-on
 
-While a graph main node executes, the adapter SHALL enforce the HLT registry on the main agent's repo-file core-class tool calls (fail-closed deny with reason, serena-only mandate for locate/read/write). Run-class tools (`bash`/`debug`/`eval` — platform shell chain head) SHALL be allowed during the armed window. The restriction SHALL end when the run terminates — via a dispatch result without a main node, via graph_force_end, or via agent_end (run settle on normal completion, error, or abort). Outside that window the adapter SHALL NOT alter the user's tool surface and SHALL NOT deny any call.
+Constraints and tool-surface enforcement SHALL apply at all times — not scoped to graph lifecycle — including sub-agents, and SHALL NOT be disableable. The armed-window state machine (arm on dispatch, disarm on terminal signals) SHALL be deleted. Enforcement SHALL be scenario-table-driven: each tool call resolves (target path + type) -> scenario -> designated adapter; calls whose tool is not the scenario's designated adapter SHALL be denied naming the designated adapter. Enforcement SHALL cover only scenarios with a designated adapter row: platform-native tool calls on in-project non-code text targets SHALL NOT be denied (adapter = platform-native read/write per hlt-heat-layering In-project non-code text read/write); target types outside the domain enumeration SHALL pass through, never denied. Designated adapter families (serena/jcodemunch/headroom) SHALL never be denied.
 
-#### Scenario: Main-node dispatch arms the restriction
+#### Scenario: Always-on deny
 
-- **WHEN** graph_start/graph_advance/graph_jump returns a main node
-- **THEN** the adapter SHALL deny repo-file core-class tool calls (read/write/edit/grep/glob/lsp/ast_edit on repo files) with the serena-mandate reason
-- **AND** run-class tools (`bash`/`debug`/`eval` — platform shell chain head) SHALL be allowed
-- **AND** serena, utility MCP tools, and pilot machinery SHALL remain allowed
+- **WHEN** a tool call violates the scenario table outside graph execution
+- **THEN** the call SHALL be denied naming the designated adapter
+- **AND** no disarm mechanism SHALL exist
 
-#### Scenario: Non-main dispatch result disarms
+#### Scenario: Code-only native-tool denial
 
-- **WHEN** a dispatch returns an approval node, a gate node, or no node
-- **THEN** the adapter SHALL restore the full tool surface
+- **WHEN** a platform-native tool call targets an in-project code file
+- **THEN** the call SHALL be denied naming the scenario's designated adapter (serena/jcodemunch)
 
-#### Scenario: Force-end terminates the restriction
+#### Scenario: Text native-tool passthrough
 
-- **WHEN** graph_force_end is called while armed
-- **THEN** the adapter SHALL disarm and restore the full tool surface
+- **WHEN** a platform-native tool call targets an in-project non-code text file
+- **THEN** the call SHALL NOT be denied — the platform-native tool SHALL be allowed
 
-#### Scenario: Agent-end fail-safe restores after abnormal termination
+#### Scenario: Unknown target passthrough
 
-- **WHEN** the driving run settles (error or abort) while armed
-- **THEN** the adapter SHALL disarm and restore the full tool surface
+- **WHEN** a tool call targets a file type outside the domain enumeration
+- **THEN** the call SHALL NOT be denied
 
-#### Scenario: Normal usage outside graph runs is unaffected
+#### Scenario: Sub-agent coverage
 
-- **WHEN** no graph run is executing
-- **THEN** the adapter SHALL NOT alter the tool surface and SHALL NOT deny any call
+- **WHEN** a sub-agent executes a tool call
+- **THEN** the scenario-table enforcement SHALL apply (where platform hooks reach; otherwise the sub-agent prompt carries the discipline)
 
-### Requirement: Lifecycle signals SHALL be a narrowed set
+### Requirement: Prompt injection SHALL be one-time
 
-Only dispatch carriers — graph_start, graph_advance, graph_jump (calls whose result carries a dispatched node) — SHALL trigger arm/disarm transitions. graph_force_end SHALL explicitly disarm (run terminated). graph_status, graph_list, graph_init, graph_clean_completed, graph_clean_all SHALL NOT migrate adapter state.
+Caveman + rtk prompts SHALL be injected into the system prompt ONCE per agent start via before_agent_start — `{ systemPrompt: [...base, CAVEMAN_PROMPT, RTK_PROMPT] }` — including sub-agents (detected via the OMP subagent marker). Per-LLM-call prompt append (before_provider_request) SHALL NOT exist (provider cache prefix stays stable).
 
-#### Scenario: Status query does not migrate state
+#### Scenario: One-time inject
 
-- **WHEN** graph_status (or graph_list/graph_init/graph_clean_*) is called while armed
-- **THEN** the adapter state SHALL remain unchanged (no disarm, no re-arm)
+- **WHEN** an agent starts (main or subagent)
+- **THEN** the system prompt SHALL include the caveman + rtk prompts once
+- **AND** no per-LLM-call append SHALL occur
 
-#### Scenario: Force-end is the explicit terminal signal
+#### Scenario: Sub-agent prompt carries discipline
 
-- **WHEN** graph_force_end returns while armed
-- **THEN** the adapter SHALL disarm exactly once
+- **WHEN** a sub-agent's system prompt is built
+- **THEN** it SHALL include the caveman + rtk prompts
+- **AND** platform-hook enforcement gaps SHALL be covered by the prompt
 
-### Requirement: Surface replay SHALL be compare-based
+### Requirement: Prototype SHALL stay validation-only
 
-Surface application SHALL be transition-guarded: the adapter SHALL compare the live active tool surface (getActiveTools) against the target surface before applying; an equal comparison SHALL be a no-op (no setActiveTools call). MCP reconnect drift SHALL be re-applied at the next dispatch transition only.
+The .omp/extensions prototype SHALL remain a seam-validation artifact: it SHALL NOT enter packages, formal specs, ADRs' normative text, skills, or constraints as authoritative design. Formal documentation SHALL reference the platform-neutral contracts, never the prototype's implementation.
 
-#### Scenario: Replay with unchanged surface is a no-op
+#### Scenario: Formal docs cite contracts not prototype
 
-- **WHEN** a dispatch transition would re-apply the surface and the live surface equals the target
-- **THEN** the adapter SHALL NOT call setActiveTools
+- **WHEN** a formal document describes enforcement or prompts
+- **THEN** it SHALL reference the platform-neutral contracts
+- **AND** SHALL NOT cite .omp/extensions as authoritative
 
-#### Scenario: Drift is re-applied at the next dispatch transition
+#### Scenario: Prototype stays unmodified by implementation
 
-- **WHEN** MCP reconnection re-activated cropped tools and the next dispatch transition occurs
-- **THEN** the adapter SHALL re-apply the target surface
-
-### Requirement: Subagent delegation SHALL be a recorded boundary
-
-The adapter SHALL NOT gate tool calls made by task()-spawned subagents (platform hooks are main-agent-scoped). The boundary SHALL be recorded in the adapter's status output. The adapter SHALL NOT gate or wrap the task tool.
-
-#### Scenario: Subagent calls pass and the boundary is recorded
-
-- **WHEN** a subagent calls a repo-file core-class tool while armed
-- **THEN** the call SHALL pass unblocked
-- **AND** the adapter status SHALL record the subagent-delegation boundary
-
-### Requirement: OMP adapter SHALL attach RTK_PROMPT during the armed window
-
-While the adapter is armed (graph main node executing), every provider request SHALL carry the RTK_PROMPT text appended to the system blocks of the payload (per-LLM-call payload rewrite). When disarmed, provider payloads SHALL be returned unchanged. The RTK_PROMPT text SHALL match the reference `.refs/oh-my-pi-supreme-token-saver` extension (verbatim: rtk command preference, no-RTK exceptions, specialized-tools-win clause).
-
-#### Scenario: Armed attach
-
-- **WHEN** the adapter is armed and a provider request is dispatched
-- **THEN** the request payload's system blocks SHALL include the RTK_PROMPT text
-- **AND** the base prompt SHALL be preserved (append semantics)
-
-#### Scenario: Disarmed no-op
-
-- **WHEN** the adapter is disarmed and a provider request is dispatched
-- **THEN** the request payload SHALL be returned unchanged
-- **AND** no RTK_PROMPT SHALL be attached
-
-#### Scenario: Lifecycle consistency
-
-- **WHEN** a graph run terminates (approval/gate/null dispatch, force_end, agent_end fail-safe)
-- **THEN** the adapter SHALL disarm
-- **AND** subsequent provider requests SHALL carry no RTK_PROMPT
+- **WHEN** the enforcement surface is implemented
+- **THEN** the implementation SHALL NOT modify or inherit code from the .omp/extensions prototype
+- **AND** the prototype SHALL remain a validation artifact

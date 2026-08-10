@@ -1,6 +1,7 @@
 ---
 name: atom-graph-design
 description: 'Entry skill for graph topology design - loads atom-graph-spec, analyzes requirements, designs phase list with dependsOn/jumps/channels. Trigger: spec phase in graph-generate graph.'
+disable-model-invocation: true
 user-invocable: false
 version: 1.5.0
 last_updated: '2026-08-08'
@@ -69,23 +70,17 @@ Design complete phase topology:
 3. **Gate phases** - pure rework nodes (jumps: when/to backward pairs, bounded by target retryCount)
 4. **Approval phases** - decision confirmation (card: task text + Accept + free input; branch-route routing only for track selection)
 
-For each phase:
+For each phase (design-relevant fields; full tables: see PHASESCHEMA.md §Phase Fields):
 
 - `id`: kebab-case, unique, descriptive
 - `type`: main / approval / gate / flow per semantics
-- `dependsOn`: list upstream phase ids - DAG, no cycles; leaf deps only (judgment context rides channels, never transitive dependsOn)
+- `dependsOn`: leaf deps only - DAG, no cycles (judgment context rides channels, never transitive dependsOn)
 - `join`: (optional) `any` - branch-route convergence only (direct upstreams span >=2 routes); absent = all; `all` is never written
 - `task`: sketch - full text per §Task Content Spec (PHASESCHEMA.md) at write time; approval task = card prompt (first line = header)
 - `channels`: main - from entry skill Context Requirements contract; gate/approval - node: entries for cross-level judgment context
 - gate `jumps`: when/to pairs - conditions reference direct dependsOn + channels node: outputs, bounded (`<target> retryCount < N`)
 
-Validate per atom-graph-spec §Topology Constraints:
-
-- No cycles in dependsOn edges
-- Every phase reachable from root
-- Gate jump conditions reference declared judgment context and carry retryCount bounds
-- Gate jump targets are writer nodes (not reviewers), upstream of the gate
-- Flow phases declare use (required - def removed)
+Validate per atom-graph-spec §Topology Constraints + ROUTING.md §Gate Jump Conditions (single home - consult, do not restate). Design-specific mappings: gate jump targets = writer nodes (not reviewers), upstream of the gate; flow phases declare `use` (required - def removed).
 
 #### interview(details)
 

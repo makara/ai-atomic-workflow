@@ -90,3 +90,21 @@ atom-doc-lifecycle §Record Format SHALL NOT mandate a specific language for ADR
 
 - **WHEN** an agent writes an ADR record
 - **THEN** metadata block, fixed body, one-decision-per-record, status machine, and immutability remain required
+
+### Requirement: Record Format Tabular
+
+atom-doc-lifecycle §Record Format SHALL render the ADR record contract as a field table (id | title | date | status | domain | decision | supersedes | superseded_by | related) plus a numbered rules list (one-decision, transitions, live/archive, immutability) — not a single run-on paragraph.
+
+#### Scenario: Table carrier
+
+- **WHEN** reading §Record Format
+- **THEN** fields appear in a table and status transitions in a numbered list — no prose-mixed field enumeration
+
+### Requirement: Runtime Dependency Declared by Exclusion
+
+atom-doc-lifecycle's `### Reference skills` subsection SHALL NOT list atom-kernel — atom-graph-spec §Contract Rules 6 excludes platform primitives from Reference skills (always available, never declared; a declaration hard-fails channel forward-coverage at graph load). The subsection SHALL carry the exclusion comment, matching sibling skills (atom-pilot, atom-scope-interview).
+
+#### Scenario: Exclusion comment present
+
+- **WHEN** reading the skill's Context Requirements
+- **THEN** `### Reference skills` carries the atom-kernel exclusion comment and no atom-kernel entry

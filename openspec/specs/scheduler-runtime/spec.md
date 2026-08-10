@@ -330,14 +330,14 @@ All three `package.json` files SHALL use `"version": "0.1.0"` (both packages pub
 
 ### Requirement: REQ-D2: Both packages SHALL include keywords
 
-Both packages' `package.json` SHALL contain a non-empty `keywords` array (including the common items graph/workflow/dag/fsm/taskflow/agent/automation/mcp/orchestration; graph-scheduler additionally includes mcp-server, effect-ts).
+Both packages' `package.json` SHALL contain a non-empty `keywords` array (including agentic-engineering, graph-engineering, workflow, and mcp related items).
 
 #### Scenario: keywords array is non-empty and contains common items
 
 - **WHEN** the `keywords` field of both packages' `package.json` is parsed
 - **THEN** both SHALL be non-empty arrays
-- **AND** both SHALL include "graph" and "mcp"
-- **AND** scheduler SHALL include "mcp-server" and "effect-ts"
+- **AND** both SHALL include "agentic-engineering", "graph-engineering", and "workflow"
+- **AND** scheduler SHALL include "mcp-server"
 
 ### Requirement: REQ-D3: Both packages SHALL include author
 

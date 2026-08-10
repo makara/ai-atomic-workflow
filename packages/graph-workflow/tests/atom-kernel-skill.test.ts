@@ -85,7 +85,7 @@ describe('atom-kernel SKILL.md - High-Level Tool Registry tool-call definition',
   });
 
   it('defines the call as a registered tool execution with exactly four fields - { intent, tool, args, bound }', () => {
-    expect(section).toMatch(/An execution is a registered tool call `\{ intent, tool, args, bound \}`/);
+    expect(section).toMatch(/An execution = registered call `\{ intent, tool, args, bound \}`/);
     for (const field of ['intent', 'tool', 'args', 'bound']) {
       expect(section).toMatch(new RegExp(`\\b${field}\\b`));
     }
@@ -97,22 +97,22 @@ describe('atom-kernel SKILL.md - High-Level Tool Registry tool-call definition',
   });
 
   it('requires tool to reference a registered high-level tool - unknown names fail at analyze', () => {
-    expect(section).toMatch(/[Uu]nknown tool names fail the call at analyze with the candidate list/);
+    expect(section).toMatch(/Unknown tool names fail at analyze \(candidate list\)/);
   });
 
   it('ends read-only calls when the tool completes without writes; write calls verify per Entry: verify', () => {
-    expect(section).toMatch(/Read-only calls end when the tool completes without writes/);
+    expect(section).toMatch(/Read-only calls end without writes/);
     expect(section).toMatch(/write calls verify per `Entry: verify` BEFORE reporting success/);
   });
 
   it('bounds the call-internal evidence loop with a default of 3 and an evidence-gap failure', () => {
-    expect(section).toMatch(/bound \(default 3, per-call override allowed\)/);
-    expect(section).toMatch(/call FAILS with evidence-gap list naming missing files\/symbols/);
+    expect(section).toMatch(/bound \(default 3, per-call override\)/);
+    expect(section).toMatch(/call FAILS with evidence-gap list \(missing files\/symbols\)/);
   });
 
   it('layers loops: call-internal bounded loop vs graph gate cross-call rework', () => {
-    expect(section).toMatch(/call-internal evidence loop = this contract, bounded/);
-    expect(section).toMatch(/Cross-call rework = graph gates \(jumps \+ retryCount, atom-graph-spec\)/);
+    expect(section).toMatch(/call-internal = this contract, bounded/);
+    expect(section).toMatch(/cross-call rework = graph gates \(atom-graph-spec\)/);
   });
 
   it('uses tool-call vocabulary - no step as execution unit in the registry section', () => {
@@ -122,66 +122,106 @@ describe('atom-kernel SKILL.md - High-Level Tool Registry tool-call definition',
   });
 });
 
-describe('atom-kernel SKILL.md - HLT Registry entry anatomy (merged from atom-mcp-contract)', () => {
+describe('atom-kernel SKILL.md - HLT Registry entry anatomy (merged from atom-mcp-contract; scenario-keyed)', () => {
   const skill = loadSkill();
   const section = skill.slice(skill.indexOf('## Registry Entries'));
 
   it('defines the closed registry intro with three views + deferred enforcement', () => {
+    expect(section).toMatch(/\|`contract`\|Declared I\/O, obligations, n\/a rules\|/);
     expect(section).toMatch(
-      /\|`contract`\|Declared I\/O, verify obligations, index-registration obligations \(unconditional while index mounted\), n\/a rules\|/,
-    );
-    expect(section).toMatch(
-      /\|`chain`\|Execution order - query plane: jcodemunch head \(\+ serena ground-truth confirmation step\)/,
+      /\|`chain`\|Execution order - the scenario's designated adapter; in-project code: two-plane chain/,
     );
     expect(section).toMatch(
       /\*\*Enforcement\*\*: deferred per-platform \(all entries; per-platform allowed\/denied\/mandatory sets recorded now/,
     );
     expect(section).toMatch(
-      /\|`plane`\|`query` \(jcodemunch head\)\|`mutation` \(serena sole\)\|`run` \(platform shell\)\|`utility` \(optional, declared use cases\)\|/,
+      /\|`scenario`\|Target domain x operation key - `in-project code` \/ `in-project non-code text \(indexed\|unindexed\)`.*`utility`\|/,
     );
   });
 
-  it('declares registry validation - three views + enforcement deferred; query head jcodemunch, mutation serena-only, run platform shell', () => {
+  it('declares registry validation - three views + enforcement deferred; scenario-keyed adapter assignment', () => {
     expect(section).toMatch(/Every entry has three views \(enforcement deferred per-entry\)/);
-    expect(section).toMatch(/query-plane entries SHALL head with jcodemunch/);
-    expect(section).toMatch(/mutation-plane entries SHALL use serena tools only/);
-    expect(section).toMatch(/utility entries SHALL carry optional markers \+ use cases \+ n\/a rules/);
+    expect(section).toMatch(
+      /each scenario key has exactly one adapter - zero or multiple adapters per cell = validation error/,
+    );
+    expect(section).toMatch(
+      /In-project-code chains SHALL keep the two-plane shape \(jcodemunch locate head \+ serena ground-truth; serena sole mutator\)/,
+    );
+    expect(section).toMatch(
+      /Indexed-target entries SHALL carry the register_edit obligation; unindexed\/out-of-project entries SHALL declare `n\/a: not indexed`/,
+    );
   });
 
   it('forbids cross-plane chains - validation errors both directions', () => {
-    expect(section).toMatch(/Chain heads SHALL NOT cross planes/);
-    expect(section).toMatch(
-      /a locate chain headed by serena symbol tools, a write chain headed by jcodemunch - both validation errors/,
-    );
+    expect(section).toMatch(/each scenario key has exactly one adapter/);
+    expect(section).toMatch(/zero or multiple adapters per cell = validation error/);
   });
 
-  it('declares the two-plane structure - query jcodemunch read-only, mutation serena sole, run platform shell', () => {
+  it('keeps allocation single-home - HLT-REGISTRY entries restate no parameter tables', () => {
+    const registry = readFileSync(resolve(__dirname, '../skills/atom-kernel/HLT-REGISTRY.md'), 'utf-8');
+    const entries = registry.slice(registry.indexOf('## Registry Entries'), registry.indexOf('## headroom'));
+    expect(entries).not.toMatch(/\|`relative_path`\|/);
+    expect(entries).not.toMatch(/\|`content`\|/);
+    expect(entries).not.toMatch(/\|`hash`\|/);
+    expect(entries).not.toMatch(/\|`file_paths`\|/);
+  });
+
+  it('hot-places tool parameter surfaces - compact tables in SKILL.md, full tables single-home in schemas', () => {
+    const skillOnly = readFileSync(resolve(__dirname, '../skills/atom-kernel/SKILL.md'), 'utf-8');
+    expect(skillOnly).toMatch(/Compact params \(full: SERENA-SCHEMAS.md\)/);
+    expect(skillOnly).toMatch(/Compact params \(full: JCODEMUNCH-SCHEMAS.md\)/);
+    expect(skillOnly).toMatch(/\|`replace_content`\|relative_path, needle, repl, mode/);
+    expect(skillOnly).toMatch(
+      /\|`search_symbols`\|repo, query, kind, language, max_results, token_budget, detail_level\|confidence\/freshness metadata\|/,
+    );
+    // headroom MCP-authoritative wording (no proxy contract text)
+    expect(skillOnly).toMatch(/Context compression - contract \(MCP authoritative\), trigger \(>8KB\), proxy forms/);
+  });
+
+  it('declares graph-scheduler heat + headroom MCP authority in atom-pilot', () => {
+    const pilot = readFileSync(resolve(__dirname, '../skills/atom-pilot/SKILL.md'), 'utf-8');
+    expect(pilot).toMatch(/Parameter schema \(hot - pilot loop surface, same lifecycle, no split\)/);
+    expect(pilot).toMatch(/execution-hot \(every dispatch\)/);
+    expect(pilot).toMatch(/operation-cold \(operator use\)/);
+  });
+
+  it('keeps the hot surface summary-level - no full entries re-inlined into SKILL.md', () => {
+    const skillOnly = readFileSync(resolve(__dirname, '../skills/atom-kernel/SKILL.md'), 'utf-8');
+    expect(skillOnly).not.toMatch(/### Entry: /);
+    expect(skillOnly).not.toMatch(/\|`contract`\|Declared I\/O/);
+  });
+
+  it('declares the scenario structure - one adapter per target domain x operation, two-plane as code-domain chain', () => {
     const intro = skill.slice(skill.indexOf('# High-Level Tool Registry'));
     expect(intro).toMatch(
-      /\*\*Query plane \(jcodemunch\)\*\* - locate\/search\/analyze chains head with jcodemunch index tools/,
+      /\*\*Scenario structure\*\*: key = scenario `\(target domain x operation\)` -> exactly one adapter \+ obligations \+ n\/a rules/,
     );
+    expect(intro).toMatch(/Core rows \(hot - every dispatch\)/);
+    expect(intro).toMatch(/\|in-project code x locate\|jcodemunch -> serena LSP ground-truth\|-\|/);
     expect(intro).toMatch(
-      /\*\*Mutation \+ ground-truth plane \(serena\)\*\* - write\/verify chains name serena as the sole tool, zero fallback/,
+      /\|out-of-project x read\/write\|platform-native read\/write\|serena `project-root-bound`; jcodemunch `not indexed`\|/,
     );
-    expect(intro).toMatch(
-      /\*\*Run class\*\* - platform shell \(`bash`, rtk prefix\) - the single class for arbitrary shell commands/,
-    );
-    expect(intro).toMatch(/utility tools never appear in a query\/mutation chain/);
+    expect(intro).toMatch(/Adapter unavailable -> loud failure/);
   });
 
   it('covers the full closed tool set - query/mutation/run + utility entries', () => {
     expect(section).toMatch(
-      /### Entry: locate\n\n- \*\*plane\*\*: query \(jcodemunch head \+ serena ground-truth confirmation\)/,
+      /### Entry: locate\n\n- \*\*scenario\*\*: in-project code x locate \(jcodemunch head \+ serena ground-truth\)/,
     );
     expect(section).toMatch(
-      /### Entry: read\n\n- \*\*plane\*\*: mutation \(serena\) \+ query-plane locate when target unknown/,
+      /### Entry: read\n\n- \*\*scenario\*\*: in-project code x read \(serena\); in-project non-code text x read \(platform-native, permissive cell\)/,
     );
-    expect(section).toMatch(/### Entry: write\n\n- \*\*plane\*\*: mutation \(serena\)/);
-    expect(section).toMatch(/### Entry: verify\n\n- \*\*plane\*\*: mutation \(serena\)/);
-    expect(section).toMatch(/### Entry: run\n\n- \*\*plane\*\*: run \(platform shell\)/);
-    for (const entry of ['compress', 'review', 'archive', 'graph-ops']) {
-      expect(section).toMatch(new RegExp(`### Entry: ${entry}\\n\\n- \\*\\*plane\\*\\*: utility`));
+    expect(section).toMatch(/### Entry: write\n\n- \*\*scenario\*\*: in-project code x write \(serena sole\)/);
+    expect(section).toMatch(
+      /### Entry: verify\n\n- \*\*scenario\*\*: in-project code x verify \(serena diagnostics \+ re-read\)/,
+    );
+    expect(section).toMatch(/### Entry: run\n\n- \*\*scenario\*\*: run \(platform shell\)/);
+    for (const entry of ['review', 'archive', 'graph-ops']) {
+      expect(section).toMatch(new RegExp(`### Entry: ${entry}\\n\\n- \\*\\*scenario\\*\\*: utility`));
     }
+    expect(section).toMatch(
+      /### Entry: compress\n\n- \*\*scenario\*\*: compress \(any domain\) - headroom-ai platform-neutral contract/,
+    );
   });
 
   it('heads locate with the query plane - jcodemunch index + serena ground-truth confirmation', () => {
@@ -206,10 +246,8 @@ describe('atom-kernel SKILL.md - HLT Registry entry anatomy (merged from atom-mc
   it('defines the two-part verify loop in Entry: verify - register_edit unconditional while mounted', () => {
     expect(section).toMatch(/serena `get_diagnostics_for_file` \(min_severity 1, LSP-covered languages\)/);
     expect(section).toMatch(/re-read the changed region \(serena `read_file` - confirm applied state\)/);
-    expect(section).toMatch(/register_edit count reported while the index is mounted \(obligation\)/);
-    expect(section).toMatch(
-      /`jcodemunch register_edit` after every edit while the index is mounted - unconditional \(mutation-plane obligation\)/,
-    );
+    expect(section).toMatch(/register_edit obligation per §Entry: register_edit/);
+    expect(section).toMatch(/register_edit per §Entry: register_edit \(mutation obligation on indexed targets\)/);
   });
 
   it('runs commands via the platform shell - rtk prefix preserved', () => {
@@ -244,10 +282,11 @@ describe('atom-kernel SKILL.md - tool schemas (merged from atom-mcp-contract)', 
     expect(section).not.toMatch(/#### execute_shell_command - run command/);
   });
 
-  it('makes register_edit unconditional while mounted, n/a when unmounted in the schema notes', () => {
+  it('scopes register_edit to indexed targets, n/a for unindexed/unmounted in the schema notes', () => {
     expect(section).toMatch(
-      /Required after every mutation while the index is mounted \(unconditional - mutation-plane obligation\)/,
+      /Required after every mutation on indexed targets \(in-project code \+ indexed non-code-text subtypes\) while the index is mounted - unconditional within scope/,
     );
+    expect(section).toMatch(/Unindexed target \(markdown\/plain text, out-of-project\) -> `n\/a: not indexed`/);
     expect(section).toMatch(/`n\/a: jcodemunch not in use` \(never silent\)/);
   });
 
@@ -262,20 +301,15 @@ describe('atom-kernel SKILL.md - fault tolerance', () => {
   const skill = loadSkill();
   const section = skill.slice(skill.indexOf('## Fault Tolerance'));
 
-  it('fails loudly per plane - query plane down fails locate, mutation plane down fails write', () => {
-    expect(section).toMatch(/\*\*Plane-down semantics\*\*/);
-    expect(section).toMatch(
-      /Query plane down \(jcodemunch unreachable\) -> locate\/search\/analyze fail naming jcodemunch/,
-    );
-    expect(section).toMatch(
-      /Mutation plane down \(serena down, project unactivated\) -> write\/verify fail naming serena/,
-    );
-    expect(section).toMatch(/Never silent degrade, never cross-plane fallback/);
+  it('fails loudly per scenario - adapter down fails the scenario call', () => {
+    expect(section).toMatch(/\*\*Adapter-down semantics\*\*/);
+    expect(section).toMatch(/the scenario call fails loudly naming the adapter \+ reason/);
+    expect(section).toMatch(/Scope is the scenario - never silent degrade, never cross-adapter fallback/);
   });
 
-  it('retries locate once within the query plane - no cross-plane fallback', () => {
-    expect(section).toMatch(/retry once within the query plane/);
-    expect(section).toMatch(/cross-plane fallback ban/);
+  it('retries locate once within the scenario adapter - no cross-adapter fallback', () => {
+    expect(section).toMatch(/retry once within the scenario's adapter/);
+    expect(section).toMatch(/never unbounded blind retry/);
   });
 
   it('covers LSP index lag on fresh files - ground-truth confirmation retries, freshness metadata consumed', () => {
@@ -291,7 +325,7 @@ describe('atom-kernel SKILL.md - fault tolerance', () => {
 
   it('gates intra-serena tiers by per-tier preconditions; serena unavailable -> loud failure', () => {
     expect(section).toMatch(/precondition \(e.g. LSP coverage per language\) gates the intra-serena tier/);
-    expect(section).toMatch(/Serena itself unavailable -> call fails loudly \(mutation plane has no non-serena tier\)/);
+    expect(section).toMatch(/Serena itself unavailable -> in-project scenarios fail loudly/);
   });
 
   it('covers the index staleness window - overview-first reads when the index has no entry', () => {

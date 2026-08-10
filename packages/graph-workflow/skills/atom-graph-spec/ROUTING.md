@@ -116,15 +116,7 @@ YAML: see YAML-EXAMPLES.md §Branch-Route Actions.
 |`jump`|Jump to target phase. Resets target + downstream (`graph_jump`). `note` logged as reason.|Required|
 |`end`|Complete the run immediately - `graph_advance` `endRun: true` -> run completed.|Unused|
 
-Each action MAY declare `value` (stable kebab-case machine identifier - carried in the persisted decision; gate jump conditions and AI recommendations reference `decision value`, never the display label). Run Mode auto executes the AI recommendation, never a declared action (see PHASESCHEMA.md §Approval Routing Actions).
-
-### Default Card (no declared routing)
-
-With no declared `routing` (the normal case), the card is assembled at execution:
-
-- **Accept** - accept the AI recommendation (agent-judged from the judgment context + snapshot + run mode: e.g. "no Top Rec -> recommend end", "review shows fail -> recommend retry the writer").
-- **Free input** - approval() custom input, always present; free text overrides the recommendation.
-- **AI-generated options** - contextual retry/jump/end/branch-route options judged at execution, presented alongside Accept.
+Each action MAY declare `value` (stable kebab-case machine identifier - carried in the persisted decision; gate jump conditions and AI recommendations reference `decision value`, never the display label). Run Mode auto-execution semantics: per PHASESCHEMA.md §Approval Routing Actions (single home).
 
 ### Approval Dependency Rule
 
@@ -154,38 +146,3 @@ Gate jump conditions drive automatic rework. Auto-rework conditions SHALL satisf
 Canonical example: §Gate+Approval Pair Pattern (bounded, contract-field, writer target, single writer).
 
 YAML anti-pattern: see YAML-EXAMPLES.md §Auto-Rework Anti-Pattern.
-
-## Run Mode
-
-Run Mode = auto-approve convention driven by the `$run-mode-confirm` activation prologue node (§Activation Prologue). Every activation (run start and round restarts) re-confirms the mode: `args.mode` short-circuits (flags/headless callers), otherwise the node asks the user (Manual recommended). The mode is NOT a run field, NOT a NodeDetail field - approval dispatches read the confirm node's output. Zero per-approval declarations - the recommendation is agent-judged at execution (see PHASESCHEMA.md §Approval Routing Actions).
-
-### Mode decision (per activation)
-
-`graph_start { graphName, args?: { mode?: 'manual' | 'auto' } }` - the mode travels as an ordinary graph input (`{args.mode}` interpolation); there is no `mode` top-level param. atom-pilot maps `--auto`/`--manual` to `args.mode` and never asks pre-start; direct MCP callers pass `args.mode` or leave it unset. Flow composition needs no plumbing - nested graphs share the same run activation, so the confirm output applies at any nesting depth.
-
-- Graphs SHALL NOT declare a mode topic in entry task texts - the mode question lives in the built-in confirm node.
-- The mode is re-decided per activation - round restarts may change it (the confirm node re-asks; no echo).
-
-### Consumption (direct branch)
-
-atom-phase-handler approval nodes AND approval() checkpoints inside main nodes read the `$run-mode-confirm` output:
-
-- `'auto'` -> the handler/checkpoint judges the AI recommendation from the judgment context (per §Jump Semantics) + snapshot + run mode, then auto-executes per atom-kernel §approval() (single assembly site for mode semantics - `IApprovalDecision` incl. `rationale`, decision-file persistence with value + label, end-action handling). No recommendation (judgment fails / context insufficient) -> human card even in auto - never guess an action.
-- `'manual'` (or missing confirm output) -> human card. No output scans, no parse/conflict fail-safe matrix - the confirm output is the single source of truth.
-
-### Run Mode context
-
-The `## Run Mode: <mode>` block accompanies every node dispatch context (main/approval/gate, same layer as `## Constraints`) - gate jump conditions may reference the mode (loop router pattern).
-
-### Scope
-
-Run Mode controls **decision presentation**:
-
-- Approval phases - auto-execute the AI recommendation when the mode is Auto.
-- approval() checkpoints inside main nodes - auto-execute the recommendation when the mode is Auto (to-spec seam check, to-tickets breakdown quiz, single-decision confirmations with a recommendation).
-- Main nodes (grill/scope interviews, work nodes) - never auto-decided outside approval() checkpoints. The mode never gates an interview - structurally: approval() without a recommendation always presents a card.
-- Gate jump semantics unchanged - a gate may reference the run-mode context in jump conditions.
-
-### Loop Router Integration
-
-Folded into §Loop Router Pattern - arch-review-loop described once. Unique: the implement pipeline's grilling is a **mandatory interview** in graph dispatch (zero-question degradation disabled). Activation-prefix re-run: see §Activation Prologue. Interview scope: see §Run Mode Scope.
