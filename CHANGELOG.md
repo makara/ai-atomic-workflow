@@ -2,28 +2,55 @@
 
 > Release history for ai-atomic-workflow — monorepo, one release line for both packages. Content derived from code state (skills, graphs, schema features), not git commits. Caveman style — one line per change, latest state wins.
 
-## [Unreleased]
+## [v0.4.0]
+
+"High-level tools".
 
 ### Added
 
-- Two-scope channels context model — global `context:` + per-phase `channels:`, node streams, one judgment-domain formula.
-- 9 built-in graphs — e2e-minimal, arch-review, arch-review-loop, adopt-with-docs, graph-generate, doc-update, spec-implement, openspec-apply, openspec-engineer.
-- Auto-decision rationale — Run Mode auto approvals persist a one-line recommendation basis.
-- graph-generate identity — maker-journey graph name, optional graph description, project-first registry precedence, load-probe validation, runId-scoped outputs.
-- Spec-skill loading per affected domain — implementation loads atom-graph-spec / atom-skill-spec / atom-doc-maintenance by domain.
-- `.graph-scheduler/docs/` scaffold in setup-atomic-workflow.
-- atom-doc-maintenance skill — single maintain() contract, replaces atom-doc-spec + atom-doc-writer.
-- Post-archive doc maintenance — openspec graphs run doc-update after archive.
+- Graphs: estate-maintain, release-prep.
+- Skills: release-prep-analyze/release-prep-apply; doc-estate family (atom-adr-maintain, atom-doc-lifecycle, atom-doc-maintain, atom-domain-spec, atom-spec-maintain); HLT registry.
+- Engine: three-tier channels + track-closure (channel context model + run closure).
+- Docs: 51 openspec specs; docs/domains.md + CONTEXT.md (domain index + glossary); skill reference docs; execution-output + opencode-hlt-policy domains.
 
 ### Changed
 
-- Adopt-stage interview boundary — conventions out, decisions in, explicit close.
-- doc-update graph reshape — trigger-first flow.
+- Engine: crud/loader/maintenance/snapshot/contracts/resolve-channels/transition/prologue/scheduler-runtime/phase schemas reworked (approval() replaces question(); channel contract simplified; prologue reports to session).
+- Skills: atom-graph-spec, atom-kernel, atom-phase-handler, atom-pilot, atom-scope-interview, atom-skill-spec, setup-atomic-workflow, atom-graph-design, atom-graph-writer optimized.
+- Graphs: adopt-with-docs, arch-review, graph-generate, openspec-apply, openspec-engineer, registry.json rebuilt.
+- Docs: README family + marketplace.json canonical description + blueprint facts 0.4.0; domain index 57 domains; ADR citations repointed (0097→0099, 0116, index 0142).
+- Config: package.json, skills.sh.json, marketplace.json.
 
 ### Removed
 
-- artifact-workflow + skill-workflow graphs — skill production flows through arch-review-loop changes.
-- atom-doc-spec / atom-doc-writer skills — superseded by atom-doc-maintenance.
+- Graphs: doc-update (folded into estate-maintain).
+- Skills: atom-doc-maintenance (renamed atom-doc-maintain), atom-mcp-contract (merged into atom-kernel), atom-openspec-archive, atom-pilot MCP-REFERENCE.md.
+- Specs: readme-family (retired — no Doc-Family kind).
+
+## [v0.3.1]
+
+Channels redesign + graph estate rebuild.
+
+### Added
+
+- Graphs: adopt-with-docs, spec-implement.
+- Skills: atom-doc-maintenance (single maintain() contract).
+- Engine: config-service (.graph-scheduler/config.json + schema validation).
+- Docs: readme-blueprint (README family regeneration source); identity + adopt-with-docs graph tests.
+
+### Changed
+
+- Engine: channels two-scope context model (global context + per-phase channels, node streams); approval-handler, prologue, flow-flatten, registry-loader, scheduler-runtime, schemas, filesystem.
+- Graphs: all rebuilt (arch-review(-loop), doc-update, e2e-minimal, graph-generate, openspec-apply, openspec-engineer, registry).
+- Skills: atom-graph-design/-spec/-writer, atom-mcp-contract, atom-openspec-archive, atom-phase-handler, atom-pilot, atom-scope-interview, setup-atomic-workflow updated.
+- Docs: readme family + bilingual changelog structure.
+- Config: package.json, marketplace.json, skills.sh.json, .gitignore.
+
+### Removed
+
+- Graphs: 8 legacy (grill-with-docs, implement, openspec-create, openspec-pipeline, plan-generate, skill-author, skill-change-workflow, skill-delete).
+- Skills: atom-doc-spec / atom-doc-writer (replaced by atom-doc-maintenance), atom-skill-writer.
+- Tests: e2e-skill-change-workflow + pipeline-v2-flatten-smoke (flow removed/reworked).
 
 ## [v0.2.0]
 
@@ -31,21 +58,17 @@ The arch-review-loop.
 
 ### Added
 
-- Gate phase type — pure rework node with `jumps` conditions.
-- Branch routes — phase `route` membership activated via `branchTo`.
-- Activation prologue — run mode confirmed per activation (manual default), constraints loaded per round.
-- Flow composition — merge-at-load flatten (depth cap 5).
-- Approval cards redesign — decision-confirmation with free input + contextual options.
-- atom-mcp-contract skill — MCP tool-call contract.
+- Engine: gate phase type (pure rework node with `jumps`), branch routes (route membership via `branchTo`), activation prologue (run mode per activation, constraints per round), flow composition (merge-at-load flatten, depth cap 5), approval cards redesign (free input + contextual options).
+- Skills: atom-mcp-contract (MCP tool-call contract).
 
 ### Changed
 
-- `graph_advance` routing — `branchTo` + `endRun` added, `skip` removed.
-- Schema convergence — `reads` / `preText` / `eval` and top-level `when` removed; `join` limited to `any`.
+- Engine: `graph_advance` routing (`branchTo` + `endRun` added, `skip` removed); schema convergence (`reads`/`preText`/`eval` and top-level `when` removed; `join` = `any` only).
+- Docs: bilingual changelog (CHANGELOG.md + docs/CHANGELOG.zh-CN.md).
 
 ### Removed
 
-- Top-level `when` skip guard — conditions moved to gate `jumps[].when`.
+- Engine: top-level `when` skip guard (moved to gate `jumps[].when`).
 
 ## [v0.1.0]
 
@@ -53,8 +76,6 @@ Initial release.
 
 ### Added
 
-- graph-scheduler — DAG execution engine + MCP server (9 tools, stdio), pure-function FSM kernel, libsql persistence.
-- `.taskflow.yaml` graph format — main/approval phases, `dependsOn`, `task`, `skill`, `channels`, `join`.
-- Approval gates — non-bypassable human decision cards between phases.
-- graph-workflow skill system — atom-pilot, atom-phase-handler, atom-kernel, entry + reference skills, setup-atomic-workflow.
-- Setup skill — setup-atomic-workflow scaffolds `.graph-scheduler/`, idempotent.
+- Engine: graph-scheduler DAG engine + MCP server (9 tools, stdio), pure-function FSM kernel, libsql persistence; approval gates (non-bypassable human decision cards).
+- Graphs: `.taskflow.yaml` format (main/approval, `dependsOn`, `task`, `skill`, `channels`, `join`).
+- Skills: graph-workflow system (atom-pilot, atom-phase-handler, atom-kernel, entry + reference skills); setup-atomic-workflow (scaffolds `.graph-scheduler/`, idempotent).

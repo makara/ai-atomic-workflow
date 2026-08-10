@@ -1,8 +1,8 @@
 {
   "name": "ai-atomic-workflow",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
-  "description": "Graph-driven work-order system for AI agents — explicit phases, scoped context, and non-bypassable approval gates.",
+  "description": "Graph-Engineering for Real Engineers: Graphs define workflows; workflows build graphs. Based on mattpocock/skills.",
   "license": "MIT",
   "type": "module",
   "workspaces": [

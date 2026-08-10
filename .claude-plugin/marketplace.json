@@ -1,8 +1,8 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "ai-atomic-workflow",
-  "version": "1.0.0",
-  "description": "Graph-driven work-order system for AI agents - explicit phases, scoped context, and non-bypassable approval gates.",
+  "version": "0.4.0",
+  "description": "Graph-Engineering for Real Engineers: Graphs define workflows; workflows build graphs. Based on mattpocock/skills.",
   "owner": {
     "name": "makarawang",
     "email": "makara15@gmail.com"

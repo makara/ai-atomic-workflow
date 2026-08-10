@@ -1,17 +1,18 @@
 {
   "name": "@ai-atomic-workflow/graph-workflow",
-  "version": "0.3.1",
-  "description": "Graph-driven work-order system for AI agents — explicit phases, scoped context, and non-bypassable approval gates.",
+  "version": "0.4.0",
+  "description": "Graph-Engineering for Real Engineers: Graphs define workflows; workflows build graphs. Based on mattpocock/skills.",
   "keywords": [
-    "graph",
-    "workflow",
-    "dag",
-    "fsm",
-    "taskflow",
     "agent",
-    "automation",
+    "agent-skills",
+    "agentic-engineering",
+    "agentic-workflow",
+    "graph-engineering",
     "mcp",
-    "orchestration"
+    "openspec",
+    "workflow",
+    "workflow-automation",
+    "workflow-orchestration"
   ],
   "homepage": "https://github.com/makara/ai-atomic-workflow#readme",
   "bugs": {

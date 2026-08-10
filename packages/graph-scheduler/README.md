@@ -22,14 +22,14 @@
   - [Making a Graph](#making-a-graph)
   - [Development](#development)
   - [FAQ](#faq)
-    - [graph\_start returns a node but the agent doesn't respond?](#graph_start-returns-a-node-but-the-agent-doesnt-respond)
+    - [graph_start returns a node but the agent doesn't respond?](#graph_start-returns-a-node-but-the-agent-doesnt-respond)
     - [How do I see run history?](#how-do-i-see-run-history)
     - [How do I abort a stuck run?](#how-do-i-abort-a-stuck-run)
     - [Where is the database?](#where-is-the-database)
 
 ## Overview
 
-Graph-driven work-order system for AI agents — explicit phases, scoped context, and non-bypassable approval gates.
+Graph-Engineering for Real Engineers: Graphs define workflows; workflows build graphs. Based on mattpocock/skills.
 
 DAG execution engine as a standalone **MCP Server** (stdio transport) — 9 MCP tools, no network port.
 
@@ -43,8 +43,8 @@ Two supported runtimes — pick one; the installer matches the runtime:
 
 |Runtime|Version|Used by|
 |-|-|-|
-|[Node](https://nodejs.org)|≥ 22|npm route — runs the compiled entry `dist/server.js`|
-|[bun](https://bun.sh)|≥ 1|bun route — runs the TypeScript entry `server.ts` natively|
+|[Node](https://nodejs.org)|>= 22|npm route — runs the compiled entry `dist/server.js`|
+|[bun](https://bun.sh)|>= 1|bun route — runs the TypeScript entry `server.ts` natively|
 
 ## Install
 
@@ -78,7 +78,7 @@ Verify either route:
 
 ```bash
 npm list -g @ai-atomic-workflow/graph-scheduler
-# @ai-atomic-workflow/graph-scheduler@0.3.1
+# @ai-atomic-workflow/graph-scheduler@0.4.0
 ```
 
 This installs the `atom-graph-scheduler` bin alongside the package.
@@ -221,19 +221,40 @@ graph_start({ graphName: "e2e-minimal" })
 
 ## Built-in Graphs
 
-9 graphs ship with the package (in `graphs/`, registered in `graphs/registry.json`). The project's `.graph-scheduler/graphs/` is searched first — a project graph with the same name overrides a built-in.
+10 graphs ship with the package (in `graphs/`, registered in `graphs/registry.json`). The project's `.graph-scheduler/graphs/` is searched first — a project graph with the same name overrides a built-in.
 
 |Graph|What it does|
 |-|-|
 |**e2e-minimal**|Minimal E2E: main → approval loop|
-|**arch-review**|Requirement production graph, standalone: scope-entry interview (input node — scope + output path + report input fresh\|existing) → arch-review report (improve-codebase-architecture — producer #1) → review-accept (Continue = requirement ready / Loop again / End). Independently executable requirement production|
-|**adopt-with-docs**|Requirement adoption (adopt stage) + spec production: adopt-scope (interview: idea/goal or input document) → adopting (grilling conversation + inline domain-modeling side effects) → adopt-accept → spec-propose (openspec-propose — adopted requirements materialize as the OpenSpec change). Standalone raw-idea entry; composed → report input via channels, record appended as dated appendix section|
-|**graph-generate**|Graph production — the maker journey: concrete 7-phase graph (entry → spec → spec-accept → implement → review → gate → accept; the name states the operation). Entry (atom-scope-interview) confirms graph name + topology scope + save location (default `.graph-scheduler/graphs/`), no CONTEXT.md dependency; spec designs topology per atom-graph-spec; implement writes `.taskflow.yaml` + registry entry + attached doc (`.graph-scheduler/docs/<name>.md`); review per code-review with atom-graph-spec; gate bounded rework; single accept. Single kind (graph), single operation (create), no skill co-production|
-|**doc-update**|Document maintenance: trigger classification → maintain per atom-doc-maintenance → review → accept. Also the post-archive doc flow for spec-implement / openspec-apply / openspec-engineer|
-|**spec-implement**|Implementation graph: spec-extract (produced change — upstream channel when composed / {args.changeName} standalone) → track gate (minimal/detailed) → archive → doc maintenance → pipeline-done. Pure implementation of an existing change — no spec generation; rework is the loop in arch-review-loop|
-|**openspec-apply**|OpenSpec apply pipeline: apply change → dual review → bounded auto-rework gate → archive → doc maintenance|
-|**openspec-engineer**|OpenSpec detailed implementation: spec synthesis → tickets → tdd implementation → dual review → bounded gate → approval → reverse-validated archive → doc maintenance|
-|**arch-review-loop**|Three-stage composition with a single loop: requirement production (arch-review — scope → report → accept) → adopt (adopt-with-docs — confirms the report, appends dated appendix, produces the OpenSpec change) → implementation (spec-implement — consumes the change → track machinery → archive) → loop-gate (auto jump to requirement/scope-entry while Top Rec remains, bounded) → loop-accept (Loop again default, Complete = user ends)|
+|**arch-review**|Requirement production graph, standalone: scope-entry interview (entry node — scope + output path + report input fresh\|existing) → arch-review report (improve-codebase-architecture — producer) → review-accept (Continue = requirement ready / Loop again / End). Independently executable requirement production; the loop composes it as its requirement stage (adopt + implement follow in arch-review-loop).|
+|**adopt-with-docs**|Requirement adoption (adopt stage) + spec production: adopt-scope (interview: idea/goal or input document) → adopting (grilling conversation, inline domain-modeling side effects) → adopt-accept (adoption approval) → spec-propose (openspec-propose — adopted requirements materialize as the OpenSpec change). Standalone raw idea entry; composed as the loop's adopt stage — receives the produced report as input document and appends its record as a dated appendix section.|
+|**graph-generate**|Graph production — the maker journey: entry (atom-scope-interview) → spec (atom-graph-design per atom-graph-spec) → spec-accept → implement (atom-graph-writer: writes .taskflow.yaml + registry entry + attached doc .graph-scheduler/docs/<name>.md, load-probe validated) → review → gate → accept. Single kind (graph), single operation (create)|
+|**spec-implement**|Implementation graph: spec-extract (produced change — upstream channel when composed / {args.changeName} standalone) → track gate (minimal/detailed) → track-owned closure (plain archive / atom-doc-lifecycle) → pipeline-done. Pure implementation of an existing change — no spec generation; rework is the loop in arch-review-loop.|
+|**openspec-apply**|OpenSpec apply pipeline: apply change → dual review → bounded auto-rework gate → plain archive (openspec-archive-change)|
+|**openspec-engineer**|OpenSpec detailed implementation: spec synthesis → tickets → tdd implementation → dual review → bounded gate → approval → lifecycle closure (reverse-validated archive + ADR fold + index)|
+|**arch-review-loop**|Three-stage composition with a single loop: requirement production (arch-review — scope → report → accept) → round-continue content gate (branch-route: continue activates the proceed route / end when no Top Recommendation remains) → adopt (adopt-with-docs — confirms the report, appends dated appendix, produces the OpenSpec change) → implementation (spec-implement — consumes the change → track machinery → archive) → loop-gate (auto jump to requirement/scope-entry while Top Rec remains, bounded) → loop-accept (Loop again default, Complete = user ends)|
+|**estate-maintain**|Estate maintenance graph: entry (trigger classification — domain-change/skill-change/proactive + workstream selection) → domains-index (atom-doc-maintain per atom-domain-spec) / specs-sync (atom-spec-maintain) / adr-align (atom-adr-maintain) → review (consistency gate + reverse-validation + read-only deployment-mirror check) → accept.|
+|**release-prep**|Pre-release preparation — propose (release-prep-analyze: version from git tag history, deterministic + idempotent pre-tag, never executes git tag/commit/push) → plan-grill (grilling confirmation of every planned operation — interview, never auto-gated) → apply (release-prep-apply: version bump on release-line surfaces + CHANGELOG [Unreleased] fold per spec + README list sync vs ground truth, overwrite-style + verified) → release-review (approval; continue completes the run — final report prints tag/commit commands, user executes manually; jump re-runs a phase).|
+
+**estate-maintain** — doc-estate maintenance as a graph: keeps the derived-view / normative / contract doc classes in sync after a domain or skill change. The root README features it; the skeleton at a glance:
+
+```mermaid
+graph LR
+   ENTRY[Entry<br/>trigger classification] --> REQ{user-request?}
+   REQ -->|yes| GRILL[Grill requirements]
+   REQ -->|no| WORK{Workstream}
+   GRILL --> WORK
+   WORK -->|domains| DOM[domains-index]
+   WORK -->|specs| SYN[specs-sync]
+   WORK -->|adrs| ALN[adr-align]
+   DOM --> REV[Review]
+   SYN --> REV
+   ALN --> REV
+   REV -->|pass| ACC[Accept]
+   REV -->|rework| WORK
+```
+
+The entry classifies the trigger (domain-change / skill-change / proactive / user-request — user-request adds a grilling confirmation step, no ADR), then dispatches the matching workstream — `domains-index` (atom-doc-maintain per atom-domain-spec), `specs-sync` (atom-spec-maintain), `adr-align` (atom-adr-maintain); the review is a consistency gate (requirements class + reverse-validation + read-only deployment-mirror check).
 
 ## arch-review-loop — one loop, one problem
 
@@ -241,17 +262,17 @@ The flagship graph: each loop round takes the biggest remaining architectural pr
 
 ```mermaid
 graph LR
-    REQ[Requirement<br/>arch-review] --> ADOPT[Adopt<br/>adopt-with-docs]
-    ADOPT --> TRACK{ADR exists?}
-    TRACK -->|no: minimal| MIN[Apply + review]
-    TRACK -->|yes: detailed| DET[Spec + tickets + implement]
-    MIN --> GATE{Accept?}
-    DET --> GATE
-    GATE -->|no: rework| TRACK
-    GATE -->|yes| ARCHIVE[Archive spec]
-    ARCHIVE --> LOOP{Review reqs}
-    LOOP -->|Top Rec remains<br/>auto · bounded| REQ
-    LOOP -->|no Top Rec| DONE[Loop complete]
+   REQ[Requirement<br/>arch-review] --> ADOPT[Adopt<br/>adopt-with-docs]
+   ADOPT --> TRACK{ADR exists?}
+   TRACK -->|no: minimal| MIN[Apply + review]
+   TRACK -->|yes: detailed| DET[Spec + tickets + implement]
+   MIN --> GATE{Accept?}
+   DET --> GATE
+   GATE -->|no: rework| TRACK
+   GATE -->|yes| ARCHIVE[Archive spec]
+   ARCHIVE --> LOOP{Review reqs}
+   LOOP -->|Top Rec remains<br/>auto · bounded| REQ
+   LOOP -->|no Top Rec| DONE[Loop complete]
 ```
 
 Phases (after composition):
@@ -290,18 +311,18 @@ The maker journey at a glance:
 
 ```mermaid
 graph LR
-    ENTRY[Entry<br/>scope interview] --> SPEC[Spec<br/>atom-graph-spec]
-    SPEC --> DESIGN[Design]
-    DESIGN --> IMPL[Implement]
-    IMPL --> REVIEW[Review]
-    REVIEW --> GATE{Accept?}
-    GATE -->|no: rework| IMPL
-    GATE -->|yes| ACCEPT[Accepted]
+   ENTRY[Entry<br/>scope interview] --> SPEC[Spec<br/>atom-graph-spec]
+   SPEC --> DESIGN[Design]
+   DESIGN --> IMPL[Implement]
+   IMPL --> REVIEW[Review]
+   REVIEW --> GATE{Accept?}
+   GATE -->|no: rework| IMPL
+   GATE -->|yes| ACCEPT[Accepted]
 ```
 
-**Update docs** — `doc-update` runs trigger → maintain → review → approval: classifies the maintenance trigger (spec-archive after an OpenSpec change archive, skill-change, domain-change, proactive), executes the atom-doc-maintenance contract, reviews, and confirms.
+**Post-archive closure** — each track owns it: openspec-apply archives plain (openspec-archive-change); openspec-engineer closes through atom-doc-lifecycle (reverse-validated archive + ADR decision-fold + index rebuild). Full estate maintenance moves to the next-phase maintain graph.
 
-Skill production (create/edit) flows through `arch-review-loop` openspec changes (improver journey) — implementation loads the spec skill per affected domain (graph → atom-graph-spec, skill → atom-skill-spec, doc → atom-doc-maintenance).
+Skill production (create/edit) flows through `arch-review-loop` openspec changes (improver journey) — implementation loads the spec skill per affected domain (graph → atom-graph-spec, skill → atom-skill-spec, doc → atom-doc-maintain).
 
 All of them are driven by `atom-pilot` from [graph-workflow](../graph-workflow/README.md).
 
