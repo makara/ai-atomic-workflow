@@ -46,26 +46,34 @@ System SHALL create a new graph execution run and immediately return the first r
 
 ### Requirement: graph_advance — report completion and get next node
 
-System SHALL accept a node completion report and return the next ready node, combining notify and askNext into a single atomic call. The call SHALL NOT accept a `status` or failure flag — a phase that failed during execution SHALL be recorded by the scheduler as `done` (failure semantics live in the agent session and output files, not the scheduler DB).
+System SHALL accept a node completion report and return the next ready node, combining notify and askNext into a single atomic call. The call SHALL accept `durationMs`, optional `branchTo` (routing decision target), and optional `endRun` (approval end action). The call SHALL NOT accept an `output` parameter — node content is produced and consumed in the agent session (platform-persisted), never persisted by the scheduler. The call SHALL NOT accept a `status` or failure flag — a phase that failed during execution SHALL be recorded by the scheduler as `done` (failure semantics live in the agent session, not the scheduler DB).
 
 #### Scenario: graph_advance returns next ready node
 
 - **WHEN** `graph_advance({ runId, nodeId: "lint", durationMs: 1234 })` is called
 - **THEN** the `lint` node SHALL be marked `done` with the reported duration
-- **THEN** the next ready node (whose dependencies are now satisfied) SHALL be returned
-- **THEN** the returned `NextNode` SHALL have type `agent` or `approval`
+- **AND** the next ready node SHALL be returned with its dispatch payload
+
+#### Scenario: graph_advance reports output
+
+- **WHEN** `graph_advance({ runId, nodeId: "lint", durationMs: 1234 })` is called
+- **THEN** the `lint` node SHALL be marked `done` with the reported duration
+- **AND** no output SHALL be accepted or persisted — node content stays in the agent session (platform-persisted)
+
+#### Scenario: Upstream outputs delivered with dispatch
+
+- **WHEN** `graph_advance` or `graph_jump` returns the next node
+- **THEN** the response SHALL include channel/dependsOn declarations but SHALL NOT include upstream output text — consumers assemble upstream context from the executing agent's session (platform-persisted), never from the payload or files
 
 #### Scenario: graph_advance returns null when graph complete
 
 - **WHEN** `graph_advance` completes the final phase (all phases `done` or `skipped`)
 - **THEN** `null` SHALL be returned — indicating graph execution is complete
-- **THEN** run status SHALL be `completed`
 
 #### Scenario: graph_advance with skip marks node as skipped
 
 - **WHEN** `graph_advance({ runId, nodeId: "...", durationMs: 0, skip: true })` is called
 - **THEN** the node SHALL be marked `skipped` instead of `done`
-- **THEN** downstream nodes SHALL become ready as if the node completed normally
 
 #### Scenario: graph_advance fails on unknown runId
 
@@ -76,7 +84,6 @@ System SHALL accept a node completion report and return the next ready node, com
 
 - **WHEN** a phase fails and the agent calls `graph_advance` without a status parameter
 - **THEN** the scheduler SHALL record the node as `done` and dispatch the next node
-- **THEN** the failure SHALL NOT be observable via `graph_status` or snapshot node states (session-local visibility)
 
 ### Requirement: graph_jump — directed jump to target phase
 
@@ -117,20 +124,24 @@ System SHALL force-terminate a running graph: all non-terminal nodes marked `ski
 
 ### Requirement: graph_status — query run snapshot
 
-System SHALL return the full state of a run: run metadata plus per-node states with status, retry count, and timestamps. The compact snapshot returned by `graph_advance` and `graph_jump` SHALL also include per-node states, enabling downstream jump-target enumeration without a separate `graph_status` call.
+System SHALL return the full state of a run: run metadata plus per-node states with status, retry count, and timestamps. The compact snapshot returned by `graph_advance` and `graph_jump` SHALL also include per-node states, enabling downstream jump-target enumeration without a separate `graph_status` call. `graph_status` SHALL NOT return node output text — run content lives in the platform session transcript.
 
 #### Scenario: graph_status returns full snapshot
 
 - **WHEN** `graph_status({ runId })` is called
 - **THEN** the response SHALL include run-level fields: `runId`, `graphName`, `status`, `createdAt`, `updatedAt`
-- **THEN** the response SHALL include a `nodes` array where each entry has: `nodeId`, `status`, `retryCount`, `startedAt`, `completedAt`, `durationMs`
+- **AND** per-node states with `nodeId`, `status`, `retryCount`, `startedAt`, `completedAt`, `durationMs`
 
 #### Scenario: Advance and jump snapshots include node states
 
 - **WHEN** `graph_advance` or `graph_jump` returns its snapshot
 - **THEN** the snapshot SHALL include a `nodes` array with `nodeId` and `status` for every phase of the run
-- **THEN** a pilot SHALL be able to enumerate completed (`done`) and `skipped` nodes from the snapshot for jump-target enumeration
-- **THEN** node `status` SHALL be one of the FSM-produced values (`pending`, `active`, `done`, `skipped`) — `failed` is not a node status (failures are session-local, not persisted by the scheduler)
+
+#### Scenario: graph_status returns outputs
+
+- **WHEN** `graph_status({ runId })` is called after nodes completed
+- **THEN** the response SHALL include status and timestamps per node
+- **AND** SHALL NOT include node output text (content is queried via the platform session, not the scheduler)
 
 ### Requirement: graph_list — list all runs
 

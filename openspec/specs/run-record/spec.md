@@ -75,20 +75,6 @@ Changes to the route activation table SHALL be persisted once, in a unified mann
 - **WHEN** a COMPLETE event carries no branchTo
 - **THEN** no `persist_run_state` effect SHALL be emitted (route map unchanged)
 
-### Requirement: Run output files scoped per run
-
-Run records and their output streams SHALL be run-scoped: outputs at `.taskflow/outputs/<runId>/<nodeId>.output.txt`. The output directory is per-run — cross-run file collisions cannot occur.
-
-#### Scenario: Output path carries runId
-
-- **WHEN** a run's node output file is referenced
-- **THEN** the path SHALL include the runId directory (`.taskflow/outputs/<runId>/…`)
-
-#### Scenario: Run cleanup removes its output directory
-
-- **WHEN** a run is force-ended or cleaned
-- **THEN** its output directory SHALL be removable as a unit — no interleaved files from other runs
-
 ### Requirement: Migration ladder version numbers are the change history
 
 `SCHEMA_VERSION` SHALL = 2; the ladder SHALL be v1 (original historical shape) + v2 (`graph_runs.routes` column + cleanup of unused fields); SHALL NOT exist intermediate states or placeholder versions. v1 SHALL contain the `node_states.topo_order` column, the `idx_node_states_topo` index, and the `schema_version.applied_at` column (original shape); v2 SHALL add the routes column and drop all three — the final shape is delivered by v2. The mode/constraints columns SHALL NOT exist in any published version (stripped by the activation-prologue redesign, merged/removed during the unpublished interim-V2 period). **Ladder replay discipline**: published/recorded versions SHALL be immutable (ghost DDL prohibited: a version that has been recorded but whose statements change is never replayed); **unpublished versions SHALL be corrected to the final complete shape** (DDL changes are merged directly into the existing version statement set, no placeholder version added); local databases that already applied such a version SHALL be corrected via direct SQL to match the code (zero data-row touches).
@@ -202,3 +188,18 @@ Each run record SHALL freeze its execution contract at creation: graphName, args
 
 - **WHEN** `.graph-scheduler/constraints.md` is edited after the run was created
 - **THEN** the run's subsequent dispatches still carry the snapshot loaded by the prologue nodes at start; only a new run reflects the new content
+
+### Requirement: Node states carry progress only
+
+`node_states` SHALL store execution progress: status, retry count, start/end timestamps, duration. No content column exists — node output text is never persisted by the scheduler. Run cleanup SHALL remove node states with their run record (no content to clean).
+
+#### Scenario: Completion persists progress
+
+- **WHEN** a node completes with a reported duration
+- **THEN** `node_states` SHALL be updated atomically (status + duration + timestamps in the same persist effect)
+- **AND** no output text SHALL be written
+
+#### Scenario: Cleanup removes node states
+
+- **WHEN** a run is cleaned or force-ended
+- **THEN** its node states SHALL be deleted with the run record — no content residue remains (content never left the session)

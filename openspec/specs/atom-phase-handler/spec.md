@@ -213,14 +213,6 @@ The runtime-constraints block SHALL declare every skill cited as authority in th
 
 Given packages/graph-workflow/skills/atom-phase-handler/SKILL.md When reading the runtime-constraints block Then atom-graph-spec is declared (not just atom-kernel)
 
-### Requirement: Short name for run-scoped stream
-
-The phrase "the run-scoped output stream (per §Run-scoped output streams)" SHALL be defined once as "run stream" and referenced by the short name thereafter.
-
-#### Scenario: parenthetical sprawl gone
-
-Given packages/graph-workflow/skills/atom-phase-handler/SKILL.md When counting "(per §Run-scoped output streams)" occurrences Then it appears at most once (the definition)
-
 ### Requirement: Decision UI block injection — main-node confirmation points per approval()
 
 The handler SHALL prepend a `## Decision UI` block to main-node context (alongside `## Run Mode:` and `## Constraints`), declaring that every user-confirmation point in the node's execution — including "ask the user" / "check with the user" / "quiz" / question()-style instructions in the dispatched skill — executes per the approval() contract: mode from `## Run Mode` (absent → manual); recommendation present + auto → execute it; no recommendation → card. Upstream skill content SHALL NOT be modified; the injection layer is the single interpretation site.
@@ -257,15 +249,6 @@ The marker emission spec (all marker strings: `[CONSTRAINT VIOLATION]`, `[TOOL U
 
 - **WHEN** a marker string spelling changes
 - **THEN** atom-phase-handler SKILL.md is the single edited site; downstream consumers reference it
-
-### Requirement: Run stream path single home
-
-The run-scoped output stream path (`.taskflow/outputs/<runId>/<nodeId>.output.txt`) and its fallback semantics SHALL be defined once in CONTEXT-ASSEMBLY.md; schema files SHALL NOT restate the path.
-
-#### Scenario: Stream path changed
-
-- **WHEN** the output stream path format changes
-- **THEN** only CONTEXT-ASSEMBLY.md §Run-Scoped Output Streams is edited
 
 ### Requirement: NODE-SCHEMA owns runtime shapes only
 
@@ -308,3 +291,18 @@ The conservative judge-failure rule (failure -> no hit -> pass through; never fa
 
 - **WHEN** scanning phase-handler DECISION-CARDS.md §Gate Jump Evaluation or atom-pilot SKILL §Error Handling for the conservative rule
 - **THEN** only a `per atom-kernel §judge()` pointer exists
+
+### Requirement: Session-based upstream assembly single home
+
+Upstream context (direct dependsOn + `node:` channels + prologue outputs) SHALL be assembled by the executing agent from its own session — the agent executed the upstream nodes earlier in the run; after session compaction the platform transcript (history addressing) restores full reports. CONTEXT-ASSEMBLY.md §Session-Based Upstream Assembly SHALL hold the assembly rules; schema files SHALL NOT restate them. Prologue outputs (`$load-constraints` constraints, `$run-mode-confirm` mode) are session facts of the activation — assembled the same way; degradation rules (missing/corrupt → manual mode + empty constraints warning) are unchanged.
+
+#### Scenario: Upstream blocks from session
+
+- **WHEN** a node dispatch references upstream reports (dependsOn / `node:` channels / prologue)
+- **THEN** the handler SHALL assemble `## Upstream:` / `## Constraints` / `## Run Mode:` blocks from the agent session (its own prior outputs, or platform history recovery after compaction)
+- **AND** no dispatch payload content and no file reads are involved
+
+#### Scenario: Missing upstream report degrades, never fails
+
+- **WHEN** an upstream node has not yet produced a report (first round of a retry loop)
+- **THEN** the handler SHALL warn and continue — no failure

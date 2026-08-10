@@ -661,45 +661,45 @@ All test fixtures, unit tests, and integration tests SHALL use `main` phases ins
 
 ### Requirement: Approval Decision Persistence
 
-The decision record SHALL be retained (action + value + label + note); option sources = Accept (AI recommendation) / free input / AI dynamic options (retry/jump/end/branch).
+The decision record SHALL be retained in-session (action + value + label + note); option sources = Accept (AI recommendation) / free input / AI dynamic options (retry/jump/end/branch). Routing SHALL be carried through `graph_advance` `branchTo`/`endRun` — no decision file and no scheduler decision store exists. Downstream gates read the decision from the agent session (the judging agent executed the decision node earlier in the run).
 
 #### Scenario: Decision file written on approval completion
 
 - **WHEN** an approval completes (AI recommendation auto-executed in auto mode, or human choice in manual mode)
-- **THEN** `.taskflow/outputs/<runId>/<nodeId>.output.txt` SHALL exist and contain the decision
+- **THEN** the pilot SHALL route via `branchTo`/`endRun` per the decision
+- **AND** the decision SHALL be kept in the conversation — no scheduler persistence, no file
 - **AND** the decision SHALL carry the routing action (continue/retry/jump/end), the target (retry/jump/branch-route), and the free-text note (if any)
 
 #### Scenario: Chosen label recorded
 
 - **WHEN** a user picks from multiple options (or auto mode executes the AI recommendation)
-- **THEN** the persisted decision SHALL record the chosen option's label and value
-- **AND** downstream SHALL distinguish the chosen option from the persisted artifact alone
+- **THEN** the session record SHALL note the chosen option's label and value
+- **AND** downstream SHALL distinguish the chosen option from the session record alone
 
 #### Scenario: Accept decision
 
 - **WHEN** the user (manual) or auto mode accepts the AI recommendation
-- **THEN** the decision persists with the recommended action's value + label; note records free text or 'run mode: auto'
+- **THEN** the decision carries the recommended action's value + label; note records free text or 'run mode: auto' — kept in the session
 
 #### Scenario: Free input
 
 - **WHEN** the user provides natural-language input instead of picking an option
-- **THEN** the input persists as the decision note; no fabricated option is recorded
+- **THEN** the input becomes the decision note; no fabricated option is recorded
 
 ### Requirement: When-Guard Evaluation on Persisted Upstream Output
 
-The evaluation context of a when guard (ADR 0038 D1) SHALL include the persisted output content of its dependsOn upstream nodes — guard conditions can reference upstream decision/output files.
+The evaluation context of a when guard (ADR 0038 D1) SHALL include the reports of its dependsOn upstream nodes — guard conditions reference upstream decisions/reports, which the judging agent holds in its own session (it executed the upstream nodes).
 
 #### Scenario: Guard reads upstream decision file
 
 - **WHEN** a node with a when condition has completed dependsOn upstream nodes
-- **THEN** the guard evaluation context SHALL include the content of the upstream `.taskflow/outputs/<dependsOn>.output.txt`
+- **THEN** the guard evaluation context SHALL include the upstream reports from the agent session
 - **AND** the evaluation SHALL determine true/false from that content, not merely from node status snapshots
 
 #### Scenario: Deterministic gate verdict on persisted upstream output
 
-- **WHEN** the arch-review-loop loop-gate evaluates and the requirement/arch-review persisted outputs show `top_rec_remaining: false` (or the requirement/scope-entry retryCount reaches its bound)
-- **THEN** the when condition SHALL evaluate to false based on the requirement/arch-review persisted output — no rework jump is triggered and the node passes through
-- **AND** the verdict SHALL NOT depend on agent session memory
+- **WHEN** the arch-review-loop loop-gate evaluates and the requirement/arch-review report shows `top_rec_remaining: false` (or the requirement/scope-entry retryCount reaches its bound)
+- **THEN** the when condition SHALL evaluate to false based on the requirement/arch-review report — no rework jump is triggered and the node passes through
 - **AND** on ambiguous or failed evaluation, the ADR 0038 conservative-execution fallback semantics SHALL be maintained (the verdict basis is not silently changed)
 
 ### Requirement: Approval SHALL default to Accept + free input
@@ -741,17 +741,17 @@ End SHALL be an action, not a node (case 4 — not loop-specific).
 
 ### Requirement: Handler persists run-scoped outputs + forwards references to sub-agents
 
-The phase handler SHALL persist node outputs and approval/gate decisions at `.taskflow/outputs/<runId>/<nodeId>.output.txt`. When a main phase dispatches sub-agents, the handler SHALL forward the injected `## Reference:` blocks into each sub-agent's context — reference skills resolved once at the phase level, never self-discovered by sub-agents.
+The phase handler SHALL assemble upstream context from the agent session (no advance output, no scheduler content). When a main phase dispatches sub-agents, the handler SHALL forward the injected `## Reference:` blocks into each sub-agent's context — reference skills resolved once at the phase level, never self-discovered by sub-agents.
 
 #### Scenario: Decisions persist in run directory
 
-- **WHEN** an approval or gate decision is persisted
-- **THEN** the path SHALL be `.taskflow/outputs/<runId>/<nodeId>.output.txt`
+- **WHEN** an approval or gate decision is produced
+- **THEN** the decision SHALL be kept in the conversation and routed via `branchTo`/`endRun` (no file path, no scheduler store)
 
 #### Scenario: Sub-agents inherit reference blocks
 
 - **WHEN** a main phase dispatches sub-agents
-- **THEN** each sub-agent's context SHALL include the parent's injected reference blocks — no self-discovery of spec skills
+- **THEN** each sub-agent's context SHALL include the parent's reference blocks — no self-discovery of spec skills
 
 ### Requirement: NodeDetail construction SHALL accept a single object input
 

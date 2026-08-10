@@ -36,7 +36,9 @@ The project context for AI-assisted development of this repo: an atomic taskflow
 
 **routingActions**: NodeDetail spelling of `routing` — the approval phase's decision routing actions array as delivered agent-side; replaces the deprecated `routes` approval field. _Avoid_: routing (YAML spelling), routes (deprecated)
 
-**Run stream**: Run-scoped output stream — node outputs persist at `.taskflow/outputs/<runId>/<nodeId>.output.txt`; stale outputs from other runs invisible. _Avoid_: output file, artifact store
+**Run state**: Scheduler-owned per-node execution facts — status, retryCount, timestamps, routing. Progress only; node CONTENT lives in the agent session (platform-persisted transcript; ADR 0143). _Avoid_: run stream (deleted, ADR 0142), output file, run-state content
+
+**Output contract**: Declared field list a main phase emits — the report the node produces in its session (platform-persisted), consumed by downstream nodes via channels (ADR 0143). _Avoid_: output spec, output fields
 
 **retryCount**: Single counter name for node retries — JUMP increments it (never zeroed) and gate jump conditions bound auto-rework against it (ADR 0046); `retryAttempt` deprecated/removed wording — same counter. _Avoid_: retryAttempt
 

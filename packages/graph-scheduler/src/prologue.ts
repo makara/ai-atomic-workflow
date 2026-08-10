@@ -47,7 +47,7 @@ Protocol:
 2. Otherwise present the approval() card — no mode block exists yet, so approval() takes its manual branch (Manual (recommended, default) vs Auto). Absence NEVER auto.
 Every activation re-confirms — never echo a previous activation's value.
 
-Output JSON to the output file: {"mode": "manual"|"auto"}`;
+Report the mode in the session (JSON, platform-persisted): {"mode": "manual"|"auto"}`;
 
 /**
  * Default `$load-constraints` task — the built-in constraints protocol.
@@ -82,7 +82,7 @@ existence is the cache validity signal (deleting it forces recompilation).
    compiled_at is audit metadata only — never used for validity.
 5. Emit the compiled array. Both files missing → empty array.
 
-Output JSON to the output file: {"constraints": ["<rule 1>", ...]}`;
+Report the constraints in the session (JSON, platform-persisted): {"constraints": ["<rule 1>", ...]}`;
 
 /**
  * Synthesize the activation prologue phase set for a flattened graph.

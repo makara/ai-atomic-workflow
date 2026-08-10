@@ -31,7 +31,7 @@ Natural-language rework conditions - LLM-evaluated by the agent at gate dispatch
 1. **Observable facts** - reference concrete output contract fields: `review/arch-review output shows top_rec_remaining: false`
 2. **Decision values** - approval decisions reference the chosen action's stable `value`, never its display label: `review-accept output shows decision value: implement` (label is pure display - reorder-safe)
 3. **retryCount bounds** - bounded conditions reference the target node's `retryCount` (single counter - see §Gate Jump Conditions): `apply-change retryCount < 2` (bounded rework), `loop-entry retryCount >= 8` (bound exhausted -> condition false -> pass through, end recommended downstream)
-4. **Scope-bounded** - reference outputs of direct `dependsOn` + `channels` `node:` targets + global-context `node:` streams exclusively; jump targets are in scope for their retryCount bound only. NEVER sibling output existence (`no … output present`) or hardcoded `.taskflow/outputs/` paths.
+4. **Scope-bounded** - reference outputs of direct `dependsOn` + `channels` `node:` targets + global-context `node:` streams exclusively (delivered from the agent session — the judging agent produced them); jump targets are in scope for their retryCount bound only. NEVER sibling output existence (`no … output present`) or runtime output paths.
 5. **Conservative** - ambiguous judgment -> no match -> pass through. Do NOT fabricate a jump.
 
 ### Anti-Patterns

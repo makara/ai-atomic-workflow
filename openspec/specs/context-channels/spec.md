@@ -195,20 +195,6 @@ Bidirectional scoped-context contract validation (forward coverage + reverse res
 - **THEN** every built-in graph in the registry SHALL pass contract validation (all-graph smoke)
 - **AND** no silent runtime fallback masks a contract breach
 
-### Requirement: Task-text hardcoded output path detection
-
-The contract validation SHALL scan each phase's `task` text for hardcoded runtime output paths (`.taskflow/outputs/`). A match SHALL fail validation as an **error** naming the phase — mirroring the existing when-guard check for the same pattern. Task texts SHALL reference upstream outputs by nodeId name, not by filesystem path.
-
-#### Scenario: Task text hardcodes output path
-
-- **WHEN** a phase's `task` text contains `.taskflow/outputs/`
-- **THEN** validation SHALL report an error naming the phase
-
-#### Scenario: Task text references output by nodeId
-
-- **WHEN** a phase's `task` text references upstream output by nodeId name only (no path)
-- **THEN** validation SHALL NOT report a hardcoded-path error
-
 ### Requirement: Undeclared injection claim detection
 
 The contract validation SHALL scan each phase's `task` text for injection claims — patterns `injected via (node:)?<id>` and `Read <id> output` — and cross-check the referenced nodeIds against the phase's effective input set (`dependsOn` ∪ `node:` channels). A referenced nodeId outside the effective set SHALL produce a **warning** naming the phase and the nodeId.
@@ -248,24 +234,24 @@ The contract validation test suite SHALL include table-driven cases for: hardcod
 
 ### Requirement: Run-scoped node channel resolution
 
-`node:` channel resolution SHALL validate that the target nodeId belongs to the current run's node set (the current run's graph-definition nodes — including all nodes after flow flattening). This validation SHALL be performed by the scheduler at **dispatch time** (NodeDetail construction): a target not in the run node set → warning (naming the channel and the target nodeId) + the channel is stripped (no injection, no failure); validation SHALL complete before the output file is read — residual disk files SHALL NOT be injected. CLI validate SHALL share the same predicate implementation with the runtime (resolve-channels `runScoped`) — the "validate + runtime share one implementation" claim holds. Agent-side execution SHALL NOT rely on the snapshot node set for this check.
+`node:` channel resolution SHALL validate that the target nodeId belongs to the current run's node set (the current run's graph-definition nodes — including all nodes after flow flattening). This validation SHALL be performed by the scheduler at **dispatch time** (NodeDetail construction): a target not in the run node set → warning (naming the channel and the target nodeId) + the channel is stripped (no injection, no failure). The scope gate exists because the declaration must resolve within the run; content delivery is session-side (the scheduler never holds content, so no stale content can leak by construction). CLI validate SHALL share the same predicate implementation with the runtime (resolve-channels `runScoped`) — the "validate + runtime share one implementation" claim holds.
 
 #### Scenario: Cross-run stale output not injected
 
 - **WHEN** a standalone graph (e.g. arch-review) resolves a `node:loop-entry` channel while the current run's node set does not contain `loop-entry` (the node exists only in nested composition scenarios)
 - **THEN** scheduler dispatch SHALL output a warning naming the channel and the target nodeId
-- **AND** the channel SHALL be stripped — even if `.taskflow/outputs/loop-entry.output.txt` remains on disk from a historical run
+- **AND** the channel SHALL be stripped — no upstream block is assembled for it
 - **AND** resolution SHALL NOT fail — the remaining channels and the task assemble normally
 
 #### Scenario: Current-run node channel resolves normally
 
 - **WHEN** in a composed graph (e.g. arch-review-loop) the target nodeId of a `node:loop-entry` channel belongs to the current run's node set
-- **THEN** resolution SHALL read `.taskflow/outputs/loop-entry.output.txt` as usual and inject a `## Upstream: loop-entry` block
-- **AND** when the file is missing, the existing missing-output warning + skip semantics SHALL be preserved
+- **THEN** resolution SHALL accept the channel and the handler SHALL assemble the upstream block from the agent session (the node's report, produced earlier in the run)
+- **AND** when the node has no report yet (not yet executed), the existing missing-output warning + skip semantics SHALL be preserved
 
 #### Scenario: Flow-propagated channels observe the same scope
 
-- **WHEN** channels reach flow entry child nodes through the two-scope model (ADR 0107 — the four-scope hierarchy and flow-phase channel propagation to entry children are removed) and the target nodeId belongs to the current run's node set
+- **WHEN** channels reach flow entry child nodes through the two-scope model and the target nodeId belongs to the current run's node set
 - **THEN** the `node:` channel SHALL resolve normally
 - **AND** when the target is not in the current run's node set (running the subgraph standalone) → warning + strip
 
@@ -435,20 +421,6 @@ Contract validation at graph load SHALL validate graph-level `context:` entries:
 - **WHEN** a gate jump condition references a node promoted via graph `context:`
 - **THEN** validation SHALL accept the reference without a phase-level `channels` declaration
 
-### Requirement: Run-scoped output streams
-
-Node output streams SHALL be scoped per run: `.taskflow/outputs/<runId>/<nodeId>.output.txt`. Channel resolution and upstream injection SHALL read through the run's own directory — stale outputs from other runs are invisible by construction. The un-scoped `.taskflow/outputs/<nodeId>.output.txt` form SHALL NOT be the canonical convention (standalone-dispatch fallback only, with a warning).
-
-#### Scenario: Upstream blocks read run-scoped paths
-
-- **WHEN** a node's upstream `node:` channel output is injected
-- **THEN** the read path SHALL be `.taskflow/outputs/<runId>/<nodeId>.output.txt`
-
-#### Scenario: Stale outputs never inject
-
-- **WHEN** a new run dispatches a node whose name matches an old run's node
-- **THEN** the old run's output SHALL NOT be readable via the new run's output path
-
 ### Requirement: Tier validation at load — convention / project / graph
 
 The system SHALL validate channel declarations against the three tiers at graph load: (a) convention layer entries SHALL be exact file paths from the fixed set (`CONTEXT.md`, `docs/domains.md`) — anything else rejected; (b) config project layer entries SHALL exist — exact-file missing -> load error, glob zero-match -> warning; (c) graph/phase file globs SHALL target workflow runtime artifacts (`.graph-scheduler/`, `.taskflow/`) — anything else is a load error. Tier validation SHALL run in the shared load-time validation path (graph load + graph_init health), never only at dispatch.
@@ -481,3 +453,12 @@ Coverage checks (forward: contract references/files ⊆ channels; reverse: chann
 
 - **WHEN** a skill contract declares `openspec/specs/` and config.json declares `openspec/specs/**/*.md`
 - **THEN** the forward coverage check SHALL pass (project layer coverage)
+
+### Requirement: Judgment-domain references stay nodeId-based
+
+Gate jump conditions SHALL reference node reports by nodeId within the judgment-domain formula (scope unchanged: direct dependsOn outputs ∪ phase `channels` entries ∪ `node:` streams in the global `context:`; jump target referenceable only within the retryCount bound). Gate judgment is agent-executed (judge()) — the judging agent reads the referenced reports from its own session. Runtime output paths SHALL NOT be referenced (they do not exist); ordinary document paths in task text remain legal content.
+
+#### Scenario: Condition references nodeId only
+
+- **WHEN** a gate jump condition references a report by nodeId within the judgment domain
+- **THEN** validation SHALL pass (no runtime-path check exists)

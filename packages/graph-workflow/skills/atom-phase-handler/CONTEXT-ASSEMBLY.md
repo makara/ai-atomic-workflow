@@ -1,30 +1,30 @@
-# Run-Scoped Output Streams
+# Session-Based Upstream Assembly
 
-**Run-scoped output streams** (short name: **run stream**): node outputs live at `.taskflow/outputs/<runId>/<nodeId>.output.txt` - path format defined HERE; referenced throughout this skill as "run stream". `<runId>` comes from dispatch snapshot (`snapshot.runId`; handler receives `{ node, snapshot? }`). Every read/write resolves through the run's own directory - stale outputs from other runs invisible. Missing runId (standalone dispatch without snapshot) -> un-scoped fallback `.taskflow/outputs/<nodeId>.output.txt` + warning.
+**Session-based upstream assembly**: node outputs are session facts — produced and consumed by the executing agent in its own conversation (platform-persisted transcript). The scheduler does NOT store or deliver output content (progress only: status/retry/timing). The handler assembles `## Upstream:` blocks from the agent session: the same agent executed the upstream nodes earlier in the run; after session compaction the platform transcript (history addressing) restores full reports. `<runId>` comes from dispatch snapshot (`snapshot.runId`; handler receives `{ node, snapshot? }`). No output files exist; no dispatch payload content exists; `graph_status` returns progress only.
 
 # Prologue Output Contract
 
-Prologue output contract (persisted like any node output):
+Prologue outputs are session facts of the activation (per-activation decisions — never echoed from a previous activation):
 
-- `$run-mode-confirm` -> `.taskflow/outputs/<runId>/$run-mode-confirm.output.txt` - JSON `{"mode": "manual"|"auto"}` (per-activation decision; the node emits `args.mode` when set, else presents the approval() card - no mode block exists yet, so approval() takes its manual branch - Manual default, absence never auto - see atom-graph-spec §Activation Prologue).
-- `$load-constraints` -> `.taskflow/outputs/<runId>/$load-constraints.output.txt` - JSON `{"constraints": ["<rule>", ...]}` (compiled-artifact protocol - the built-in node emits the cached `.graph-scheduler/constraints.json` array verbatim when the artifact exists, else compiles `## Rules` into it; existence = validity, deletion = reset - round-level freeze holds via the output stream).
+- `$run-mode-confirm` -> session `{"mode": "manual"|"auto"}` (the node emits `args.mode` when set, else presents the approval() card - no mode block exists yet, so approval() takes its manual branch - Manual default, absence never auto - see atom-graph-spec §Activation Prologue). Every activation re-confirms.
+- `$load-constraints` -> session `{"constraints": ["<rule>", ...]}` (compiled-artifact protocol - the built-in node emits the cached `.graph-scheduler/constraints.json` array verbatim when the artifact exists, else compiles `## Rules` into it; existence = validity, deletion = reset - round-level freeze holds in-session).
 
 Activation order load-first: `$load-constraints` dispatches before `$run-mode-confirm`; confirm dispatch reads existing constraints block - its decision card carries `## Constraints` context; confirm-dispatch degrade path (constraints missing -> warning) no longer fires.
 
-Missing/corrupt prologue output -> degrade, never block: mode -> `manual` + warning; constraints -> empty block + warning (absence never auto - see atom-graph-spec §Activation Prologue).
+Missing/unrecallable prologue facts -> degrade, never block: mode -> `manual` + warning; constraints -> empty block + warning (absence never auto - see atom-graph-spec §Activation Prologue).
 
 **Presence gating:** confirm read gated on `$run-mode-confirm` appearing in `snapshot.nodes` - approval-less graph skips synthesis (no mode consumer) -> no mode block, NO warning emitted. Load read unconditional (constraints consumed by every node type). Degradation applies only to SYNTHESIZED nodes whose output was lost.
 
 # Prologue Context Blocks
 
-Every node dispatch (main/approval/gate): read prologue outputs, prepend context blocks `## Run Mode: <mode>` (from `$run-mode-confirm` - only when node exists in `snapshot.nodes`) + `## Constraints` (from `$load-constraints`, per SKILL.md §Constraints Block Format) - same layer as before, now sourced from prologue node outputs, not NodeDetail fields. Gate jump evaluation context includes them - jump conditions can reference the mode (`run mode is auto …`). Blocks arrive regardless of node type - no graph declares them, no task text repeats them. The `## Run Mode:` block is ALSO the mode source for approval() (atom-kernel §approval()) - absent block -> manual branch (absence never auto).
+Every node dispatch (main/approval/gate): assemble prologue blocks from the agent session `## Run Mode: <mode>` (from `$run-mode-confirm` - only when node exists in `snapshot.nodes`) + `## Constraints` (from `$load-constraints`, per SKILL.md §Constraints Block Format) - same layer as before, now sourced from the session (the agent executed the prologue nodes this activation). Gate jump evaluation context includes them - jump conditions can reference the mode (`run mode is auto …`). Blocks arrive regardless of node type - no graph declares them, no task text repeats them. The `## Run Mode:` block is ALSO the mode source for approval() (atom-kernel §approval()) - absent block -> manual branch (absence never auto).
 
 # Main Inline Context Assembly
 
 Main phases execute in main agent process (no sub-agent) - context assembled inline:
 
 1. **Resolve channels** - contract source dual-track: `node.skill` present -> resolve against that skill's `## Context Requirements` four-subsection contract; `node.skill` absent -> empty contract - every entry must be an explicit `skill:`/`node:` prefix or file glob, bare name -> error.
-2. **Upstream blocks** - read implicit `dependsOn` outputs AND `node:` channel targets from `the run stream` -> `## Upstream: <nodeId>` blocks. **Run-scope gate is scheduler-side**: the scheduler strips `node:` targets outside the run's flattened node set at dispatch - out-of-run references never reach the agent, stale output files from other runs never leak in. **Missing output -> warn + continue, never fail** (first round of a retry loop is legal timing).
+2. **Upstream blocks** - assemble implicit `dependsOn` reports AND `node:` channel targets from the agent session -> `## Upstream: <nodeId>` blocks. The executing agent produced these reports earlier in the run (same session, platform-persisted); after compaction restore via platform history addressing. **Run-scope gate is scheduler-side for declarations**: the scheduler strips `node:` targets outside the run's flattened node set at dispatch - out-of-run declarations never reach the agent; the scheduler holds no content, so no stale content can leak (no files exist). **Missing report -> warn + continue, never fail** (first round of a retry loop is legal timing).
 3. **Reference blocks** - resolve `skill:<name>` entries -> `## Reference:` blocks.
 4. **Registry blocks** - assemble HLT Registry entries for the merged class set (node `operations:` + skill `Operation classes` - see SKILL.md §Registry Injection) -> `## Registry: <tool> — scenario: <domain> x <operation> -> <adapter>` blocks (scenario key carries the adapter assignment). No declared classes -> no assembly, no warning.
 5. **File blocks** - deliver < 8KB channel file entries agent-side as verbatim `## File:` blocks per §Channel File Consumption; larger entries are NOT delivered - consume per the HLT read chain (atom-kernel Entry: read - structural overviews, sliced reads, compress-after-read).

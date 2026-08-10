@@ -555,7 +555,7 @@ describe('route-first fleet contract', () => {
 // ---------------------------------------------------------------------------
 
 describe('2.3 gate jump condition hygiene', () => {
-  it('rejects hardcoded .taskflow/outputs path in jump condition', () => {
+  it('accepts inert .taskflow/outputs text in jump condition — path checks removed', () => {
     const graph = {
       name: 'test',
       version: 1,
@@ -570,7 +570,8 @@ describe('2.3 gate jump condition hygiene', () => {
       ],
     };
     const { errors } = validateGraphContracts(graph, 'test.yaml');
-    expect(errors.some((e) => e.includes('hardcodes runtime output path'))).toBe(true);
+    // Runtime path checks removed — the path no longer exists; inert text passes clean.
+    expect(errors).toEqual([]);
   });
 
   it('rejects sibling-output-existence jump condition', () => {
@@ -1765,7 +1766,7 @@ describe('4.6 main channels validation', () => {
 // ---------------------------------------------------------------------------
 
 describe('4.7 task text contract', () => {
-  it('rejects task text hardcoding .taskflow/outputs/ — error', () => {
+  it('accepts task text mentioning .taskflow/outputs/ — runtime path checks removed', () => {
     const graph = {
       name: 't',
       version: 1,
@@ -1774,7 +1775,8 @@ describe('4.7 task text contract', () => {
       ],
     };
     const { errors } = validateGraphContracts(graph, 't.yaml');
-    expect(errors.some((e) => e.includes('hardcodes runtime output path'))).toBe(true);
+    // Runtime path checks removed — the path no longer exists; inert text passes clean.
+    expect(errors).toEqual([]);
   });
 
   it('warns on injection claim of undeclared node', () => {

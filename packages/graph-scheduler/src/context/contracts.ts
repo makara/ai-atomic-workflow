@@ -76,8 +76,6 @@ function upstreamClosure(id: string, byId: Map<string, Record<string, unknown>>)
 
 /** sibling-output-existence guard pattern: e.g. "no <node> output present" */
 const SIBLING_OUTPUT_EXISTENCE_RE = /no\s+[\w-]+\s+output\s+present/i;
-/** hardcoded runtime output path in guards */
-const HARDCODED_OUTPUT_PATH_RE = /\.taskflow\/outputs\//;
 /** injection claim patterns in task text — 'injected via <id>' / 'injected via node:<id>' */
 const INJECTION_CLAIM_RE = /injected\s+via\s+(?:node:)?([\w-]+)/gi;
 /** read-output claim pattern in task text — 'Read <id> output' */
@@ -178,14 +176,10 @@ export function validateGraphContracts(
     // (single enforcement point — schema rejects before this layer runs).
 
     // declared-inputs contract: task text input references must be covered
-    // by dependsOn (implicit) or node: channels (explicit). Hardcoded output paths
-    // error (mirror of the when-guard check); undeclared injection claims warn.
+    // by dependsOn (implicit) or node: channels (explicit). Runtime output
+    // paths no longer exist (content flows via the agent session);
+    // undeclared injection claims warn.
     const taskText = str(phase.task, '');
-    if (taskText && HARDCODED_OUTPUT_PATH_RE.test(taskText)) {
-      errors.push(
-        `${prefix} — task text hardcodes runtime output path '.taskflow/outputs/'; reference the upstream node output by nodeId name instead (declared inputs)`,
-      );
-    }
     const effectiveInputs = nodeScope(deps, graphContext, phase.channels as readonly string[] | undefined);
     if (taskText) {
       const claimed: string[] = [];
@@ -340,11 +334,6 @@ export function validateGraphContracts(
       for (const jump of (phase.jumps ?? []) as Array<Record<string, unknown>>) {
         const jumpWhen = str(jump.when, '');
         if (jumpWhen) {
-          if (HARDCODED_OUTPUT_PATH_RE.test(jumpWhen)) {
-            errors.push(
-              `${prefix} — gate jump condition hardcodes runtime output path '.taskflow/outputs/'; reference the upstream node output instead (e.g. '<nodeId> output shows …').`,
-            );
-          }
           if (SIBLING_OUTPUT_EXISTENCE_RE.test(jumpWhen)) {
             errors.push(
               `${prefix} — gate jump condition depends on sibling output existence ('no … output present'); conditions must reference observable fields of the declared judgment context (direct dependsOn ∪ channels node: targets ∪ global-context node: streams).`,

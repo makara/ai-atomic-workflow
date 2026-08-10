@@ -27,19 +27,19 @@ Human decision card (approval() manual/absent branch) - field mapping:
 # Gate Jump Evaluation
 
 1. Assemble jump evaluation context (main-style pipeline - judgment context):
-   - Direct dependsOn outputs: read `the run stream of <dependsOnId>` -> `## Upstream: <dependsOnId>` blocks (main parity).
-   - `channels` `node:` targets: read `the run stream of <nodeTarget>` -> `## Upstream: <nodeTarget>` blocks; missing -> note `<nodeTarget> has no output` in the context (node pending/unactivated; a condition referencing it evaluates false).
+   - Direct dependsOn reports: assemble `## Upstream: <dependsOnId>` blocks from the agent session (the executing agent produced them; platform history recovery after compaction) (main parity).
+   - `channels` `node:` targets: assemble `## Upstream: <nodeTarget>` blocks from the agent session; missing -> note `<nodeTarget> has no output` in the context (node pending/unactivated; a condition referencing it evaluates false).
    - Snapshot: per-node states incl. `retryCount` - jump bounds reference the TARGET node's `retryCount` (single counter, JUMP-maintained, never zeroed; every node in the jump closure - target + downstream terminals - increments, so a gate downstream of a rework target carries a non-zero retryCount after rework rounds).
-   - Prepend `## Run Mode: <mode>` (from `$run-mode-confirm` output) + constraints blocks (from `$load-constraints` output; same layer as main/approval).
+   - Prepend `## Run Mode: <mode>` (from `$run-mode-confirm` session fact) + constraints blocks (from `$load-constraints` session fact; same layer as main/approval).
 2. Evaluate jumps in declaration order:
    - judge each condition; the first `"true"` selects its jump; stop. No hit -> pass through.
    - judge() per atom-kernel §judge() - constrained true/false answer; judgment failure -> no hit -> pass through (conservative).
 3. Hit -> `IApprovalDecision { action: "jump", target: <jump.to>, label: <jump.when> }` (shape per atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape). No hit -> `{ action: "continue" }` (no target - pass through, zero forward effect).
 4. Judgment failure (ambiguous) -> treat as no hit -> pass through (conservative rule - single home: atom-kernel §judge()).
 
-# Persist Decision
+# Keep Decision In-Session
 
-Persist the decision to `the run stream` (run-scoped output stream - path format: see CONTEXT-ASSEMBLY.md §Run-Scoped Output Streams). Write failure -> mark `[FILE MISSING: output stream for <runId>/<nodeId>]` in output, do not crash.
+The decision lives in the agent session (platform-persisted) — no scheduler persistence, no files. The pilot routes it via `graph_advance` `branchTo`/`endRun`; downstream gates judge the decision from the session (the judging agent executed the decision node earlier in the run).
 
 - **Approval** - full decision JSON (shape + field semantics: see atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape - single home); auto path adds `rationale`; downstream gate jump conditions consume the decision `value` exactly as the human path.
 - **Gate** - decision JSON incl. target + label.

@@ -151,9 +151,9 @@ describe('atom-phase-handler SKILL.md - project constraints + gate branch contra
     expect(dispatchRules.match(/Clear todo per §Todo Lifecycle \(dispatch clear\)/g)?.length).toBeGreaterThanOrEqual(3);
   });
 
-  it('mandates completion clear after persist, unconditional on success/failure', () => {
+  it('mandates completion clear after report, unconditional on success/failure', () => {
     const lifecycle = skill.slice(skill.indexOf('## Todo Lifecycle (node boundary)'));
-    expect(lifecycle).toMatch(/after output\/decision persist, before return/);
+    expect(lifecycle).toMatch(/after output\/decision report, before return/);
     expect(lifecycle).toMatch(/unconditional on success\/failure/);
   });
 
@@ -167,13 +167,14 @@ describe('atom-phase-handler SKILL.md - project constraints + gate branch contra
   it('approval flow delegates the mode to approval() and clears todo before return', () => {
     // collapse: the handler assembles content, delegates the mode
     // decision to the kernel approval() contract, maps to IApprovalDecision,
-    // persists, clears todo, returns
+    // keeps the decision in-session, clears todo, returns
     const approvalSection = skill.slice(skill.indexOf('### approval type'));
     expect(approvalSection).toMatch(/[Dd]elegate the mode decision to approval\(\)/);
     expect(approvalSection).toMatch(/[Aa]ssemble card content \+ recommendation/);
     expect(approvalSection).toMatch(/Map to IApprovalDecision/);
+    expect(approvalSection).toMatch(/[Kk]eep the decision in the session/);
     expect(approvalSection).toMatch(
-      /Persist.*[Cc]lear todo per §Todo Lifecycle \(completion clear\).*[Rr]eturn `\{ status: "done", output: "<json>", durationMs \}`/s,
+      /[Cc]lear todo per §Todo Lifecycle \(completion clear\).*[Rr]eturn `\{ status: "done", output: "<json>", durationMs \}`/s,
     );
   });
 
@@ -191,19 +192,19 @@ describe('atom-phase-handler SKILL.md - project constraints + gate branch contra
     expect(lifecycle).not.toMatch(/§Step Projection/);
   });
 
-  it('anchors main dispatch timing: clear -> assembly -> calls -> checks -> persist -> clear', () => {
+  it('anchors main dispatch timing: clear -> assembly -> calls -> checks -> report -> clear', () => {
     const rules = skill.slice(skill.indexOf('# Dispatch Rules'));
     const mainSection = rules.slice(rules.indexOf('### main type'));
     const clearIdx = mainSection.indexOf('Clear todo per §Todo Lifecycle (dispatch clear)');
     const assemblyIdx = mainSection.indexOf('Assemble inline context blocks');
     const callIdx = mainSection.indexOf('Execute tool calls per atom-kernel §High-Level Tool Registry');
-    const persistIdx = mainSection.indexOf('Write output to `the run-scoped output stream');
+    const reportIdx = mainSection.indexOf('Report the node output');
     const completionClearIdx = mainSection.lastIndexOf('Clear todo per §Todo Lifecycle (completion clear)');
     expect(clearIdx).toBeGreaterThan(-1);
     expect(assemblyIdx).toBeGreaterThan(clearIdx);
     expect(callIdx).toBeGreaterThan(assemblyIdx);
-    expect(persistIdx).toBeGreaterThan(callIdx);
-    expect(completionClearIdx).toBeGreaterThan(persistIdx);
+    expect(reportIdx).toBeGreaterThan(callIdx);
+    expect(completionClearIdx).toBeGreaterThan(reportIdx);
     expect(mainSection).not.toMatch(/Step 0 projection/);
     expect(mainSection).not.toMatch(/done gate/i);
   });

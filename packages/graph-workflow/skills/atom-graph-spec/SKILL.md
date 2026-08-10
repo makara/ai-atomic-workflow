@@ -104,7 +104,7 @@ Skill-side contract rules - single definition site (atom-skill-spec points here)
 
 1. Contract is the single source of truth for graph channel declarations - the load-time pass cross-checks every dispatching graph's `channels` against it (missing reference/file -> error, phantom channel -> warning).
 2. **Placeholder entries forbidden** - `<configurable …>` style entries fail contract parsing with an error. Every entry MUST be a concrete node ID, skill name, operation class, or file glob. Annotation stripping precedes the placeholder check - `<configurable> (note)` still fails.
-3. **No hardcoded output paths in skill body** - skills MUST NOT reference `.taskflow/outputs/<id>.output.txt` directly; upstream arrives via declared context (dependsOn implicit + `node:` channels).
+3. **No runtime output paths in skill body** - the `.taskflow/outputs/` form no longer exists (content flows via the agent session); references to it are inert text, no check exists. Upstream arrives via declared context (dependsOn implicit + `node:` channels) from the agent session.
 4. **No self-load duplication** - content reachable via declared context arrives at dispatch; the skill body MUST NOT re-load reference skills or re-read declared files.
 5. **Operation classes are closed-set members** - an unknown class name fails contract validation naming the skill and the class (loud rejection, no runtime fallback).
 6. `atom-kernel` excluded from Reference skills - platform primitives, always available.

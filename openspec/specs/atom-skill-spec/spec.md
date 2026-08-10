@@ -41,7 +41,7 @@ SKILL.md format reference. Asset: `packages/graph-workflow/skills/atom-skill-spe
 
 ### Requirement: Context Requirements is a four-subsection machine-parseable contract
 
-The `## Context Requirements` section SHALL be a machine-parseable contract with exactly four subsections — `### From upstream` (node IDs), `### Reference skills` (skill names), `### Operation classes` (closed-set members of the High-Level Tool Registry the skill performs by default — optional, absent = no default classes), `### Files` (file globs) — each containing a simple list. Placeholder entries (e.g. `<configurable — …>`) SHALL be rejected; a skill with an unparseable contract SHALL fail validation. An unknown operation class SHALL fail validation naming the skill and the class. Skills SHALL NOT hardcode `.taskflow/outputs/` paths or duplicate channel resolution inside their bodies — content reachable via declared channels SHALL be consumed as injected context, not re-read by the skill itself.
+The `## Context Requirements` section SHALL be a machine-parseable contract with exactly four subsections — `### From upstream` (node IDs), `### Reference skills` (skill names), `### Operation classes` (closed-set members of the High-Level Tool Registry the skill performs by default — optional, absent = no default classes), `### Files` (file globs) — each containing a simple list. Placeholder entries (e.g. `<configurable — …>`) SHALL be rejected; a skill with an unparseable contract SHALL fail validation. An unknown operation class SHALL fail validation naming the skill and the class. Skills SHALL NOT hardcode runtime output paths of any kind (the `.taskflow/outputs/` form no longer exists; the rule generalizes to filesystem-path references) or duplicate channel resolution inside their bodies — content reachable via declared channels SHALL be consumed from the handler-injected context (run state delivered with dispatch).
 
 #### Scenario: Contract parses into four lists
 
@@ -63,7 +63,7 @@ The `## Context Requirements` section SHALL be a machine-parseable contract with
 
 - **WHEN** a skill's contract declares a Reference skill or Files entry
 - **THEN** the skill body SHALL NOT re-load that reference itself or re-read those files directly as its primary mechanism — the handler-injected context SHALL be authoritative
-- **THEN** a graph-dispatch skill referencing `.taskflow/outputs/<id>.output.txt` in its body SHALL be flagged
+- **THEN** a graph-dispatch skill referencing a runtime output path (e.g. `.taskflow/…`) in its body SHALL be flagged
 
 ### Requirement: Operation classes feed handler injection
 

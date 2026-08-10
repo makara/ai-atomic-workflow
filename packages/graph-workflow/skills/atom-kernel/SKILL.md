@@ -65,6 +65,10 @@ task({ i, context, tasks })
 
 Capture agent ID via the platform's artifact mechanism.
 
+**Output contract (receipt contract)** - every task SHALL declare its return fields (in the task text or an outputSchema). Sub-agents yield a compact structured receipt: status + the declared fields + artifact references (`agent://<id>` / file paths), compressed, no process narrative. Results enter the main context ONCE as the receipt; full transcripts stay addressable via the platform artifact/history mechanisms — never re-injected wholesale.
+
+**Zero on-disk writes** - sub-agents SHALL NOT write persistent files (run state, docs, reports). Deliverable-worthy content is returned in the receipt; the owning main node persists durable artifacts per the output model (session + durable artifacts; scheduler holds progress only).
+
 **Decision Request** - verify-style handoff from dispatched work (Context, Auto-recorded debt, Blocking findings, Dispatch record, Suggested advance label); graph review nodes embed it.
 
 ---

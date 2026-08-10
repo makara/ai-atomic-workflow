@@ -89,7 +89,6 @@ Single emission spec - one rule per marker:
 |-|-|
 |`[CONSTRAINT VIOLATION: <count>]`|Constraint scan count - `Constraint check:` present with `unsatisfied` > 0 -> prefix output with the count.|
 |`[TOOL USAGE VIOLATION: <count>]`|Tool-usage check violation count - any `violated` line, or no check block (all declared classes counted as violated) -> prefix output with the count.|
-|`[FILE MISSING: <path>]`|Persist failure - run-scoped output stream write failed -> mark in output, no crash; run stream instance: `[FILE MISSING: output stream for <runId>/<nodeId>]`.|
 |`[HEADROOM COLD]` / `[HEADROOM PROXY DOWN]`|Headroom health-gate markers - emission per HLT-REGISTRY.md §headroom.|
 
 ## Registry Injection
@@ -101,7 +100,7 @@ Main dispatch: HLT Registry entries for the merged class set - `node.operations`
 Platform todo lists = node-scoped execution scratchpads - execution-trace, never session-persistent. Handler enforces per node type:
 
 1. **Dispatch clear** - before task execution: `todo()` clear (contract: atom-kernel §todo() - Boundary Clear).
-2. **Completion clear** - after output/decision persist, before return: `todo()` clear - unconditional on success/failure.
+2. **Completion clear** - after output/decision report, before return: `todo()` clear - unconditional on success/failure.
 3. **Propagation** - node todo never forwarded to subagents (platform strips at spawn); subagent todos child-scoped, cleared at child yield.
 
 ---
@@ -119,8 +118,8 @@ Static dispatch by `node.type` - main/approval/gate; unknown fails; null complet
 2. Inject `## Agent hints:` block when `node.agent` non-empty (see §Agent Hints).
 3. Execute tool calls per atom-kernel §High-Level Tool Registry - registered invocation `{ intent, tool, args, bound }`; bound caps the evidence loop, default 3.
 4. Constraint scan - `Constraint check:` present -> count `unsatisfied`; > 0 -> prefix `[CONSTRAINT VIOLATION: <count>]`.
-5. Tool usage check per §Tool Usage Check - MUST run before output write so the marker lands in the persisted file.
-6. Write output to `the run-scoped output stream` (run stream; no manifest sidecar).
+5. Tool usage check per §Tool Usage Check - MUST run before output report so the marker lands in the node report.
+6. Report the node output - keep it in the agent session (platform-persisted); the advance carries progress only (`status`, `durationMs` — no output param, no scheduler content store, no file writes).
 7. Measure wall-clock duration via `Date.now()`.
 8. Clear todo per §Todo Lifecycle (completion clear).
 9. Collect result - map to `{ status, output, durationMs }`.
@@ -144,7 +143,7 @@ Absent/empty -> no block, platform default.
 2. For each jump (declaration order): judge each condition - first "true" selects the jump - stop evaluating; no hit -> pass through (judge failure handling - single home: atom-kernel §judge()).
 3. Hit -> IApprovalDecision { action: "jump", target: <jump.to>, label: <jump.when> } (shape per atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape) - resets target + downstream terminal nodes to pending, upstream kept (per atom-graph-spec §Gate Jump Conditions). No hit -> { action: "continue" } (no target - pass through, zero forward effect).
 4. `jumps` required non-empty - a gate without rework jumps is a silent pass-through (see NODE-SCHEMA.md §Type-Specific Fields).
-5. Persist: write `the run-scoped output stream` - decision JSON per DECISION-CARDS.md §Persist Decision; failure -> `[FILE MISSING: output stream for <runId>/<nodeId>]`, no crash.
+5. Keep the decision JSON in the agent session (platform-persisted) - the pilot routes it via `branchTo`/`endRun`; downstream gates judge from the session. No scheduler persistence, no files.
 6. Clear todo per §Todo Lifecycle (completion clear).
 7. Return `{ status: "done", output: "<IApprovalDecision JSON>", durationMs }`.
 
@@ -156,7 +155,7 @@ Absent/empty -> no block, platform default.
 1. **Assemble card content + recommendation** per DECISION-CARDS.md §Decision Card Composition (judgment context, eligible re-run targets, `node.task` -> pre-call text - single home). Prepend `## Run Mode: <mode>` block (always) + constraints block (per §Constraints Block Format, when constraints non-empty) to pre-call text. Surface upstream constraint violations - append `[CONSTRAINT VIOLATION: <nodeId> × N]`; tool-usage violations - append `[TOOL USAGE VIOLATION: <nodeId> × N]` (same aggregation pipeline).
 2. **Delegate the mode decision to approval()** - per atom-kernel §approval() (single assembly site for mode semantics; auto-without-recommendation -> card, never guess).
 3. **Map to IApprovalDecision** - shapes: atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape (single home). Auto-executed: `note: 'run mode: auto'`, `rationale` = one-line judgment-context basis (observable output fields / decision values, e.g. `review output overall: pass; top_rec_remaining: true`). End recommendation -> `action: "end"`. Manual choices omit `rationale` (the human IS the basis) - the field is optional.
-4. **Persist** to `the run-scoped output stream` - decision JSON per DECISION-CARDS.md §Persist Decision (shape home: atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape). Write failure -> mark `[FILE MISSING: output stream for <runId>/<nodeId>]`, no crash.
+4. **Keep the decision in the session** - decision JSON stays in the conversation (platform-persisted); the pilot routes via `branchTo`/`endRun`. No scheduler persistence, no files.
 5. Clear todo per §Todo Lifecycle (completion clear).
 6. Return `{ status: "done", output: "<json>", durationMs }`.
 

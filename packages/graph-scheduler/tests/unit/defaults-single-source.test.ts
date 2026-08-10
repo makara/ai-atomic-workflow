@@ -36,7 +36,7 @@ describe('defaults single source', () => {
 
   it('runtime adopts the scaffold layout — project graph in the default taskflowDir loads', async () => {
     // Repo root ships the scaffolded .graph-scheduler/config.json (produced by
-    // the setup flow). lorem-gen lives in the project taskflowDir
+    // the setup flow). adapter-e2e lives in the project taskflowDir
     // ('.graph-scheduler/graphs'), NOT the builtin dir. Config lookup is
     // cwd-relative — resolve the scaffold paths explicitly so the test passes
     // from any working directory (package-local config shadows root when run
@@ -48,7 +48,7 @@ describe('defaults single source', () => {
         taskflowDir: resolve(repoRoot, '.graph-scheduler/graphs'),
         registryPaths: [resolve(repoRoot, '.graph-scheduler/graphs/registry.json')],
       });
-      const res = yield* Effect.either(Effect.tryPromise(() => rt.graphStart('lorem-gen')));
+      const res = yield* Effect.either(Effect.tryPromise(() => rt.graphStart('adapter-e2e')));
       yield* Effect.tryPromise(() => rt.dispose());
       return res;
     });

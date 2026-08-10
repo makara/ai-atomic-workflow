@@ -10,7 +10,7 @@ This domain currently has no registered behavioral-contract requirement; new con
 
 ### Requirement: arch-review — requirement generation graph
 
-arch-review SHALL be the independently executable requirement production graph: `scope-entry` (interview input node, skill: atom-scope-interview, in-degree 0, topics: domain/feature/problem + focus + output path + report_input fresh|existing) → `arch-review` (main, skill improve-codebase-architecture — the producer, dependsOn: [scope-entry]) → `review-accept` (approval terminal: Continue → requirement ready; Loop again → retry scope-entry; End → end action). The grill flow SHALL NOT be composed into arch-review — the graph SHALL NOT declare a flow phase referencing adopt-with-docs (requirement adoption is the loop's adopt stage, ADR 0099). The graph SHALL NOT reference review-machinery (inlined, ADR 0097). References to the loop's middle stage SHALL use the name `adopt` (never `refine`).
+arch-review SHALL be the independently executable requirement production graph: `scope-entry` (interview input node, skill: atom-scope-interview, in-degree 0, topics: domain/feature/problem + focus + output path + report_input fresh|existing) → `arch-review` (main, skill improve-codebase-architecture — the producer, dependsOn: [scope-entry]) → `review-accept` (approval terminal: Continue → requirement ready; Loop again → retry scope-entry; End → end action). The grill flow SHALL NOT be composed into arch-review — the graph SHALL NOT declare a flow phase referencing adopt-with-docs (requirement adoption is the loop's adopt stage, ADR 0099). The graph SHALL NOT reference review-machinery (inlined, ADR 0099). References to the loop's middle stage SHALL use the name `adopt` (never `refine`).
 
 #### Scenario: Standalone requirement run
 
@@ -30,7 +30,7 @@ The review-machinery standalone graph SHALL be deleted — its single `arch-revi
 
 - **WHEN** a validator scans all built-in graphs for flow `use:` targets
 - **THEN** review-machinery SHALL NOT appear
-- **AND** the registry SHALL contain 11 graphs, review-machinery absent
+- **AND** the registry SHALL contain 10 graphs, review-machinery absent
 
 ### Requirement: Report-input semantics
 

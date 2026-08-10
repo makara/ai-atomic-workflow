@@ -378,7 +378,7 @@ The standalone `atom-mcp-contract` skill is deleted from the skills package; its
 
 ### Requirement: ASP spec files removed
 
-`docs/specs/2026-08-06-atomic-step-protocol.md` and `openspec/specs/atomic-step-protocol/` are removed; their decision history lives in ADR 0116/0119. `openspec/specs/atom-mcp-contract/` is merged into this spec and removed.
+`docs/specs/2026-08-06-atomic-step-protocol.md` and `openspec/specs/atomic-step-protocol/` are removed; their decision history lives in this spec (owning module) and ADR 0119 (0116 archived). `openspec/specs/atom-mcp-contract/` is merged into this spec and removed.
 
 #### Scenario: No ASP spec remains
 

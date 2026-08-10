@@ -63,10 +63,26 @@ Verbose + raw MCP JSON, `retryCount` per node, internal state changes.
 
 ## Approval decisions
 
-**Approval decisions** - list every approval with its chosen action + label; for auto-executed decisions, show the `rationale` (the recommendation basis - makes auto approvals auditable, F6). Manual choices show the chosen option; `rationale` absent (the human IS the basis).
+**Approval decisions** - list every approval with its chosen action + label; for auto-executed decisions, show the `rationale` (the recommendation basis — makes auto approvals auditable). Manual choices show the chosen option; `rationale` absent (the human IS the basis).
 
 |nodeId|action|label|rationale?|
 |-|-|-|-|
 |`<nodeId>`|`continue` / `retry` / `jump` / `end`|`<chosen option label>`|`<rationale>` - auto only|
 
 E.g. `spec-accept` -> `continue (accept)` - auto, rationale: design complete + user confirmed in interview.
+
+## Feedback Channels
+
+Feedback is classified into three channels, each mapped to an existing primitive; no new templates, no output files.
+
+|Channel|Primitive|When|Persistence|
+|-|-|-|-|
+|Decision|`approval()` cards + Decision Request handoff (Context / Auto-recorded debt / Blocking findings / Dispatch record / Suggested advance label)|A routing decision is needed (approval/gate nodes; decision requests at review handoffs)|Session only — IApprovalDecision JSON kept in the conversation (platform transcript); routing via `branchTo`/`endRun`|
+|Status|Per-node status lines + final report table (this document)|Node boundaries only — never mid-node play-by-play|Session only (platform transcript); aggregate facts in the final report|
+|Risk|Inline conversation reporting + structured markers (`[CONSTRAINT VIOLATION]` / `[TOOL USAGE VIOLATION]`) + gate jumps|Mid-node deviations/impacts, violations — immediate, don't wait for the node boundary|Markers ride the node report in the session; prose stays in the session|
+
+Rules:
+
+- Never write feedback to files — the platform transcript is the session record; the scheduler tracks progress only.
+- Decision channel never hides a needed decision (no "reduce interaction rounds" omission).
+- Status channel never fabricates progress — node boundary lines only.

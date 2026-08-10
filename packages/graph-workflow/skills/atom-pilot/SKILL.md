@@ -81,7 +81,7 @@ Tool names detected at runtime per §Graph-Scheduler Tool Detection. Parameter s
 |graph_clean_completed|clean completed runs|before?|
 |graph_clean_all|clean all runs|-|
 
-`graph_start` returns `{ runId, node, snapshot, resolvedFrom, resolvedPath, description? }`. `graph_advance` / `graph_jump` return `{ snapshot, node }` - `node: null` = graph complete (`fsmState` `completed`). The snapshot (per-node states) accompanies every dispatch - jump navigation + progress display. Run mode comes from the `$run-mode-confirm` prologue output - no output scans, no echo scans, no backend field.
+`graph_start` returns `{ runId, node, snapshot, resolvedFrom, resolvedPath, description? }`. `graph_advance` / `graph_jump` return `{ snapshot, node }` - `node: null` = graph complete (`fsmState` `completed`). The snapshot (per-node states) accompanies every dispatch - jump navigation + progress display. Run mode comes from the `$run-mode-confirm` prologue session fact - no output scans, no echo scans, no backend field.
 
 ### Return Shapes
 
@@ -89,7 +89,7 @@ Tool names detected at runtime per §Graph-Scheduler Tool Detection. Parameter s
 graph_start { graphName, args? } → { runId, node: NodeDetail | null, snapshot: GraphSnapshot, resolvedFrom: project|builtin|fallback, resolvedPath: string, description?: string }
 ```
 
-Scheduler resolve graph name via merged registry - project entries override builtin (project-first). Return `runId` + first `node` (NodeDetail | null) + run `snapshot` (per-node states - jump navigation + progress display; the activation prefix nodes appear in `nodes` like any run member) + resolution identity (`resolvedFrom` + `resolvedPath` + graph `description`). Agent hold `runId` for all subsequent calls.
+Scheduler resolve graph name via merged registry - project entries override builtin (project-first). Return `runId` + first `node` (NodeDetail | null) + run `snapshot` (per-node states - jump navigation + progress display; the activation prefix nodes appear in `nodes` like any run member) + resolution identity (`resolvedFrom` + `resolvedPath` + graph `description`). NodeDetail carries channel declarations (dependsOn + `node:` entries) — upstream content is assembled from the agent session, never delivered in the payload. Agent hold `runId` for all subsequent calls.
 
 ### Pilot Commands
 
@@ -111,7 +111,7 @@ Execute->advance cycle:
 
 `graph_advance` merges notify + next into one call - report node result AND fetch next pending node. Gate jump hits pass the rework target as `branchTo`; approval branch-route decisions pass the node-or-route target as `branchTo`; the approval `end` action passes `endRun: true` (run completes - §Run Completion). Approval retry/jump path diverges - see §Approval Decision Processing.
 
-> **Note:** `output` collected in (b) for display only. `graph_advance` receives `{ runId, nodeId, durationMs, branchTo?, endRun? }` - `output` stays in agent session. Exception: approval/gate `output` (IApprovalDecision) drives routing; not passed to graph_advance.
+> **Note:** `output` collected in (b) for display only. `graph_advance` receives `{ runId, nodeId, durationMs, branchTo?, endRun? }` - no output param; the scheduler persists progress only. Node content and approval/gate decisions stay in the agent session (platform-persisted) — downstream gates judge from the session.
 
 ## Node Execution
 

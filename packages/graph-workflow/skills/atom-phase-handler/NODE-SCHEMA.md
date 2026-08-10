@@ -20,13 +20,13 @@
 |Field|Type|Phase type|Purpose|
 |-|-|-|-|
 |`task`|string?|`main`, `approval`|Task instruction text (main - executed inline) / full card prompt (approval - first line = header, rest = card body; schema removed `topic`/`preText`, loud rejection)|
-|`channels`|string[]?|all|Effective channel patterns (global channel + phase channels - scheduler-side merge of config `context:` default layer + graph top-level `context:` prepended to phase `channels:`, dedup outer-first; carries the merged list, agent-side never re-merges) - main: skill names, file globs, or node IDs against the execution skill contract (deterministic); gate/approval: all entry kinds (uniform - same rule as main); node: entries are read edges to node streams, promotion self-skip already applied|
+|`channels`|string[]?|all|Effective channel patterns (global channel + phase channels - scheduler-side merge of config `context:` default layer + graph top-level `context:` prepended to phase `channels:`, dedup outer-first; carries the merged list, agent-side never re-merges) - main: skill names, file globs, or node IDs against the execution skill contract (deterministic); gate/approval: all entry kinds (uniform - same rule as main); node: entries are read edges to node reports (delivered from the agent session), promotion self-skip already applied|
 |`topic`|string?|`approval`|Synthesized decision-card header - NOT a YAML-layer field; approval-handler builds it from the task's first line (`phase.task?.split('\n')[0] ?? 'Decision Required'`). Used as approval() header|
 |`routingActions`|IApprovalAction[]?|`approval`|Decision routing actions - declared ONLY in branch-route scenarios; drives those approval() options (see §IApprovalAction). Otherwise the card is Accept (AI recommendation) + free input + AI-generated contextual options|
 |`jumps`|IJumpCondition[]?|`gate`|Rework jumps - `[{when, to}]`; the agent evaluates conditions, a hit -> backward jump to `to`, no hit -> pass through. Required non-empty - a gate without rework jumps is a silent pass-through|
 |`route`|string?|all|Route membership - declared route id (absent = implicit default route, always active)|
 
-Judgment context (gate/approval) = direct dependsOn outputs (`## Upstream:` blocks) + effective `channels` targets (`node:` outputs, reference skills, files - full-type inheritance) - assembled by the same pipeline as main nodes. The `reads` field is removed (schema field convergence); cross-level references declare `channels: [node:<id>]`.
+Judgment context (gate/approval) = direct dependsOn reports (`## Upstream:` blocks from the agent session) + effective `channels` targets (`node:` reports, reference skills, files - full-type inheritance) - assembled by the same pipeline as main nodes. The `reads` field is removed (schema field convergence); cross-level references declare `channels: [node:<id>]`.
 
 ## IJumpCondition
 

@@ -33,19 +33,25 @@ The graph definition SHALL declare a top-level `context:` list (the global chann
 
 ### Requirement: Node channels — output streams and read edges
 
-Every node's output SHALL be a stream named `<nodeId>`. A phase SHALL declare reads of non-`dependsOn` streams via phase-level `channels: [node:<id>]` — a read edge without scheduling implication. `dependsOn` SHALL remain the scheduling edge and SHALL auto-inject direct outputs; a `node:` entry duplicating a `dependsOn` target SHALL be a redundant-declaration warning, never an error.
+A node's report (its output-contract payload) is produced and consumed in the executing agent's session (platform-persisted) — it is not a scheduler-owned record and is not delivered with dispatch. A phase SHALL declare reads of non-`dependsOn` reports via phase-level `channels: [node:<id>]` — a read edge without scheduling implication. `dependsOn` SHALL remain the scheduling edge and SHALL imply an upstream read; a `node:` entry duplicating a `dependsOn` target SHALL be a redundant-declaration warning, never an error. Channel entries declare WHICH upstream context a node consumes; the handler assembles that context from the agent session. Outputs SHALL NOT be files and SHALL NOT be scheduler state.
 
 #### Scenario: Cross-level stream read
 
-- **WHEN** a phase consumes a node output that is not a direct `dependsOn` dependency
+- **WHEN** a phase consumes a node report that is not a direct `dependsOn` dependency
 - **THEN** the phase SHALL declare `channels: [node:<id>]`
-- **THEN** the output SHALL be injected as an upstream block exactly like a direct dependency output
+- **THEN** the report SHALL be assembled as an upstream block exactly like a direct dependency output (from the agent session)
 
 #### Scenario: Redundant read edge warns
 
 - **WHEN** a phase declares `channels: [node:X]` while X is already in its `dependsOn`
 - **THEN** validation SHALL emit a redundant-declaration warning naming the entry
 - **THEN** loading SHALL succeed
+
+#### Scenario: No file path in channel semantics
+
+- **WHEN** channel resolution identifies an upstream report
+- **THEN** no `.taskflow/outputs/…` path SHALL be read, referenced, or validated
+- **AND** the dispatch payload SHALL NOT carry the report text — content comes from the agent session
 
 ### Requirement: Uniform phase channels — one rule for all types
 

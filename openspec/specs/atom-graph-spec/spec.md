@@ -69,7 +69,7 @@ Reference for the `.taskflow.yaml` format. Assets: `packages/graph-workflow/skil
 
 ### Requirement: Task content rules (Task Content Spec)
 
-atom-graph-spec §Language Constraints SHALL be extended with a full §Task Content Spec covering: (1) mandatory task structure — directive → phase-local invariants → `Output contract:` field list for main phases; approval tasks header + decision topic + phase-local criteria only; (2) skill dedup deletion test — task text SHALL NOT restate dispatched-skill protocol, handler-default card mechanics, or injection mechanics; (3) comment topology-intent-only rule — one-line comments stating structural purpose, no prose narration or doc references; (4) canonical output-contract spelling — exactly `Output contract:` prefix, no alternates; (5) no injection-mechanics wording — tasks name consumed fields, never files or mechanisms. The existing three task-text rules (input references covered, no `.taskflow/outputs/` hardcodes, injected wording matches channels) SHALL remain.
+atom-graph-spec §Language Constraints SHALL be extended with a full §Task Content Spec covering: (1) mandatory task structure — directive → phase-local invariants → `Output contract:` field list for main phases; approval tasks header + decision topic + phase-local criteria only; (2) skill dedup deletion test — task text SHALL NOT restate dispatched-skill protocol, handler-default card mechanics, or injection mechanics; (3) comment topology-intent-only rule — one-line comments stating structural purpose, no prose narration or doc references; (4) canonical output-contract spelling — exactly `Output contract:` prefix, no alternates; (5) no injection-mechanics wording — tasks name consumed fields, never files or mechanisms. The existing three task-text rules SHALL remain in updated form: input references covered; no runtime output-path hardcodes (the `.taskflow/outputs/` rule is removed with the path itself — runtime output paths no longer exist; ordinary document paths remain legal content); injected wording matches channels.
 
 #### Scenario: Spec section present
 
@@ -119,20 +119,6 @@ When a main phase dispatches sub-agents (e.g. code-review axis agents), the inje
 - **WHEN** a review phase (channel `skill:atom-graph-spec`) dispatches review sub-agents
 - **THEN** each sub-agent's context SHALL include the spec content (forwarded reference)
 - **AND** no sub-agent SHALL read the spec skill file from disk
-
-### Requirement: Output stream isolation by run
-
-Node output streams SHALL be scoped per run: `.taskflow/outputs/<runId>/<nodeId>.output.txt`. A run's dispatches read/write within its own directory — stale outputs from other runs are invisible by construction. Cross-run output collisions SHALL NOT occur.
-
-#### Scenario: Outputs land in run-scoped directory
-
-- **WHEN** a node writes its output file
-- **THEN** the file SHALL be at `.taskflow/outputs/<runId>/<nodeId>.output.txt`
-
-#### Scenario: Stale outputs never inject
-
-- **WHEN** a new run dispatches a node whose name matches an old run's node
-- **THEN** the old run's output SHALL NOT be readable via the new run's output path
 
 ### Requirement: graph_init SHALL NOT be misused as graph-YAML validation
 
@@ -294,3 +280,13 @@ The graph-spec family SHALL hold each shared rule at exactly one authoritative s
 
 - **WHEN** scanning PHASESCHEMA for the removed preText/reads note
 - **THEN** it appears once (at §Gate Type) — the §YAML channels Field duplicate is absent
+
+### Requirement: Upstream delivery by run state
+
+Upstream reports (direct dependsOn + `node:` channels) SHALL be delivered to the executing agent via its own session — the agent produced them earlier in the run (platform-persisted; platform history addressing restores after compaction). The scheduler SHALL NOT store or deliver output content — dispatch carries channel declarations only. PHASESCHEMA SHALL document the delivery form (session assembly, `## Upstream:` blocks) and SHALL NOT carry any `.taskflow/outputs/` path format. Channel resolution on a run-scope gate is scheduler-side for declarations: out-of-run channel targets are stripped at dispatch (the scheduler never holds content, so no stale content can leak).
+
+#### Scenario: Dispatch carries upstream outputs
+
+- **WHEN** a node is dispatched with completed upstreams
+- **THEN** the dispatch SHALL carry the channel/dependsOn declarations
+- **AND** the handler SHALL assemble `## Upstream:` blocks from the agent session — no payload content, no file reads

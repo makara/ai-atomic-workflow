@@ -138,7 +138,7 @@ export function parseContextContract(content: string): IContextContract {
 
 /** Structured channel resolution result. */
 export interface IResolveResult {
-  /** upstream node IDs to read `.taskflow/outputs/<runId>/<id>.output.txt` for (run-scoped streams) */
+  /** upstream node IDs whose reports the phase consumes (declared read edges — assembled from the agent session) */
   readonly upstream: string[];
   /** reference skill names to load per the resolution convention (plain name → <skillsDir>/<name>/SKILL.md) */
   readonly references: string[];
@@ -160,7 +160,7 @@ export interface IResolveInput {
   /**
    * Current run's node set (flattened graph nodeIds). When present, a `node:`
    * target outside the set is a cross-run reference — warn + skip instead of
-   * resolving (stale output files from other runs must never inject). Absent
+   * resolving (stale content from other runs must never deliver). Absent
    * (validation paths without a run) → check skipped, behavior unchanged.
    */
   readonly runNodeIds?: ReadonlySet<string>;
@@ -238,7 +238,7 @@ export function fileChannelCoveredBy(channel: string, contractFile: string): boo
 /**
  * Shared run-scope gate — a `node:` channel target (or bare contract-upstream
  * match) outside the current run's flattened node set is a cross-run reference:
- * warn + skip (stale output files from other runs must never inject). Absent
+ * warn + skip (stale content from other runs must never deliver). Absent
  * runNodeIds (validation paths without a run) → check skipped.
  *
  * Single implementation shared by:
@@ -252,7 +252,7 @@ export function isNodeInRun(target: string, runNodeIds: ReadonlySet<string> | un
 
 /** Run-scope warning text — same wording everywhere. */
 export function runScopeWarning(display: string): string {
-  return `"${display}" — target outside the current run's node set; cross-run output files are never injected (stale-file protection)`;
+  return `"${display}" — target outside the current run's node set; cross-run channel declarations are never delivered (run-scope protection)`;
 }
 
 /**
