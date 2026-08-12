@@ -1,13 +1,17 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+/**
+ * Three-tier channel model — engine-side machine validation only.
+ *
+ * The engine validates what it owns: graph-level context entry shape (the
+ * global channel's graph layer), user-supplement layer existence, and the
+ * convention-layer constant. Skill prose is never parsed — phase-channel
+ * tier enforcement was agent-side contract coverage (deleted with the
+ * entry-skill machinery); phase channels pass through shape-validated.
+ */
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import {
-  globMatchesAny,
-  validateEntrySkillContracts,
-  validateGraphContracts,
-  validateProjectContext,
-} from '../src/context/contracts.js';
+import { globMatchesAny, validateGraphContracts, validateProjectContext } from '../src/context/contracts.js';
 import { DEFAULT_CONVENTIONS } from '../src/context/resolve-channels.js';
 
 function makeDir(): { dir: string; cleanup: () => void } {
@@ -15,31 +19,10 @@ function makeDir(): { dir: string; cleanup: () => void } {
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-function makeSkillsDir(entries: Record<string, string>): { dir: string; cleanup: () => void } {
-  const { dir, cleanup } = makeDir();
-  for (const [name, body] of Object.entries(entries)) {
-    mkdirSync(join(dir, name));
-    writeFileSync(join(dir, name, 'SKILL.md'), body);
-  }
-  return { dir, cleanup };
-}
-
-const SKILL_FILES_CONTRACT = (files: string): string => `---
-name: picker
-description: x
----
-
-## Context Requirements
-
-### Files
-
-${files}
-`;
-
 const baseGraph = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   name: 'g',
-  version: 1,
-  phases: [{ id: 'p', type: 'main', dependsOn: [], task: 'x' }],
+
+  phases: [{ id: 'p', type: 'main', dependsOn: [], task: 'x', operations: [] }],
   ...over,
 });
 
@@ -63,123 +46,11 @@ describe('three-tier channel model — graph-level context', () => {
     const { errors } = validateGraphContracts(baseGraph({ context: ['naked-name'] }), 'g.yaml');
     expect(errors.some((e) => e.includes('bare name'))).toBe(true);
   });
-});
 
-describe('three-tier channel model — phase channels', () => {
-  it('rejects project file glob in phase channels (tier violation)', async () => {
-    const { dir, cleanup } = makeSkillsDir({ picker: SKILL_FILES_CONTRACT('- docs/adr/') });
-    try {
-      const graph = baseGraph({
-        phases: [{ id: 'p', type: 'main', dependsOn: [], skill: 'picker', channels: ['docs/adr/*.md'], task: 'x' }],
-      });
-      const { errors } = await validateEntrySkillContracts([{ filePath: 'g.yaml', graph }], dir, {
-        checkOrphans: false,
-      });
-      expect(errors.some((e) => e.includes('docs/adr/*.md') && e.includes('workflow runtime artifacts'))).toBe(true);
-    } finally {
-      cleanup();
-    }
-  });
-
-  it('accepts workflow artifact glob in phase channels', async () => {
-    const { dir, cleanup } = makeSkillsDir({ picker: SKILL_FILES_CONTRACT('- .graph-scheduler/docs/x.md') });
-    try {
-      const graph = baseGraph({
-        phases: [
-          {
-            id: 'p',
-            type: 'main',
-            dependsOn: [],
-            skill: 'picker',
-            channels: ['.graph-scheduler/docs/x.md'],
-            task: 'x',
-          },
-        ],
-      });
-      const { errors } = await validateEntrySkillContracts([{ filePath: 'g.yaml', graph }], dir, {
-        checkOrphans: false,
-      });
-      expect(errors.some((e) => e.includes('workflow runtime artifacts'))).toBe(false);
-    } finally {
-      cleanup();
-    }
-  });
-});
-
-describe('three-tier channel model — coverage via convention/project layers', () => {
-  it('satisfies forward coverage through the convention layer — absence-tolerant', async () => {
-    const { dir, cleanup } = makeSkillsDir({ picker: SKILL_FILES_CONTRACT('- CONTEXT.md') });
-    try {
-      // fresh-scaffold absence: the convention file does NOT exist on disk —
-      // conventions are never existence-checked (absence-tolerance by
-      // construction), coverage still passes via the convention layer.
-      expect(existsSync(join(dir, 'CONTEXT.md'))).toBe(false);
-      const graph = baseGraph({ phases: [{ id: 'p', type: 'main', dependsOn: [], skill: 'picker', task: 'x' }] });
-      const { errors } = await validateEntrySkillContracts([{ filePath: 'g.yaml', graph }], dir, {
-        checkOrphans: false,
-      });
-      expect(errors.some((e) => e.includes('declares file'))).toBe(false);
-    } finally {
-      cleanup();
-    }
-  });
-
-  it('annotated convention entry passes — annotation stripped, exemption applies (reported defect)', async () => {
-    const { dir, cleanup } = makeSkillsDir({
-      picker: SKILL_FILES_CONTRACT('- ./CONTEXT.md (project glossary per domain-modeling CONTEXT-FORMAT.md)'),
-    });
-    try {
-      const graph = baseGraph({ phases: [{ id: 'p', type: 'main', dependsOn: [], skill: 'picker', task: 'x' }] });
-      const { errors, warnings } = await validateEntrySkillContracts([{ filePath: 'g.yaml', graph }], dir, {
-        checkOrphans: false,
-      });
-      expect(errors.some((e) => e.includes('declares file'))).toBe(false);
-      expect(warnings.some((e) => e.includes('declares file'))).toBe(false);
-    } finally {
-      cleanup();
-    }
-  });
-
-  it('convention file omission is legal — no obligation, no error', async () => {
-    const { dir, cleanup } = makeSkillsDir({ picker: SKILL_FILES_CONTRACT('- docs/adr/*.md') });
-    try {
-      const graph = baseGraph({
-        phases: [{ id: 'p', type: 'main', dependsOn: [], skill: 'picker', channels: ['docs/adr/*.md'], task: 'x' }],
-      });
-      const { errors } = await validateEntrySkillContracts([{ filePath: 'g.yaml', graph }], dir, {
-        checkOrphans: false,
-      });
-      expect(errors.some((e) => e.includes('declares file'))).toBe(false);
-    } finally {
-      cleanup();
-    }
-  });
-
-  it('satisfies forward coverage through the project layer', async () => {
-    const { dir, cleanup } = makeSkillsDir({ picker: SKILL_FILES_CONTRACT('- docs/adr/') });
-    try {
-      const graph = baseGraph({ phases: [{ id: 'p', type: 'main', dependsOn: [], skill: 'picker', task: 'x' }] });
-      const { errors } = await validateEntrySkillContracts([{ filePath: 'g.yaml', graph }], dir, {
-        checkOrphans: false,
-        projectContext: ['docs/adr/*.md'],
-      });
-      expect(errors.some((e) => e.includes('declares file'))).toBe(false);
-    } finally {
-      cleanup();
-    }
-  });
-
-  it('still errors on uncovered contract files (deletion never silent)', async () => {
-    const { dir, cleanup } = makeSkillsDir({ picker: SKILL_FILES_CONTRACT('- docs/specs/') });
-    try {
-      const graph = baseGraph({ phases: [{ id: 'p', type: 'main', dependsOn: [], skill: 'picker', task: 'x' }] });
-      const { errors } = await validateEntrySkillContracts([{ filePath: 'g.yaml', graph }], dir, {
-        checkOrphans: false,
-      });
-      expect(errors.some((e) => e.includes('declares file'))).toBe(true);
-    } finally {
-      cleanup();
-    }
+  it('warns (never errors) on convention-layer declaration in graph context', () => {
+    const { errors, warnings } = validateGraphContracts(baseGraph({ context: ['./CONTEXT.md'] }), 'g.yaml');
+    expect(errors).toHaveLength(0);
+    expect(warnings.some((w) => w.includes('convention-layer') && w.includes('./CONTEXT.md'))).toBe(true);
   });
 });
 
@@ -240,6 +111,18 @@ describe('globMatchesAny', () => {
       writeFileSync(join(dir, 'a', 'b', 'c.md'), 'x');
       expect(globMatchesAny('a/**/*.md', dir)).toBe(true);
       expect(globMatchesAny('a/**/*.ts', dir)).toBe(false);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('matches ** with zero directory levels', () => {
+    const { dir, cleanup } = makeDir();
+    try {
+      mkdirSync(join(dir, 'a'), { recursive: true });
+      writeFileSync(join(dir, 'a', 'c.md'), 'x');
+      expect(globMatchesAny('a/**/*.md', dir)).toBe(true);
+      expect(globMatchesAny('a/**', dir)).toBe(true);
     } finally {
       cleanup();
     }

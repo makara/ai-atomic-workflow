@@ -23,11 +23,10 @@ describe('Internal type shapes', () => {
       retryCount: 0,
       startedAt: '2026-01-01T00:00:00.000Z',
       completedAt: '2026-01-01T00:00:01.000Z',
-      durationMs: 1000,
     };
     expect(ns.status).toBe('done');
     expect(ns.retryCount).toBe(0);
-    expect(ns.durationMs).toBe(1000);
+    expect(ns.completedAt).toBe('2026-01-01T00:00:01.000Z');
   });
 
   it('NodeState minimal — only required fields', () => {
@@ -45,6 +44,8 @@ describe('Internal type shapes', () => {
       type: 'main',
       dependsOn: ['phase-0'],
       mode: 'exclusive',
+
+      operations: [],
     };
     expect(p.id).toBe('agent-a');
     expect(p.type).toBe('main');
@@ -56,10 +57,12 @@ describe('Internal type shapes', () => {
       id: 'gate-1',
       type: 'main',
       mode: 'exclusive',
+
+      operations: [],
     };
-    expect(p.retry).toBeUndefined();
     // retry is declared unknown for schema-level loud rejection — accessing it
     // as a config object must go through the unknown escape hatch
+    expect((p as unknown as { retry?: unknown }).retry).toBeUndefined();
     expect((p as unknown as { retry?: { max: number } }).retry).toBeUndefined();
   });
 });

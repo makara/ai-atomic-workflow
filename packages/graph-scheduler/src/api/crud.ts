@@ -27,6 +27,7 @@ import { RegistryLoader } from '../registry-loader.js';
 import type {
   DispatchConfigError,
   InvalidStateError,
+  ModeRequiredError,
   NextNodeInput,
   NotFoundError,
   RegistryLoadError,
@@ -35,7 +36,7 @@ import type {
 
 import { ConfigService } from '../config-service.js';
 import { executeEffects, reconstructFsmState } from './fsm-reconstruct.js';
-import { getContractWarnings, loadGraphForRun, loadGraphWithRegistry, toTaskflowGraph } from './graph-loader.js';
+import { loadGraphForRun, loadGraphWithRegistry, toTaskflowGraph } from './graph-loader.js';
 import { dropRunCaches, graphLoadCache } from './run-caches.js';
 import { buildNodeDetail, buildSnapshot, findActiveNode, type IGraphSnapshot } from './snapshot.js';
 
@@ -132,7 +133,7 @@ function invalidState(runId: string, currentStatus: string, attemptedAction: str
  *
  * @param graphName — graph name (resolved via registry or `${graphName}.taskflow.yaml`)
  * @param args      — optional invocation arguments (accessible via {args.X} in templates);
- *                    `args.mode` short-circuits the built-in $run-mode-confirm prologue node
+ *                    `args.mode` (manual | auto) is the activation mode — REQUIRED (absent → ModeRequiredError)
  */
 export function graphStart(
   graphName: string,
@@ -141,7 +142,6 @@ export function graphStart(
   {
     runId: string;
     node: NodeDetail | null;
-    contractWarnings?: string[];
     /** Resolution source of the loaded graph — project | builtin | fallback. */
     resolvedFrom: 'project' | 'builtin' | 'fallback';
     /** Absolute path the graph was loaded from. */
@@ -155,6 +155,20 @@ export function graphStart(
   GraphRepository | FileSystem | RegistryLoader | ConfigService
 > {
   return Effect.gen(function* () {
+    // Activation mode — first-class parameter, required at invocation
+    // (activation facts live at the boundary, never in the run).
+    const mode = typeof args?.mode === 'string' ? args.mode : undefined;
+    if (mode === undefined || (mode !== 'manual' && mode !== 'auto')) {
+      return yield* Effect.fail<ModeRequiredError>({
+        _tag: 'ModeRequiredError',
+        graphName,
+        message:
+          mode === undefined
+            ? `graph_start requires args.mode ('manual' | 'auto') — no mode passed; run not created`
+            : `graph_start invalid args.mode: '${mode}' (expected 'manual' | 'auto'); run not created`,
+      });
+    }
+
     const repo = yield* GraphRepository;
     const config = yield* ConfigService;
     const tf = yield* loadGraphWithRegistry(graphName, config.context);
@@ -178,16 +192,9 @@ export function graphStart(
     // Cache graph definition for subsequent advance/jump within this run
     graphLoadCache.set(runId, tf);
 
-    // Create run row + node state rows in DB (prologue nodes included — they
-    // are run members and dispatch first; an author-declared reserved id is
-    // both a prologue member and a phase — seed it once)
+    // Create run row + node state rows in DB (author nodes only)
     yield* repo.createRun(runId, graphName, args);
-    const prologueIds = new Set(graph.prologue.map((p) => p.id));
-    const nodes = [...graph.prologue, ...graph.phases.filter((p) => !prologueIds.has(p.id))].map(
-      (p: { id: string }) => ({
-        nodeId: p.id,
-      }),
-    );
+    const nodes = graph.phases.map((p: { id: string }) => ({ nodeId: p.id }));
     yield* repo.createNodeStates(runId, nodes);
 
     // Execute transition effects
@@ -195,11 +202,9 @@ export function graphStart(
 
     // Build next node
     const node = yield* buildNextNode({ runId, state: nextState, graph, args: args ?? null });
-    // Contract warnings captured at load — surfaced for decision gates
     return {
       runId,
       node,
-      contractWarnings: getContractWarnings(graphName),
       resolvedFrom: tf.resolvedFrom,
       resolvedPath: tf.resolvedPath,
       description: tf.description,
@@ -215,11 +220,11 @@ export function graphStart(
  * and returns the updated snapshot + next node.
  *
  * Output is NOT passed to graph-scheduler — it lives in agent session
- * or on-disk files per the design principle.
+ * or on-disk files per the design principle. Duration is derived from
+ * timestamps — never reported.
  *
  * @param runId      — run identifier
  * @param nodeId     — completed phase identifier
- * @param durationMs — execution duration in milliseconds
  * @param branchTo   — routing decision target (route-first): gate jump target
  *                    (backward rework — terminal upstream node) or approval
  *                    branch-route target (node or route id — activates route)
@@ -228,7 +233,6 @@ export function graphStart(
 export function graphAdvance(
   runId: string,
   nodeId: string,
-  durationMs: number,
   branchTo?: string,
   endRun?: boolean,
 ): Effect.Effect<
@@ -240,7 +244,7 @@ export function graphAdvance(
     const { run, currentState, graph } = yield* loadRunContext(runId);
 
     // Always dispatch COMPLETE event — output stays in agent session
-    const event: FsmEvent = { type: 'COMPLETE', phaseId: nodeId, durationMs, branchTo, endRun };
+    const event: FsmEvent = { type: 'COMPLETE', phaseId: nodeId, branchTo, endRun };
     const result = yield* dispatchEvent(runId, currentState, graph, event);
 
     // Execute effects

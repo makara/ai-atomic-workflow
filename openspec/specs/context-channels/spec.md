@@ -6,235 +6,31 @@ Context contract parsing + channel resolution. Assets: `packages/graph-scheduler
 
 ## Requirements
 
-### Requirement: Skill contract is the single source of truth for channels
-
-The system SHALL treat the entry skill's `## Context Requirements` section (From upstream / Reference skills / Files subsections) as the single source of truth for a graph phase's data-flow needs. Graph-side channel declarations SHALL be derived from and cross-checked against this contract. A skill contract SHALL be machine-parseable — each subsection SHALL contain a machine-readable list, and placeholder entries such as `<configurable>` SHALL be rejected. Contract parsing SHALL skip markdown code-fenced blocks: documentation examples inside fences SHALL never be parsed as contract entries.
-
-#### Scenario: Contract subsections are machine-parseable
-
-- **WHEN** a skill declares `### From upstream`, `### Reference skills`, or `### Files` subsections under `## Context Requirements`
-- **THEN** each subsection SHALL be parseable into a list of entries (node IDs, skill names, file globs)
-- **THEN** a placeholder entry like `<configurable — …>` SHALL fail contract parsing with an error naming the skill
-
-#### Scenario: Graph channels checked against contract
-
-- **WHEN** a graph phase's `channels` are validated
-- **THEN** every Reference skill and Files entry in the dispatched skill's contract SHALL appear in the phase's `channels`
-- **THEN** a missing entry SHALL fail validation as an error (channel deletion is never silent)
-
-#### Scenario: Extra channels flagged as warnings
-
-- **WHEN** a phase declares a `channels` entry that matches no contract subsection and is not an explicit glob
-- **THEN** validation SHALL emit a warning naming the phase and the phantom entry
-
-#### Scenario: Fenced contract examples are inert
-
-- **WHEN** a skill's contract example appears inside a ``` code fence
-- **THEN** the parser SHALL produce no contract entries from it
-- **THEN** validation SHALL neither error on its placeholders nor report the skill as an orphan because of it
-
-### Requirement: Channel type derived from contract, not guesswork
-
-The system SHALL resolve each `channels` entry's type by looking it up in the dispatched skill's contract: entry in the From upstream table → upstream node output; entry in the Reference skills table → skill; entry in the Files table or containing a path separator or glob character → file glob. No fallback search SHALL be applied; an entry matching nothing SHALL be a resolution error. A `node:` channel whose target node's output file does not exist SHALL resolve as a warning with skipped injection — the missing file is a legal temporal state in retry loops, not a configuration error. For an agent phase whose dispatched skill has no contract (review-type skills whose contract is graph-decided), every `channels` entry SHALL carry an explicit `skill:` or `node:` prefix or be a file glob — a bare name SHALL fail validation as an error.
-
-#### Scenario: Entry type determined by contract lookup
-
-- **WHEN** a `channels` entry matches an entry in the skill's From upstream table
-- **THEN** it SHALL be resolved as an upstream node output (injected context)
-- **WHEN** an entry matches the Reference skills table
-- **THEN** it SHALL be resolved as a skill reference
-- **WHEN** an entry matches the Files table or is an explicit glob
-- **THEN** it SHALL be resolved as file globs
-
-#### Scenario: Unresolvable channel is an error
-
-- **WHEN** a `channels` entry matches no contract subsection, has no explicit `skill:`/`node:` prefix, and is not a glob
-- **THEN** resolution SHALL fail with an error naming the entry — no fallback guessing
-
-#### Scenario: Review-type phase channels require explicit prefixes
-
-- **WHEN** an agent phase dispatches a skill with an empty contract (e.g. atom-dual-review, contract graph-decided)
-- **THEN** every `channels` entry SHALL be an explicit `skill:<name>`, `node:<nodeId>`, or file glob
-- **THEN** a bare-name entry SHALL fail validation with an error stating that review-type channels require explicit prefixes
-
-#### Scenario: Cross-level upstream via explicit node prefix
-
-- **WHEN** a phase consumes an upstream node output that is not a direct `dependsOn` dependency
-- **THEN** the phase SHALL declare it with an explicit `node:<nodeId>` prefix in `channels`
-- **THEN** a `node:` channel SHALL be valid regardless of the direct-dependency closure
-
-#### Scenario: Missing node output file warns and skips
-
-- **WHEN** a `node:<nodeId>` channel is resolved but `.taskflow/outputs/<runId>/<nodeId>.output.txt` does not exist (e.g. first round of a retry loop)
-- **THEN** resolution SHALL emit a warning naming the channel and the missing path
-- **THEN** the channel SHALL be skipped (no injection block) and resolution SHALL NOT fail
-- **THEN** the phase SHALL proceed with remaining channels and the assembled prompt
-
-### Requirement: Resolver shared between runtime and validation
-
-The system SHALL implement channel resolution as a single pure function module consumed by the runtime assembly path, the contract check path, and the load-time validation path. Coverage checks (forward: contract entries missing from channels) SHALL delegate to the same resolver — no self-implemented path/glob matching in the checker. Both directions SHALL observe identical matching semantics for the same inputs.
-
-#### Scenario: Runtime and validator share resolution
-
-- **WHEN** the runtime assembles a sub-agent prompt from a phase's `channels`, `dependsOn`, and skill contract
-- **THEN** it SHALL call the shared resolver module
-- **WHEN** the CLI validates a graph's channel declarations
-- **THEN** it SHALL call the same shared resolver module
-- **THEN** a resolution outcome (error or warning) SHALL be identical in both paths for identical inputs
-
-#### Scenario: Resolution output is deterministic and testable
-
-- **WHEN** the resolver is invoked with the same (channels, dependsOn, contract) triple
-- **THEN** it SHALL return the same structured result: upstream blocks, reference blocks, file paths, and aggregated errors
-- **THEN** the result SHALL be independently assertable in table-driven tests
-
-#### Scenario: Bidirectional checks share one implementation
-
-- **WHEN** a channel set passes the forward coverage check AND the reverse resolution
-- **THEN** both SHALL have used the same matching implementation (resolve-channels)
-- **AND** a semantic change to matching (e.g. glob shape) affects both directions identically
-
-### Requirement: Contract parsing ignores code-fenced documentation examples
-
-The system SHALL parse a skill's `## Context Requirements` contract from the document body only — markdown code-fenced blocks (``` delimiters) SHALL NOT contribute contract entries. Documentation examples showing contract syntax inside fences SHALL have no effect on contract parsing, orphan detection, or channel validation. A skill whose only `## Context Requirements` occurrences are inside code fences SHALL be treated as having no contract.
-
-#### Scenario: Fenced examples do not leak into contracts
-
-- **WHEN** a skill's body contains a ```markdown fence that includes a `## Context Requirements` example with placeholder entries
-- **THEN** the parser SHALL NOT produce contract entries from those lines
-- **WHEN** the skill is otherwise contract-less
-- **THEN** validation SHALL treat it as an empty contract — no placeholder errors, no orphan reports
-
-### Requirement: Main contract source — dual track
-
-A main phase's channels SHALL resolve against a contract source chosen by the phase's `skill` field: when the main phase declares `skill`, its `## Context Requirements` section SHALL be the contract (identical path to agent phases); when the main phase declares no `skill`, the contract SHALL be empty and every `channels` entry SHALL be an explicit `skill:`/`node:` prefix or a file glob — a bare name SHALL be a resolution error. The channels field scope SHALL cover `agent` and `main` types.
-
-#### Scenario: Main with skill resolves by contract
-
-- **WHEN** a main phase declares `skill: atom-openspec-archive` and `channels: ["node:apply-change", "skill:atom-graph-spec"]`
-- **THEN** each entry SHALL be typed by lookup in that skill's contract — same resolver path as an agent phase
-- **THEN** a contract Reference/Files entry missing from `channels` SHALL fail validation as an error
-
-#### Scenario: Main without skill requires explicit prefixes
-
-- **WHEN** a main phase declares no `skill` and a bare-name `channels` entry
-- **THEN** resolution SHALL fail with an error stating that contract-less channels require explicit `skill:`/`node:` prefixes or globs
-- **WHEN** the same phase uses only `skill:`/`node:`/glob entries
-- **THEN** resolution SHALL succeed
-
-#### Scenario: Channels scope covers main in field documentation
-
-- **WHEN** a graph-authoring document describes the `channels` field
-- **THEN** its applicability SHALL be stated as `agent, main` — never `agent` only
-
 ### Requirement: Main branch inline context injection
 
-The main handler SHALL assemble the phase's context inline before executing the phase task: resolve channels per contract → read `node:`/implicit `dependsOn` upstream outputs as `## Upstream: <nodeId>` blocks → load `skill:` entries as `## Reference:` blocks → resolve globs as `## File:` blocks → prepend the blocks in order (upstream → reference → file → constraints → task) to the task text and execute inline. A `node:` channel whose target output file is missing SHALL warn and skip — never fail — matching the agent-phase retry semantics.
+MODIFIED: the main handler SHALL assemble the phase's context inline before executing the phase task: read `node:`/implicit `dependsOn` upstream outputs as `## Upstream: <nodeId>` blocks (from the agent session — upstream content is never delivered in the payload), load `skill:` entries as `## Reference:` blocks (the handler reads the skill itself), resolve globs as `## File:` blocks, then prepend the blocks in order (upstream → reference → file → constraints → task) to the task text and execute inline. A `node:` channel whose target has no produced output SHALL warn and skip — never fail.
 
 #### Scenario: Main phase receives injected upstream block
 
-- **WHEN** a main phase declares `channels: ["node:writer"]` and the writer output file exists
+- **WHEN** a main phase declares `channels: ["node:writer"]` and the writer output exists in the session
 - **THEN** the inline execution context SHALL contain a `## Upstream: writer` block with the output content
 - **THEN** the assembled blocks SHALL precede the phase task in the order upstream → reference → file → constraints → task
 
 #### Scenario: Missing node output warns and skips
 
-- **WHEN** a main phase's `node:` channel target output does not exist (e.g. first round of a retry loop)
-- **THEN** assembly SHALL emit a warning naming the channel and the missing path
+- **WHEN** a main phase's `node:` channel target has no produced output yet (e.g. first round of a retry loop)
+- **THEN** assembly SHALL emit a warning naming the channel
 - **THEN** the channel SHALL be skipped (no injection block) and assembly SHALL NOT fail
 - **THEN** the phase SHALL execute with the remaining blocks and the task
 
 #### Scenario: Main phase consumes reference skill
 
 - **WHEN** a main phase declares `channels: ["skill:atom-graph-spec"]`
-- **THEN** the inline context SHALL contain a `## Reference` block with the skill content
-
-### Requirement: Validation covers main channels
-
-CLI validate SHALL apply channel validation to main phases with the same strength as agent phases: forward coverage (contract Reference/Files entries present), reverse resolution (bare-name/ghost-entry detection), and contract-less explicit-prefix enforcement. Upstream coverage checks SHALL include main phases' channels and `dependsOn` in the effective dependency set. The field-type assertion SHALL add the `main + preText` error branch.
-
-#### Scenario: Main channel contract gap errors
-
-- **WHEN** a main phase dispatches a skill whose contract lists a Reference/Files entry missing from the phase's `channels`
-- **THEN** validate SHALL report an error naming the phase and the missing entry
-
-#### Scenario: Main ghost entry warns
-
-- **WHEN** a main phase declares a `channels` entry matching no contract subsection and not an explicit glob
-- **THEN** validate SHALL emit a warning naming the phase and the phantom entry
-
-#### Scenario: Main bare-name without contract errors
-
-- **WHEN** a main phase declares no `skill` and a bare-name `channels` entry
-- **THEN** validate SHALL report an error stating that contract-less main channels require explicit prefixes
-
-#### Scenario: Main preText flagged by validate
-
-- **WHEN** validate inspects a main phase declaring `preText`
-- **THEN** it SHALL report an error naming the phase and the `preText` field — mirroring the schema-level rejection
-
-### Requirement: Contract validation executes at graph load
-
-Bidirectional scoped-context contract validation (forward coverage + reverse resolution + phantom/redundant warnings) SHALL run as part of the graph loading path — after schema parse and merge-at-load flattening, before the run is dispatched. Violations SHALL fail the load with GraphDefinitionError; warnings SHALL not block loading.
-
-#### Scenario: Deleted channel fails at load
-
-- **WHEN** a graph's phase channel set no longer covers an entry skill contract Reference/Files entry
-- **THEN** loading the graph SHALL fail with GraphDefinitionError naming the phase and the missing entry
-- **AND** no CLI invocation is required for the check to fire
-
-#### Scenario: Phantom channel warns at load
-
-- **WHEN** a phase declares a channels entry matching no contract subsection and not an explicit glob
-- **THEN** loading SHALL succeed
-- **AND** the load SHALL surface a warning naming the phase and the unmatched entry
-
-#### Scenario: Existing graphs still load
-
-- **WHEN** the load-time hook is mounted
-- **THEN** every built-in graph in the registry SHALL pass contract validation (all-graph smoke)
-- **AND** no silent runtime fallback masks a contract breach
-
-### Requirement: Undeclared injection claim detection
-
-The contract validation SHALL scan each phase's `task` text for injection claims — patterns `injected via (node:)?<id>` and `Read <id> output` — and cross-check the referenced nodeIds against the phase's effective input set (`dependsOn` ∪ `node:` channels). A referenced nodeId outside the effective set SHALL produce a **warning** naming the phase and the nodeId.
-
-#### Scenario: Injection claim covered by dependsOn
-
-- **WHEN** a phase's `task` text claims injection of a nodeId listed in its `dependsOn`
-- **THEN** validation SHALL NOT report an undeclared-claim warning
-
-#### Scenario: Injection claim covered by node: channel
-
-- **WHEN** a phase's `task` text claims injection of a nodeId listed in its `channels` with `node:` prefix
-- **THEN** validation SHALL NOT report an undeclared-claim warning
-
-#### Scenario: Injection claim references undeclared node
-
-- **WHEN** a phase's `task` text claims injection of a nodeId absent from both `dependsOn` and `node:` channels
-- **THEN** validation SHALL report a warning naming the phase and nodeId
-
-### Requirement: Declared-inputs doc contract
-
-The graph-authoring documentation (atom-graph-spec §Task Content Rules) SHALL state the declared-inputs contract: task text input references SHALL be covered by `dependsOn` (implicit) or `channels` (explicit); hardcoded output paths SHALL be prohibited; "injected" wording SHALL correspond to declared channels.
-
-#### Scenario: Doc states declared-inputs contract
-
-- **WHEN** a graph author reads the task content rules section
-- **THEN** the three declared-inputs rules SHALL be present
-
-### Requirement: Test coverage
-
-The contract validation test suite SHALL include table-driven cases for: hardcoded path → error; undeclared injection claim → warning; covered injection claim → clean.
-
-#### Scenario: Table-driven cases present
-
-- **WHEN** the contract validation tests run
-- **THEN** the three case classes SHALL be asserted
+- **THEN** the inline context SHALL contain a `## Reference` block with the skill content (handler-loaded)
 
 ### Requirement: Run-scoped node channel resolution
 
-`node:` channel resolution SHALL validate that the target nodeId belongs to the current run's node set (the current run's graph-definition nodes — including all nodes after flow flattening). This validation SHALL be performed by the scheduler at **dispatch time** (NodeDetail construction): a target not in the run node set → warning (naming the channel and the target nodeId) + the channel is stripped (no injection, no failure). The scope gate exists because the declaration must resolve within the run; content delivery is session-side (the scheduler never holds content, so no stale content can leak by construction). CLI validate SHALL share the same predicate implementation with the runtime (resolve-channels `runScoped`) — the "validate + runtime share one implementation" claim holds.
+MODIFIED: `node:` channel resolution SHALL validate that the target nodeId belongs to the current run's node set (the current run's graph-definition nodes — including all nodes after flow flattening). This validation SHALL be performed by the scheduler at **dispatch time** (NodeDetail construction): a target not in the run node set → warning (naming the channel and the target nodeId) + the channel is stripped (no injection, no failure). The scope gate exists because the declaration must resolve within the run; content delivery is session-side (the scheduler never holds content, so no stale content can leak by construction). Engine validation SHALL use the same predicate implementation across dispatch paths — one implementation, no second copy.
 
 #### Scenario: Cross-run stale output not injected
 
@@ -255,9 +51,14 @@ The contract validation test suite SHALL include table-driven cases for: hardcod
 - **THEN** the `node:` channel SHALL resolve normally
 - **AND** when the target is not in the current run's node set (running the subgraph standalone) → warning + strip
 
+#### Scenario: One run-scope predicate implementation
+
+- **WHEN** any dispatch path (graph_start / graph_advance / graph_jump) validates a `node:` channel
+- **THEN** all SHALL call the same predicate implementation — identical behavior, no second copy
+
 #### Scenario: CLI validate shares the same predicate
 
-- **WHEN** CLI validate checks graph channel declarations
+- **WHEN** CLI validate checks graph channel declarations (estate-maintain agent-side validation)
 - **THEN** its run-node-set validation SHALL call the same predicate implementation as runtime dispatch — identical behavior, no second implementation
 
 ### Requirement: Judgment context assembly SHALL use the single context pipeline
@@ -306,41 +107,6 @@ Gate SHALL declare leaf dependencies only; cross-level judgment inputs go throug
 
 - **WHEN** a gate declares a transitive dependency alongside its direct one (leaf rule violation)
 - **THEN** contract validation SHALL error naming the redundant dependency
-
-### Requirement: Bidirectional scoped-context contract validation
-
-The graph loading path SHALL cross-check every phase's `channels` against the dispatched entry skill's `## Context Requirements` in both directions. Reference skills and Files entries missing from `channels` SHALL be errors (channel deletion is never silent); `channels` entries matching no contract subsection (and not explicit globs) SHALL be warnings (phantom channels surface); `channels` entries duplicating `dependsOn` node IDs SHALL be warnings (redundant declarations are visible). Validation SHALL run for every load — no manual command required — and SHALL reuse the same channel resolver as the runtime assembly path.
-
-#### Scenario: Missing reference skill fails validation
-
-- **WHEN** an entry skill declares a Reference skill (e.g. `atom-skill-spec`) and the dispatching phase's `channels` omit it
-- **THEN** validation SHALL report an error naming the phase, the graph, and the missing entry
-
-#### Scenario: Missing Files entry fails validation
-
-- **WHEN** an entry skill declares a Files entry (e.g. `CONTEXT.md`) and the dispatching phase's `channels` omit it
-- **THEN** validation SHALL report an error naming the phase and the missing entry
-
-#### Scenario: Phantom channel warns
-
-- **WHEN** a phase declares a `channels` entry that matches no contract subsection, is not a glob, and has no explicit prefix
-- **THEN** validation SHALL emit a warning naming the phase and the phantom entry
-
-#### Scenario: Redundant dependsOn channel warns
-
-- **WHEN** a phase declares a `channels` entry whose nodeId is already in `dependsOn`
-- **THEN** validation SHALL emit a redundant-declaration warning naming the entry
-
-#### Scenario: Validation shares resolver with runtime
-
-- **WHEN** the CLI validates a graph and the runtime later executes it
-- **THEN** both SHALL use the same resolver module for channel type derivation and error aggregation
-
-#### Scenario: Validation fires without CLI
-
-- **WHEN** any graph loads through the standard loading path
-- **THEN** the bidirectional check SHALL have executed
-- **AND** results SHALL be identical to the retired CLI validate output for the same graph
 
 ### Requirement: Channel scope hierarchy — project, graph, flow, phase
 
@@ -402,58 +168,6 @@ The merge of the config default layer and the graph `context:` into the global c
 - **WHEN** the agent-side handler resolves a dispatched node's channels
 - **THEN** it SHALL pass the effective list through the shared resolver — identical behavior to per-phase declarations
 
-### Requirement: Load-time validation covers inherited channels
-
-Contract validation at graph load SHALL validate graph-level `context:` entries: the prefix/glob rule (bare name → error) and `node:` target membership in the flattened node set. Config-level entries SHALL be validated at config parse for the prefix/glob rule; config `node:` membership resolves per run — an out-of-run target warns + strips at dispatch (run-scope gate), identical to phase-level semantics. Forward coverage checks (contract Reference/Files entries present in channels) SHALL evaluate against the effective list — an entry satisfied at graph level SHALL NOT be reported missing on the phase. Gate jump conditions SHALL validate against the judgment domain formula: dependsOn ∪ phase channels ∪ global-context `node:` streams ∪ jump targets.
-
-#### Scenario: Graph-level entry satisfies forward coverage
-
-- **WHEN** a graph declares top-level `context: ["./CONTEXT.md"]` and a phase dispatches a skill whose contract lists `./CONTEXT.md`
-- **THEN** the phase's forward coverage check SHALL pass without a phase-level declaration
-
-#### Scenario: Invalid graph-level entry fails load
-
-- **WHEN** a graph declares top-level `context: ["node:ghost-phase"]` where `ghost-phase` is not in the flattened set
-- **THEN** loading SHALL fail with GraphDefinitionError naming the entry
-
-#### Scenario: Gate condition satisfied by global stream
-
-- **WHEN** a gate jump condition references a node promoted via graph `context:`
-- **THEN** validation SHALL accept the reference without a phase-level `channels` declaration
-
-### Requirement: Tier validation at load — convention / project / graph
-
-The system SHALL validate channel declarations against the three tiers at graph load: (a) convention layer entries SHALL be exact file paths from the fixed set (`CONTEXT.md`, `docs/domains.md`) — anything else rejected; (b) config project layer entries SHALL exist — exact-file missing -> load error, glob zero-match -> warning; (c) graph/phase file globs SHALL target workflow runtime artifacts (`.graph-scheduler/`, `.taskflow/`) — anything else is a load error. Tier validation SHALL run in the shared load-time validation path (graph load + graph_init health), never only at dispatch.
-
-#### Scenario: Graph glob outside workflow namespaces
-
-- **WHEN** a graph channel entry is a file glob not under `.graph-scheduler/` or `.taskflow/`
-- **THEN** load SHALL fail with a tier violation error naming the entry and its legal alternatives
-
-#### Scenario: Convention layer entry invalid
-
-- **WHEN** a convention layer entry is a glob or directory class (e.g. `docs/adr/**`)
-- **THEN** configuration validation SHALL reject it
-
-#### Scenario: Tier check runs at load and graph_init
-
-- **WHEN** `graph_init` health runs
-- **THEN** it SHALL report tier violations for every registered graph — same implementation as load-time validation
-
-### Requirement: Effective-merge includes convention and project layers
-
-Coverage checks (forward: contract references/files ⊆ channels; reverse: channel resolution) SHALL evaluate the effective channel list including the convention layer and the config project layer — not only graph context and phase channels. A contract Files entry satisfied by the convention layer or config layer SHALL NOT be reported missing.
-
-#### Scenario: Skill Files covered by convention layer
-
-- **WHEN** a skill contract declares `CONTEXT.md` and no graph/phase channel covers it
-- **THEN** the forward coverage check SHALL pass (convention layer coverage)
-
-#### Scenario: Skill Files covered by project layer
-
-- **WHEN** a skill contract declares `openspec/specs/` and config.json declares `openspec/specs/**/*.md`
-- **THEN** the forward coverage check SHALL pass (project layer coverage)
-
 ### Requirement: Judgment-domain references stay nodeId-based
 
 Gate jump conditions SHALL reference node reports by nodeId within the judgment-domain formula (scope unchanged: direct dependsOn outputs ∪ phase `channels` entries ∪ `node:` streams in the global `context:`; jump target referenceable only within the retryCount bound). Gate judgment is agent-executed (judge()) — the judging agent reads the referenced reports from its own session. Runtime output paths SHALL NOT be referenced (they do not exist); ordinary document paths in task text remain legal content.
@@ -462,3 +176,59 @@ Gate jump conditions SHALL reference node reports by nodeId within the judgment-
 
 - **WHEN** a gate jump condition references a report by nodeId within the judgment domain
 - **THEN** validation SHALL pass (no runtime-path check exists)
+
+### Requirement: Convention-file channel declarations warn at validation
+
+A phase or graph `channels:` entry that resolves to a convention-layer file (`DEFAULT_CONVENTIONS` member: `./CONTEXT.md`, `docs/domains.md`, normalized) SHALL emit a validation warning naming the entry and the node, stating that the file is implicit coverage and the declaration is redundant.
+
+#### Scenario: Convention declaration warns
+
+- **WHEN** a graph phase declares `channels: ["./CONTEXT.md", "node:requirement/arch-review"]`
+- **THEN** validation SHALL report a warning for `./CONTEXT.md` naming the phase, and no warning for the `node:` entry
+
+#### Scenario: Non-convention file channels stay silent
+
+- **WHEN** a phase declares `channels: ["docs/adr/0145-context-management-hints.md"]` (non-convention file)
+- **THEN** validation SHALL emit no convention warning for that entry
+
+### Requirement: Convention-file channel delivery is skipped at dispatch
+
+A convention-layer file declared in `channels:` SHALL NOT be delivered as a channel block at dispatch — the file stays implicit coverage (available via the convention layer), the declaration has zero delivery effect. Channel delivery SHALL carry only node-specific streams (`node:` / `skill:` references) and workflow-artifact globs.
+
+#### Scenario: Dispatch skips the convention declaration
+
+- **WHEN** a phase declares `channels: ["./CONTEXT.md", "docs/domains.md", "node:upstream"]` and the run dispatches the phase
+- **THEN** the dispatched context SHALL contain the `node:upstream` block and SHALL NOT contain channel blocks for `./CONTEXT.md` or `docs/domains.md`
+- **THEN** the convention files remain available through the convention layer unchanged
+
+#### Scenario: Skip applies to graph-level context too
+
+- **WHEN** a graph declares top-level `context: ["docs/domains.md"]`
+- **THEN** dispatch SHALL skip delivering `docs/domains.md` as a global-channel block, with the same validation warning
+
+### Requirement: Convention semantics unchanged when undeclared
+
+Graphs and phases that never declare convention files SHALL behave exactly as before: convention files remain implicit coverage, absence-tolerant, never existence-checked.
+
+#### Scenario: Undeclared convention files unaffected
+
+- **WHEN** a graph declares no convention files in `context:` or `channels:`
+- **THEN** validation SHALL emit no convention warnings and dispatch SHALL deliver only the declared channels
+
+### Requirement: Skill contract is agent-side single source
+
+The skill's `## Context Requirements` contract SHALL be the agent-side single source of truth for context assembly — the handler reads the skill it dispatches and assembles context per its contract. The engine SHALL NOT parse skill prose: no `## Context Requirements` extraction, no machine-readable contract lists derived from SKILL.md in the scheduler.
+
+#### Scenario: Engine loads graph without reading skills
+
+- **WHEN** `graph_start` loads a graph whose phases declare `skill:` channels
+- **THEN** the engine SHALL NOT read or parse any SKILL.md file — the `skill:` entries pass through shape-validated to the agent
+
+### Requirement: skill: channel entries pass through
+
+`skill:<name>` channel entries SHALL be delivered to the agent as declared (shape-validated) — the agent resolves the skill itself via its own skill system; the engine holds no skill-format knowledge.
+
+#### Scenario: skill channel delivered verbatim
+
+- **WHEN** a phase declares `channels: ["skill:codebase-design"]`
+- **THEN** the NodeDetail channels array SHALL contain `skill:codebase-design` and no engine-side skill lookup or parsing occurs

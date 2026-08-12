@@ -44,9 +44,11 @@ describe('atom-scope-interview v2.0 callee contract', () => {
   });
 
   it('delegates interview mechanics - no restatement, no solve mode', () => {
-    expect(skill).toMatch(/interview\(\) consensus mode per atom-kernel/);
+    expect(skill).toMatch(/interview\(\) per atom-kernel over Topics \(confirmation contract\)/);
+    expect(skill).toMatch(/participation: as-needed/);
     expect(skill).not.toMatch(/solve mode/);
     expect(skill).not.toMatch(/one question per turn/);
+    expect(skill).not.toMatch(/zero-question degradation/);
   });
 
   it('supports classification-only mode', () => {

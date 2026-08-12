@@ -55,7 +55,7 @@ describe('taskflowDir multi-layer resolution (regression)', () => {
       }),
     );
 
-    const result = await rt.graphStart('e2e-minimal');
+    const result = await rt.graphStart('e2e-minimal', { mode: 'auto' });
     expect(result).toBeDefined();
     expect(result.runId).toBeTruthy();
     expect(result.node).toBeDefined();
@@ -68,10 +68,10 @@ describe('taskflowDir multi-layer resolution (regression)', () => {
     // This exercises the multi-dir file system fallback (registry resolves nothing).
     const { writeFileSync } = require('node:fs');
     const graphYaml = `name: unique-project-graph
-version: 1
 phases:
   - id: project-only
     type: main
+    operations: []
     dependsOn: []
     task: project-specific
 `;
@@ -85,13 +85,11 @@ phases:
     );
 
     // Registry has no entry → falls back to direct load → finds project file.
-    // Activation prefix dispatches first, then the author node.
-    const result = await rt.graphStart('unique-project-graph');
+    // Runs start directly at the first author node.
+    const result = await rt.graphStart('unique-project-graph', { mode: 'auto' });
     expect(result).toBeDefined();
     expect(result.runId).toBeTruthy();
-    expect(result.node?.nodeId).toBe('$load-constraints');
-    const next = await rt.graphAdvance(result.runId, '$load-constraints', 10);
-    expect(next.node?.nodeId).toBe('project-only');
+    expect(result.node?.nodeId).toBe('project-only');
 
     await rt.dispose();
   });
@@ -101,7 +99,7 @@ phases:
     // Built-in graphs must still be loadable.
     const rt = await Effect.runPromise(createMemoryRuntime());
 
-    const result = await rt.graphStart('e2e-minimal');
+    const result = await rt.graphStart('e2e-minimal', { mode: 'auto' });
     expect(result).toBeDefined();
     expect(result.runId).toBeTruthy();
     expect(result.node).toBeDefined();

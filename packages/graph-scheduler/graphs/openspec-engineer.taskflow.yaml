@@ -4,6 +4,7 @@ phases:
   - id: to-spec
     type: main
     dependsOn: []
+    operations: [read, write, run]
     task: |
       Synthesize the spec from the recorded ADR decision + change context per
       to-spec skill. No interview. Change name — NEVER ask: {args.changeName}
@@ -20,6 +21,7 @@ phases:
   - id: to-tickets
     type: main
     dependsOn: [to-spec]
+    operations: [read, write, run]
     task: |
       Break the spec into tracer-bullet tickets per to-tickets skill.
       Draft vertical slices with blocking edges; breakdown confirmation via
@@ -33,6 +35,7 @@ phases:
     type: main
     skill: implement
     dependsOn: [to-tickets]
+    operations: [read, write, run, verify]
     channels:
       - node:implement-review
       - node:to-spec
@@ -62,6 +65,7 @@ phases:
     skill: code-review
     agent: [reviewer, explore, task, general]
     dependsOn: [implement]
+    operations: [locate, read, review]
     channels:
       - node:to-spec
       - node:to-tickets
@@ -105,6 +109,7 @@ phases:
     type: main
     dependsOn: [implement-accept]
     skill: atom-doc-lifecycle
+    operations: [read, run, archive]
     channels:
       - node:to-spec
       - node:implement

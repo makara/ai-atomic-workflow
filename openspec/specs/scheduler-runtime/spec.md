@@ -406,3 +406,23 @@ Executing `npm pack --dry-run` on both packages SHALL succeed (exit 0), and the 
 - **THEN** the command SHALL finish with exit 0
 - **AND** the scheduler tarball SHALL be named `ai-atomic-workflow-graph-scheduler-0.1.0.tgz`
 - **AND** the workflow tarball SHALL be named `ai-atomic-workflow-graph-workflow-0.1.0.tgz`
+
+### Requirement: Approval route-completeness is enforced
+
+A COMPLETE dispatch for an approval phase that declares branch-route `routing.actions` (containing `action: "continue"`) SHALL carry either a `branchTo` (route/node activation target) or `endRun: true` (explicit completion). A dispatch with neither SHALL fail with an invalid-state error and MUST NOT silently drain the run. Approval phases without declared `routing.actions` (default card: Accept + free input + AI options) keep their existing behavior — completing without `branchTo` drains normally.
+
+#### Scenario: branch-route approval missing a routing decision
+
+- **WHEN** the agent completes a branch-route approval with neither `branchTo` nor `endRun`
+- **THEN** the transition fails with an invalid-state error (silent drain prevented)
+- **AND** the run stays running
+
+#### Scenario: branch-route approval with branchTo activates the route
+
+- **WHEN** the agent completes a branch-route approval with `branchTo` pointing at a declared route id
+- **THEN** the route activates and its members become ready as before
+
+#### Scenario: default approval drains without branchTo
+
+- **WHEN** the agent completes an approval that declares no `routing.actions` and passes no `branchTo`
+- **THEN** the run drains naturally as before (unchanged behavior)

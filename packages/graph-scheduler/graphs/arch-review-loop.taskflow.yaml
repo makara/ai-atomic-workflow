@@ -57,12 +57,13 @@ phases:
     dependsOn: [adopt]
     route: proceed
 
-  # Loop gate — auto + Top Rec remains + bound → re-round from scope-entry.
+  # Loop gate — top Rec remains + bound → re-round from scope-entry. Pure
+  # machine judgment — run mode plays no part (consumption boundary).
   - id: loop-gate
     type: gate
     dependsOn: [implement]
     jumps:
-      - when: 'run mode is auto AND requirement/arch-review output shows top_rec_remaining: true AND requirement/scope-entry retryCount < 8'
+      - when: 'requirement/arch-review output shows top_rec_remaining: true AND requirement/scope-entry retryCount < 8'
         to: requirement/scope-entry
 
   # Round-end — loop again (Top Rec remains + bound) or complete.

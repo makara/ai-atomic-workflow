@@ -144,7 +144,7 @@ describe('ConfigFileSchema', () => {
     const result = ConfigFileSchema.safeParse({
       dbPath: ':memory:',
       taskflowDir: 'graphs',
-      agentRegistry: [{ type: 'main', skill: 'atom-phase-handler' }],
+      agentRegistry: [{ type: 'main', skill: 'atom-phase-handler', operations: [] }],
     });
     expect(result.success).toBe(false);
     const messages = result.error!.issues.map((i) => i.message).join('\n');

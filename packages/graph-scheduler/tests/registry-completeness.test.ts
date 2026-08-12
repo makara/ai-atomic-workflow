@@ -166,7 +166,7 @@ describe('base phase types statically dispatched', () => {
   });
 
   it('PhaseSchema accepts main/approval/flow/gate (flow needs use; gate needs jumps)', () => {
-    expect(PhaseSchema.safeParse({ id: 'p', type: 'main' }).success).toBe(true);
+    expect(PhaseSchema.safeParse({ id: 'p', type: 'main', operations: [] }).success).toBe(true);
     expect(PhaseSchema.safeParse({ id: 'p', type: 'approval' }).success).toBe(true);
     expect(PhaseSchema.safeParse({ id: 'p', type: 'flow', use: 'child' }).success).toBe(true);
     expect(PhaseSchema.safeParse({ id: 'p', type: 'gate', jumps: [{ when: 'x', to: 'w' }] }).success).toBe(true);

@@ -1,63 +1,59 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+/**
+ * Load probe — annotated convention entry (reported defect regression).
+ *
+ * Machine validation only: the engine never parses skill prose, so the
+ * trailing parenthetical annotation is inert. A graph whose phase channels
+ * carry an annotated convention entry loads cleanly — phase channels are
+ * shape-passed (annotation never parsed). The machine convention guard
+ * (convention-layer declaration warn, never error) still fires for bare
+ * convention paths declared at graph level.
+ */
+import { Effect } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { toTaskflowGraph } from '../src/api/graph-loader.js';
-import { validateEntrySkillContracts } from '../src/context/contracts.js';
+import { validateGraphContracts } from '../src/context/contracts.js';
+import type { Taskflow } from '../src/graph-definition.js';
 
 describe('load probe — annotated convention entry (reported defect)', () => {
-  it('graph load + entry-skill validation pass with annotated convention entry', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'probe-'));
-    mkdirSync(join(dir, 'annotated-skill'));
-    writeFileSync(
-      join(dir, 'annotated-skill', 'SKILL.md'),
-      `---
-name: annotated-skill
-description: x
----
+  it('graph load succeeds with annotated convention entry in phase channels', async () => {
+    const graph: Taskflow = {
+      name: 'probe-graph',
 
-## Context Requirements
+      phases: [
+        {
+          id: 'p',
+          type: 'main',
+          dependsOn: [],
+          skill: 'annotated-skill',
+          channels: [
+            'node:up',
+            'skill:codebase-design',
+            './CONTEXT.md (project glossary per domain-modeling CONTEXT-FORMAT.md)',
+          ],
+          task: 'x',
+          operations: [],
+        },
+      ],
+    };
+    // Schema/phase validation passes — the graph adapts cleanly.
+    const adapted = await Effect.runPromise(toTaskflowGraph(graph));
+    expect(adapted.phases.map((p) => p.id)).toEqual(['p']);
 
-### From upstream
+    // Machine checks: phase channels pass through unparsed — annotation never
+    // interpreted, no errors, no convention warning at phase level.
+    const { errors } = validateGraphContracts(graph, 'probe.yaml');
+    expect(errors).toEqual([]);
+  });
 
-- up (review output)
+  it('machine convention guard still warns (never errors) on bare convention declaration at graph level', () => {
+    const graph = {
+      name: 'probe-graph',
 
-### Reference skills
-
-- codebase-design (vocabulary)
-
-### Files
-
-- ./CONTEXT.md (project glossary per domain-modeling CONTEXT-FORMAT.md)
-- docs/adr/*.md
-
-## Entry
-
-**MUST run**
-`,
-    );
-    try {
-      const graph = toTaskflowGraph({
-        name: 'probe-graph',
-        version: 1,
-        phases: [
-          {
-            id: 'p',
-            type: 'main',
-            dependsOn: [],
-            skill: 'annotated-skill',
-            channels: ['node:up', 'skill:codebase-design', 'docs/adr/*.md'],
-            task: 'x',
-          },
-        ],
-      });
-      const { errors, warnings } = await validateEntrySkillContracts([{ filePath: 'probe.yaml', graph }], dir, {
-        checkOrphans: false,
-      });
-      expect(errors).toEqual([]);
-      expect(warnings.some((w) => w.includes('declares file'))).toBe(false);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+      context: ['./CONTEXT.md', 'skill:codebase-design'],
+      phases: [{ id: 'p', type: 'main', dependsOn: [], task: 'x', operations: [] }],
+    };
+    const { errors, warnings } = validateGraphContracts(graph, 'probe.yaml');
+    expect(errors).toEqual([]);
+    expect(warnings.some((w) => w.includes('convention-layer') && w.includes('./CONTEXT.md'))).toBe(true);
   });
 });

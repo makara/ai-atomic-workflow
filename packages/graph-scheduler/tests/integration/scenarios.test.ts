@@ -29,11 +29,25 @@ function makeFixture(): Fixture {
   // Linear 3-phase main graph (scenario 1, 4, 5) — JSON is valid YAML subset; no end node (drain)
   const linearGraph = {
     name: 'linear-agent-test',
-    version: 1,
+
     phases: [
-      { id: 'phase-1', type: 'main', skill: 'scenario-agent-skill', task: 'step 1', dependsOn: [] },
-      { id: 'phase-2', type: 'main', skill: 'scenario-agent-skill', task: 'step 2', dependsOn: ['phase-1'] },
-      { id: 'phase-3', type: 'main', skill: 'scenario-agent-skill', task: 'step 3', dependsOn: ['phase-2'] },
+      { id: 'phase-1', type: 'main', skill: 'scenario-agent-skill', task: 'step 1', dependsOn: [], operations: [] },
+      {
+        id: 'phase-2',
+        type: 'main',
+        skill: 'scenario-agent-skill',
+        task: 'step 2',
+        dependsOn: ['phase-1'],
+        operations: [],
+      },
+      {
+        id: 'phase-3',
+        type: 'main',
+        skill: 'scenario-agent-skill',
+        task: 'step 3',
+        dependsOn: ['phase-2'],
+        operations: [],
+      },
     ],
   };
   writeFileSync(join(taskflowDir, 'linear-agent-test.taskflow.yaml'), JSON.stringify(linearGraph, null, 2));
@@ -41,11 +55,25 @@ function makeFixture(): Fixture {
   // 3-phase graph for force-end scenario (scenario 3)
   const forceEndGraph = {
     name: 'force-end-test',
-    version: 1,
+
     phases: [
-      { id: 'step-a', type: 'main', skill: 'scenario-agent-skill', task: 'first', dependsOn: [] },
-      { id: 'step-b', type: 'main', skill: 'scenario-agent-skill', task: 'second', dependsOn: ['step-a'] },
-      { id: 'step-c', type: 'main', skill: 'scenario-agent-skill', task: 'third', dependsOn: ['step-b'] },
+      { id: 'step-a', type: 'main', skill: 'scenario-agent-skill', task: 'first', dependsOn: [], operations: [] },
+      {
+        id: 'step-b',
+        type: 'main',
+        skill: 'scenario-agent-skill',
+        task: 'second',
+        dependsOn: ['step-a'],
+        operations: [],
+      },
+      {
+        id: 'step-c',
+        type: 'main',
+        skill: 'scenario-agent-skill',
+        task: 'third',
+        dependsOn: ['step-b'],
+        operations: [],
+      },
     ],
   };
   writeFileSync(join(taskflowDir, 'force-end-test.taskflow.yaml'), JSON.stringify(forceEndGraph, null, 2));
@@ -53,10 +81,17 @@ function makeFixture(): Fixture {
   // Gate+approval pair graph (scenario 6) — machine gate before human card; no end node
   const gatePairGraph = {
     name: 'gate-pair-test',
-    version: 1,
+
     phases: [
-      { id: 'writer', type: 'main', skill: 'scenario-agent-skill', task: 'write', dependsOn: [] },
-      { id: 'review', type: 'main', skill: 'scenario-agent-skill', task: 'review', dependsOn: ['writer'] },
+      { id: 'writer', type: 'main', skill: 'scenario-agent-skill', task: 'write', dependsOn: [], operations: [] },
+      {
+        id: 'review',
+        type: 'main',
+        skill: 'scenario-agent-skill',
+        task: 'review',
+        dependsOn: ['writer'],
+        operations: [],
+      },
       {
         id: 'auto-gate',
         type: 'gate',
@@ -102,39 +137,14 @@ async function createTestRuntime(fixture: Fixture): Promise<SchedulerRuntime> {
   );
 }
 
-/**
- * Start a run and advance through the activation prologue prefix (P nodes —
- * $run-mode-confirm + $load-constraints) until the first author node
- * dispatches. Returns the first author node with its retryCount.
- */
-async function startSkippingPrologue(
-  rt: SchedulerRuntime,
-  graphName: string,
-): Promise<{ runId: string; node: { nodeId: string; retryCount: number } | null }> {
-  const start = await rt.graphStart(graphName);
-  let node = start.node;
-  while (node?.nodeId.startsWith('$')) {
-    const next = await rt.graphAdvance(start.runId, node.nodeId, 50);
-    node = next.node;
-  }
-  return { runId: start.runId, node };
-}
-
-/** Advance through any pending prologue prefix until an author node dispatches. */
+/** Return the active node (no prefix exists — runs start at author nodes). */
 async function advanceThroughPrologue(
   rt: SchedulerRuntime,
   runId: string,
 ): Promise<{ nodeId: string; retryCount: number } | null> {
   const status = await rt.graphStatus(runId);
   const active = status.nodes.find((n) => n.status === 'active');
-  let node: { nodeId: string; retryCount: number } | null = active
-    ? { nodeId: active.nodeId, retryCount: active.retryCount }
-    : null;
-  while (node?.nodeId.startsWith('$')) {
-    const next = await rt.graphAdvance(runId, node.nodeId, 50);
-    node = next.node ? { nodeId: next.node.nodeId, retryCount: next.node.retryCount } : null;
-  }
-  return node;
+  return active ? { nodeId: active.nodeId, retryCount: active.retryCount } : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -157,30 +167,26 @@ describe('runtime scenarios', () => {
   it('completes a 3-phase linear agent DAG end-to-end', async () => {
     const rt = await createTestRuntime(fix);
 
-    // Start — the activation prefix dispatches first (load node — no approvals)
-    const { runId, node: n0 } = await rt.graphStart('linear-agent-test');
+    // Start — first author node dispatches directly (no activation prefix)
+    const { runId, node: n0 } = await rt.graphStart('linear-agent-test', { mode: 'auto' });
     expect(runId).toBeTruthy();
     expect(n0).not.toBeNull();
-    expect(n0!.nodeId).toBe('$load-constraints');
-
-    // Advance the prefix → first author agent active
-    const n1 = await rt.graphAdvance(runId, '$load-constraints', 50);
-    expect(n1.node!.nodeId).toBe('phase-1');
+    expect(n0!.nodeId).toBe('phase-1');
 
     // Advance phase-1 → phase-2
-    const r1 = await rt.graphAdvance(runId, 'phase-1', 50);
+    const r1 = await rt.graphAdvance(runId, 'phase-1');
     expect(r1.snapshot.fsmState).toBe('running');
     expect(r1.node).not.toBeNull();
     expect(r1.node!.nodeId).toBe('phase-2');
 
     // Advance phase-2 → phase-3
-    const r2 = await rt.graphAdvance(runId, 'phase-2', 50);
+    const r2 = await rt.graphAdvance(runId, 'phase-2');
     expect(r2.snapshot.fsmState).toBe('running');
     expect(r2.node).not.toBeNull();
     expect(r2.node!.nodeId).toBe('phase-3');
 
     // Advance phase-3 → run drains (final node) — completed, no end marker
-    const r3 = await rt.graphAdvance(runId, 'phase-3', 50);
+    const r3 = await rt.graphAdvance(runId, 'phase-3');
     expect(r3.snapshot.fsmState).toBe('completed');
     expect(r3.node).toBeNull();
 
@@ -194,18 +200,17 @@ describe('runtime scenarios', () => {
   it('runs gate+approval pair: gate carries jumps, branchTo resets retryCount', async () => {
     const rt = await createTestRuntime(fix);
 
-    // Start — activation prefix (confirm + load — graph has an approval)
-    const { runId, node: n0 } = await rt.graphStart('gate-pair-test');
-    expect(n0!.nodeId).toBe('$load-constraints');
-    const n1 = await advanceThroughPrologue(rt, runId);
-    expect(n1!.nodeId).toBe('writer');
+    // Start — first author node dispatches directly (no activation prefix)
+    const { runId, node: n0 } = await rt.graphStart('gate-pair-test', { mode: 'auto' });
+    expect(n0!.nodeId).toBe('writer');
+    const n1 = n0;
 
     // writer → review
-    const r1 = await rt.graphAdvance(runId, 'writer', 50);
+    const r1 = await rt.graphAdvance(runId, 'writer');
     expect(r1.node!.nodeId).toBe('review');
 
     // review → gate (not approval — machine judge first)
-    const r2 = await rt.graphAdvance(runId, 'review', 50);
+    const r2 = await rt.graphAdvance(runId, 'review');
     const gateNode = r2.node!;
     expect(gateNode.nodeId).toBe('auto-gate');
     expect(gateNode.type).toBe('gate');
@@ -217,49 +222,43 @@ describe('runtime scenarios', () => {
     expect(gateNode.retryCount).toBe(0);
 
     // Gate no-match (absent branchTo) → passes through to paired approval (human card)
-    const r3 = await rt.graphAdvance(runId, 'auto-gate', 50);
+    const r3 = await rt.graphAdvance(runId, 'auto-gate');
     expect(r3.node!.nodeId).toBe('accept');
     expect(r3.node!.type).toBe('approval');
     // Route-first: no written actions — card = Accept + free input + AI options
     expect(r3.node!.routingActions).toBeUndefined();
 
     // Jump back to the gate (rework decision, mid-graph target — NOT the entry)
-    // — JUMP resets target + downstream terminals; the prologue is untouched.
+    // — JUMP resets target + downstream terminals; upstream is untouched.
     const j = await rt.graphJump(runId, 'auto-gate');
     expect(j.node!.nodeId).toBe('auto-gate');
     expect(j.node!.retryCount).toBe(1);
     expect(j.snapshot.nodes.find((n) => n.nodeId === 'auto-gate')?.retryCount).toBe(1);
     expect(j.snapshot.nodes.find((n) => n.nodeId === 'accept')?.retryCount).toBe(1);
-    // Prologue NOT re-run — mid-graph rework keeps the round prefix
-    expect(j.snapshot.nodes.find((n) => n.nodeId === '$run-mode-confirm')?.status).toBe('done');
 
     // Gate re-enters (retryCount 1) → branchTo=writer (terminal upstream, ENTRY)
-    // → JUMP reset + prologue re-run (round restart) — next dispatch is P (load first).
-    const retry = await rt.graphAdvance(runId, 'auto-gate', 50, 'writer');
-    expect(retry.node!.nodeId).toBe('$load-constraints');
+    // → JUMP reset — the entry re-dispatches directly with its retry visible.
+    const retry = await rt.graphAdvance(runId, 'auto-gate', 'writer');
+    expect(retry.node!.nodeId).toBe('writer');
     expect(retry.node!.retryCount).toBe(1);
     expect(retry.snapshot.nodes.find((n) => n.nodeId === 'auto-gate')?.retryCount).toBe(2);
-    expect(retry.snapshot.nodes.find((n) => n.nodeId === 'writer')?.status).toBe('pending');
-
-    // Advance the re-run prefix → writer re-dispatched with retry visible
-    const w1 = await advanceThroughPrologue(rt, runId);
-    expect(w1!.nodeId).toBe('writer');
-    expect(w1!.retryCount).toBe(1);
+    expect(retry.snapshot.nodes.find((n) => n.nodeId === 'writer')?.status).toBe('active');
+    const w1 = retry;
 
     // Re-run upstream chain → gate → pass-through → paired approval re-armed
-    const w3 = await rt.graphAdvance(runId, 'writer', 50);
+    const w3 = await rt.graphAdvance(runId, 'writer');
     expect(w3.node!.nodeId).toBe('review');
-    const rv3 = await rt.graphAdvance(runId, 'review', 50);
+    const rv3 = await rt.graphAdvance(runId, 'review');
     expect(rv3.node!.nodeId).toBe('auto-gate');
     expect(rv3.node!.retryCount).toBe(2);
-    const r5 = await rt.graphAdvance(runId, 'auto-gate', 50);
+    const r5 = await rt.graphAdvance(runId, 'auto-gate');
     expect(r5.node!.nodeId).toBe('accept');
     // accept was reset once (first JUMP closure); the second reset skipped it
     // (already pending) — its own counter stays 1
     expect(r5.node!.retryCount).toBe(1);
 
     // Approval continue (no branchTo) → drain: accept is the final node
-    const r4 = await rt.graphAdvance(runId, 'accept', 50);
+    const r4 = await rt.graphAdvance(runId, 'accept');
     expect(r4.snapshot.fsmState).toBe('completed');
     expect(r4.node).toBeNull();
   });
@@ -269,17 +268,17 @@ describe('runtime scenarios', () => {
   it('openspec-apply: fail → change-gate branchTo retries apply-change → pass → human card', async () => {
     const rt = await createTestRuntime(fix);
 
-    // Start — activation prefix first (graph has approvals)
-    const { runId } = await rt.graphStart('openspec-apply');
-    const n1 = await advanceThroughPrologue(rt, runId);
-    expect(n1!.nodeId).toBe('apply-change');
+    // Start — first author node dispatches directly (no activation prefix)
+    const { runId, node: n0 } = await rt.graphStart('openspec-apply', { mode: 'auto' });
+    expect(n0!.nodeId).toBe('apply-change');
+    const n1 = n0;
 
     // apply-change → change-review
-    const r1 = await rt.graphAdvance(runId, 'apply-change', 100);
+    const r1 = await rt.graphAdvance(runId, 'apply-change');
     expect(r1.node!.nodeId).toBe('change-review');
 
     // change-review → change-gate (machine judge first — not the human card)
-    const r2 = await rt.graphAdvance(runId, 'change-review', 100);
+    const r2 = await rt.graphAdvance(runId, 'change-review');
     const gate = r2.node!;
     expect(gate.nodeId).toBe('change-gate');
     expect(gate.type).toBe('gate');
@@ -287,37 +286,33 @@ describe('runtime scenarios', () => {
     expect(gate.jumps![0].to).toBe('apply-change');
 
     // Gate retry decision → branchTo apply-change (terminal upstream, ENTRY) →
-    // JUMP reset + prologue re-run (round restart) — next dispatch is P.
-    const j = await rt.graphAdvance(runId, 'change-gate', 100, 'apply-change');
-    expect(j.node!.nodeId).toBe('$load-constraints');
+    // JUMP reset — the entry re-dispatches directly with retry visible.
+    const j = await rt.graphAdvance(runId, 'change-gate', 'apply-change');
+    expect(j.node!.nodeId).toBe('apply-change');
+    expect(j.node!.retryCount).toBe(1);
     expect(j.snapshot.nodes.find((n) => n.nodeId === 'change-gate')?.retryCount).toBe(1);
-
-    // Advance the re-run prefix → apply-change re-dispatched with retry visible
-    const w1 = await advanceThroughPrologue(rt, runId);
-    expect(w1!.nodeId).toBe('apply-change');
-    expect(w1!.retryCount).toBe(1);
+    const w1 = j;
 
     // Re-run: apply-change → change-review → change-gate (retryCount now 1)
-    const w2 = await rt.graphAdvance(runId, 'apply-change', 100);
+    const w2 = await rt.graphAdvance(runId, 'apply-change');
     expect(w2.node!.nodeId).toBe('change-review');
-    const rv2 = await rt.graphAdvance(runId, 'change-review', 100);
+    const rv2 = await rt.graphAdvance(runId, 'change-review');
     expect(rv2.node!.nodeId).toBe('change-gate');
     expect(rv2.node!.retryCount).toBe(1);
 
     // Bound trip: second rework branchTo → gate retryCount = 2 — branch condition
     // 'apply-change retryCount < 2' deterministically false → agent picks default → human card again
-    const j2 = await rt.graphAdvance(runId, 'change-gate', 100, 'apply-change');
+    const j2 = await rt.graphAdvance(runId, 'change-gate', 'apply-change');
+    expect(j2.node!.nodeId).toBe('apply-change');
     expect(j2.node!.retryCount).toBe(2);
-    const w3 = await advanceThroughPrologue(rt, runId);
-    expect(w3!.nodeId).toBe('apply-change');
-    expect(w3!.retryCount).toBe(2);
-    const rv3 = await rt.graphAdvance(runId, 'apply-change', 100);
+    const w3 = j2;
+    const rv3 = await rt.graphAdvance(runId, 'apply-change');
     expect(rv3.node!.nodeId).toBe('change-review');
-    const rv3b = await rt.graphAdvance(runId, 'change-review', 100);
+    const rv3b = await rt.graphAdvance(runId, 'change-review');
     expect(rv3b.node!.nodeId).toBe('change-gate');
     expect(rv3b.node!.retryCount).toBe(2);
     // Gate no-match (absent branchTo) → falls through default to human approval card
-    const r3 = await rt.graphAdvance(runId, 'change-gate', 100);
+    const r3 = await rt.graphAdvance(runId, 'change-gate');
     const accept = r3.node!;
     expect(accept.nodeId).toBe('change-accept');
     expect(accept.type).toBe('approval');
@@ -326,9 +321,9 @@ describe('runtime scenarios', () => {
 
     // Human continue → archive (plain, openspec-archive-change) → graph drains
     // (no post-archive doc-maintenance flow — doc-update deleted)
-    const r4 = await rt.graphAdvance(runId, 'change-accept', 100);
+    const r4 = await rt.graphAdvance(runId, 'change-accept');
     expect(r4.node!.nodeId).toBe('archive');
-    const r5 = await rt.graphAdvance(runId, 'archive', 100);
+    const r5 = await rt.graphAdvance(runId, 'archive');
     expect(r5.snapshot.fsmState).toBe('completed');
     expect(r5.node).toBeNull();
   });
@@ -338,10 +333,9 @@ describe('runtime scenarios', () => {
   it('force-ends a running graph, setting status to terminated', async () => {
     const rt = await createTestRuntime(fix);
 
-    // Start + advance the prefix + first node
-    const { runId } = await rt.graphStart('force-end-test');
-    await rt.graphAdvance(runId, '$load-constraints', 50);
-    await rt.graphAdvance(runId, 'step-a', 50);
+    // Start + advance to the first author node
+    const { runId } = await rt.graphStart('force-end-test', { mode: 'auto' });
+    await rt.graphAdvance(runId, 'step-a');
 
     // Force end
     const snap = await rt.graphForceEnd(runId);
@@ -358,22 +352,19 @@ describe('runtime scenarios', () => {
   it('runs two independent graph instances concurrently', async () => {
     const rt = await createTestRuntime(fix);
 
-    // Start two runs — both dispatch the activation prefix first
-    const [run1, run2] = await Promise.all([rt.graphStart('linear-agent-test'), rt.graphStart('linear-agent-test')]);
+    // Start two runs — both dispatch their first author node directly
+    const [run1, run2] = await Promise.all([
+      rt.graphStart('linear-agent-test', { mode: 'auto' }),
+      rt.graphStart('linear-agent-test', { mode: 'auto' }),
+    ]);
 
     // Distinct runIds
     expect(run1.runId).not.toBe(run2.runId);
-    expect(run1.node!.nodeId).toBe('$load-constraints');
-    expect(run2.node!.nodeId).toBe('$load-constraints');
-
-    // Advance the prefix in both runs → phase-1
-    const p1 = await rt.graphAdvance(run1.runId, '$load-constraints', 50);
-    expect(p1.node!.nodeId).toBe('phase-1');
-    const p2 = await rt.graphAdvance(run2.runId, '$load-constraints', 50);
-    expect(p2.node!.nodeId).toBe('phase-1');
+    expect(run1.node!.nodeId).toBe('phase-1');
+    expect(run2.node!.nodeId).toBe('phase-1');
 
     // Advance run1 only
-    const r1a = await rt.graphAdvance(run1.runId, 'phase-1', 50);
+    const r1a = await rt.graphAdvance(run1.runId, 'phase-1');
     expect(r1a.node!.nodeId).toBe('phase-2');
 
     // Run2 still at phase-1 (unaffected)
@@ -381,7 +372,7 @@ describe('runtime scenarios', () => {
     expect(s2.fsmState).toBe('running');
 
     // Advance run2 independently
-    const r2a = await rt.graphAdvance(run2.runId, 'phase-1', 50);
+    const r2a = await rt.graphAdvance(run2.runId, 'phase-1');
     expect(r2a.node!.nodeId).toBe('phase-2');
   });
 
@@ -389,11 +380,11 @@ describe('runtime scenarios', () => {
 
   it('throws when starting a non-existent graph', async () => {
     const rt = await createTestRuntime(fix);
-    await expect(rt.graphStart('nonexistent-graph')).rejects.toThrow();
+    await expect(rt.graphStart('nonexistent-graph', { mode: 'auto' })).rejects.toThrow();
   });
 
   it('throws when advancing with an invalid runId', async () => {
     const rt = await createTestRuntime(fix);
-    await expect(rt.graphAdvance('invalid-run-id', 'x', 50)).rejects.toThrow();
+    await expect(rt.graphAdvance('invalid-run-id', 'x')).rejects.toThrow();
   });
 });

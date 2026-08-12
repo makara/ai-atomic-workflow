@@ -50,7 +50,7 @@ describe('subgraph load error propagation', () => {
         taskflowDir: fixture.taskflowDir,
         registryPaths: [join(fixture.taskflowDir, 'registry.json')],
       });
-      const res = yield* Effect.either(Effect.tryPromise(() => rt.graphStart('parent')));
+      const res = yield* Effect.either(Effect.tryPromise(() => rt.graphStart('parent', { mode: 'auto' })));
       yield* Effect.tryPromise(() => rt.dispose());
       return res;
     });
@@ -59,13 +59,13 @@ describe('subgraph load error propagation', () => {
   it('propagates the original schema error for a broken child graph — not GRAPH_NOT_FOUND', async () => {
     const parent = {
       name: 'parent',
-      version: 1,
+
       phases: [{ id: 'child-flow', type: 'flow', use: 'broken-child' }],
     };
     // child with a schema violation: phase missing required `type`
     const brokenChild = {
       name: 'broken-child',
-      version: 1,
+
       phases: [{ id: 'only-id' }],
     };
     writeGraph(fixture, 'parent', parent);
@@ -86,7 +86,7 @@ describe('subgraph load error propagation', () => {
   it('yields GRAPH_NOT_FOUND with corrected copy for a missing child graph', async () => {
     const parent = {
       name: 'parent',
-      version: 1,
+
       phases: [{ id: 'child-flow', type: 'flow', use: 'ghost-child' }],
     };
     writeGraph(fixture, 'parent', parent);
@@ -105,13 +105,13 @@ describe('subgraph load error propagation', () => {
   it('honors a registry override for child resolution — explicit path wins', async () => {
     const parent = {
       name: 'parent',
-      version: 1,
+
       phases: [{ id: 'child-flow', type: 'flow', use: 'aliased-child' }],
     };
     const child = {
       name: 'real-child',
-      version: 1,
-      phases: [{ id: 'leaf', type: 'main', skill: 'scenario-agent-skill', task: 't', dependsOn: [] }],
+
+      phases: [{ id: 'leaf', type: 'main', skill: 'scenario-agent-skill', task: 't', dependsOn: [], operations: [] }],
     };
     writeGraph(fixture, 'parent', parent);
     writeGraph(fixture, 'real-child', child);

@@ -14,6 +14,7 @@ phases:
     type: main
     dependsOn: []
     skill: atom-scope-interview
+    operations: []
     task: |
       Execute scope interview per atom-scope-interview (maker journey —
       kind=graph, operation=create; no kind switch, no skill co-production).
@@ -26,15 +27,17 @@ phases:
 
       Output contract: graph_name, scope, save_location, scope_complete.
 
-  # Spec — design the phase topology per atom-graph-design (solve mode);
+  # Spec — design the phase topology per atom-graph-design (design flow);
   # the skill contract derives the atom-graph-spec reference channel.
   - id: spec
     type: main
     dependsOn: [entry]
     skill: atom-graph-design
+    operations: [read]
     task: |
       Execute atom-graph-design graph mode per atom-graph-design skill —
-      entry scope is the design input; interview solve mode, present design
+      entry scope is the design input; research → think → interview
+      confirmation rounds (participation: mandatory), present design
       decisions one at a time.
 
       Output contract: design, graph_name (echo), save_location (echo),
@@ -58,6 +61,7 @@ phases:
     type: main
     dependsOn: [spec-accept]
     skill: atom-graph-writer
+    operations: [read, write, run, verify]
     channels:
       - node:spec
       - node:entry
@@ -71,7 +75,7 @@ phases:
       attached usage doc at .graph-scheduler/docs/<name>.md.
 
       Load-probe validation: graph_start the produced graph → expect a node
-      return + 0 contractWarnings → then graph_force_end the probe run.
+      return (no contractWarnings field exists — machine validation only) → then graph_force_end the probe run.
       Report the probe result; deviations from design SHALL be reported, not
       negotiated.
 
@@ -83,6 +87,7 @@ phases:
     type: main
     dependsOn: [implement]
     skill: code-review
+    operations: [locate, read, review]
     agent: [reviewer, explore, task, general]
     channels:
       - node:entry

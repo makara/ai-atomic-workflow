@@ -16,7 +16,7 @@ describe('TaskflowSchema — happy path', () => {
   it('parses a complete taskflow with all optional fields', () => {
     const raw = {
       name: 'my-workflow',
-      version: 1,
+
       phases: [
         {
           id: 'phase-1',
@@ -25,6 +25,8 @@ describe('TaskflowSchema — happy path', () => {
           task: 'Execute task A',
           channels: ['file1.txt', 'file2.txt'],
           skill: 'custom-skill',
+
+          operations: [],
         },
         {
           id: 'phase-2',
@@ -46,7 +48,7 @@ describe('TaskflowSchema — happy path', () => {
 
   it('parses a minimal taskflow — phases only', () => {
     const raw = {
-      phases: [{ id: 'p1', type: 'main', task: 'run' }],
+      phases: [{ id: 'p1', type: 'main', task: 'run', operations: [] }],
     };
 
     const result = TaskflowSchema.safeParse(raw);
@@ -60,8 +62,8 @@ describe('TaskflowSchema — happy path', () => {
   it('parses taskflow with no optional phase fields', () => {
     const raw = {
       phases: [
-        { id: 'p1', type: 'main' },
-        { id: 'p2', type: 'main' },
+        { id: 'p1', type: 'main', operations: [] },
+        { id: 'p2', type: 'main', operations: [] },
       ],
     };
 
@@ -103,14 +105,14 @@ describe('TaskflowSchema — invalid input', () => {
 
   it('rejects phase without id', () => {
     const result = TaskflowSchema.safeParse({
-      phases: [{ type: 'main' }],
+      phases: [{ type: 'main', operations: [] }],
     });
     expect(result.success).toBe(false);
   });
 
   it('rejects phase id that is not a string', () => {
     const result = TaskflowSchema.safeParse({
-      phases: [{ id: 123, type: 'main' }],
+      phases: [{ id: 123, type: 'main', operations: [] }],
     });
     expect(result.success).toBe(false);
   });
@@ -118,7 +120,7 @@ describe('TaskflowSchema — invalid input', () => {
   it('rejects name that is not a string', () => {
     const result = TaskflowSchema.safeParse({
       name: 123,
-      phases: [{ id: 'p1', type: 'main' }],
+      phases: [{ id: 'p1', type: 'main', operations: [] }],
     });
     expect(result.success).toBe(false);
   });
@@ -126,7 +128,7 @@ describe('TaskflowSchema — invalid input', () => {
   it('rejects version that is not a number', () => {
     const result = TaskflowSchema.safeParse({
       version: true,
-      phases: [{ id: 'p1', type: 'main' }],
+      phases: [{ id: 'p1', type: 'main', operations: [] }],
     });
     expect(result.success).toBe(false);
   });
@@ -137,26 +139,32 @@ describe('TaskflowSchema — invalid input', () => {
 // ---------------------------------------------------------------------------
 
 describe('TaskflowSchema — boundary', () => {
-  it('accepts version as string (lenient — z.union)', () => {
+  it('rejects version as string — dead field, loud rejection', () => {
     const raw = {
+      name: 'g',
       version: '1.0',
-      phases: [{ id: 'p1', type: 'main', task: 'run' }],
+      phases: [{ id: 'p1', type: 'main', task: 'run', operations: [] }],
     };
-    expect(TaskflowSchema.safeParse(raw).success).toBe(true);
+    const result = TaskflowSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'version');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toContain("'version' is removed");
   });
 
-  it('accepts version as number', () => {
+  it('rejects version as number — dead field, loud rejection', () => {
     const raw = {
+      name: 'g',
       version: 1,
-      phases: [{ id: 'p1', type: 'main', task: 'run' }],
+      phases: [{ id: 'p1', type: 'main', task: 'run', operations: [] }],
     };
-    expect(TaskflowSchema.safeParse(raw).success).toBe(true);
+    expect(TaskflowSchema.safeParse(raw).success).toBe(false);
   });
 
   it('accepts empty name string', () => {
     const raw = {
       name: '',
-      phases: [{ id: 'p1', type: 'main', task: 'run' }],
+      phases: [{ id: 'p1', type: 'main', task: 'run', operations: [] }],
     };
     expect(TaskflowSchema.safeParse(raw).success).toBe(true);
   });
@@ -168,7 +176,7 @@ describe('TaskflowSchema — boundary', () => {
 
   it('passes through unknown top-level fields', () => {
     const raw = {
-      phases: [{ id: 'p1', type: 'main', task: 'run' }],
+      phases: [{ id: 'p1', type: 'main', task: 'run', operations: [] }],
       extraField: 'should be allowed',
     };
     const result = TaskflowSchema.safeParse(raw);
@@ -203,7 +211,7 @@ describe('TaskflowSchema — flow type phases', () => {
         id: 'inline-ops',
         type: 'flow',
         def: {
-          phases: [{ id: 'nested', type: 'main', dependsOn: [], task: 'do work' }],
+          phases: [{ id: 'nested', type: 'main', dependsOn: [], task: 'do work', operations: [] }],
         },
         dependsOn: [],
       },
@@ -227,12 +235,12 @@ describe('TaskflowSchema — flow type phases', () => {
   it('accepts complete flow taskflow with multiple flow phases (no with/def)', () => {
     const raw = {
       name: 'orchestrated-workflow',
-      version: 1,
+
       phases: [
-        { id: 'plan', type: 'main', dependsOn: [], task: 'plan work' },
+        { id: 'plan', type: 'main', dependsOn: [], task: 'plan work', operations: [] },
         { id: 'skill-ops', type: 'flow', use: 'skill-delete', dependsOn: ['plan'] },
         { id: 'doc-ops', type: 'flow', use: 'doc-sync', dependsOn: ['plan'] },
-        { id: 'review', type: 'main', skill: 'code-review', dependsOn: ['skill-ops', 'doc-ops'] },
+        { id: 'review', type: 'main', skill: 'code-review', dependsOn: ['skill-ops', 'doc-ops'], operations: [] },
         { id: 'approve', type: 'approval', dependsOn: ['review'] },
       ],
     };
@@ -244,7 +252,7 @@ describe('TaskflowSchema — flow type phases', () => {
     const raw = {
       name: 'with-graph-context',
       context: ['skill:atom-graph-spec', './CONTEXT.md', 'node:requirement/arch-review'],
-      phases: [{ id: 'p1', type: 'main', task: 'run' }],
+      phases: [{ id: 'p1', type: 'main', task: 'run', operations: [] }],
     };
     const result = TaskflowSchema.safeParse(raw);
     expect(result.success).toBe(true);
@@ -256,7 +264,7 @@ describe('TaskflowSchema — flow type phases', () => {
   it('rejects legacy top-level channels key — loud rename hint, no silent strip', () => {
     const raw = {
       channels: ['skill:atom-graph-spec'],
-      phases: [{ id: 'p1', type: 'main', task: 'run' }],
+      phases: [{ id: 'p1', type: 'main', task: 'run', operations: [] }],
     };
     const result = TaskflowSchema.safeParse(raw);
     expect(result.success).toBe(false);
@@ -267,7 +275,7 @@ describe('TaskflowSchema — flow type phases', () => {
   it('rejects non-array top-level context', () => {
     const raw = {
       context: 'skill:atom-graph-spec',
-      phases: [{ id: 'p1', type: 'main', task: 'run' }],
+      phases: [{ id: 'p1', type: 'main', task: 'run', operations: [] }],
     };
     const result = TaskflowSchema.safeParse(raw);
     expect(result.success).toBe(false);

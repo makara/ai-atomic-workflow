@@ -83,7 +83,7 @@ Neither mechanism references a node - completion is an action and a drain, never
 
 ## Constraint Layering
 
-Project constraints - `.graph-scheduler/constraints.md` - arrive at every node (main/approval/gate) as `## Constraints` block. The source is the built-in `$load-constraints` activation prologue node (§Activation Prologue): it runs at EVERY activation (run start and entry-target resets) and its output JSON is the round's constraint snapshot - round-level freeze (the round's dispatches read the same output; a mid-round edit never affects the in-flight round). The built-in protocol is the compiled-artifact contract: `.graph-scheduler/constraints.json` caches the caveman-compiled rule set (existence = validity, deletion = reset, `compiled_at` audit-only) - the fast path emits the artifact verbatim with zero markdown I/O; the compile path reads `## Rules` and writes the artifact. No run-record snapshot, no process cache, no scheduler file reads - the artifact is agent-side, and the built-in task text carries the protocol. Layer order (additive floor):
+Project constraints - `.graph-scheduler/constraints.md` - arrive at every node (main/approval/gate) as `## Constraints` block. The source is the activation load (§Activation): the pilot loads once per activation (compiled-artifact contract: `.graph-scheduler/constraints.json` caches the caveman-compiled rule set — existence = validity, deletion = reset, `compiled_at` audit-only — fast path emits the artifact verbatim with zero markdown I/O; compile path reads `## Rules` and writes the artifact) and holds the round's constraint snapshot in the session — round-level freeze (the round's dispatches read the same session copy; a mid-round edit never affects the in-flight round). No run-record snapshot, no process cache, no scheduler file reads - the artifact is agent-side, and the pilot startup carries the protocol. Layer order (additive floor):
 
 platform layer < node-level task/context < skill-level `## Rules`
 
@@ -91,7 +91,7 @@ platform layer < node-level task/context < skill-level `## Rules`
 - Same-dimension conflict (e.g. language) -> keep both entries, agent judges by more specific layer
 - Dedup: drop entries duplicating `lang.conversation`/`lang.documents`/`git.policy` structured fields (atom-kernel rule 3 reuse)
 - Block cap 2 KB - exceed -> explicit warning, never silent truncation
-- The YAML `constraints` phase field was removed - project constraints are the single constraints source; authors override the source by declaring their own `$load-constraints` node (reserved-id override)
+- The YAML `constraints` phase field was removed - project constraints are the single constraints source; `$`-prefixed ids are schema-rejected (the activation prologue was removed — the source is the compiled artifact)
 
 ## Channel File Consumption
 

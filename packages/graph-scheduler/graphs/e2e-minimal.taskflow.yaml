@@ -3,6 +3,7 @@ phases:
   - id: agent-echo
     type: main
     dependsOn: []
+    operations: []
     task: |
       Say hello in a random language.
 

@@ -76,26 +76,26 @@ The global deployment candidate `~/.agents/skills` SHALL NOT contain copies of s
 #### Scenario: Handler returns structured result
 
 - **WHEN** execution completes (main, approval, or gate)
-- **THEN** the result SHALL include `nodeId` and `durationMs` — enough for `graph_advance` reporting
+- **THEN** the result SHALL include `nodeId`, `status`, `output`, and `durationMs` (session display — the handler-measured wall clock; duration is NOT transmitted to `graph_advance`, which derives it from timestamps)
 - **THEN** approval decisions SHALL carry the selected action and optional note
 
 ### Requirement: Input-stage consumption
 
-atom-phase-handler SHALL read activation inputs from input-node outputs: `## Run Mode:` block from the run-mode input node output (absence → manual + warning, never auto), `## Constraints` block from the constraints input node output (absence → empty + warning). Consumption shape SHALL be unchanged from the prologue-output reads — only the source naming follows the injected defaults.
+atom-phase-handler SHALL read activation inputs from the activation boundary: `## Run Mode:` block from the session activation facts (graph_start `args.mode` — required, absent → MODE_REQUIRED at start; the handler consumes the run-mode block from the session copy, absence → manual + warning, never auto), `## Constraints` block from the pilot-loaded constraints (absent → empty + warning). Consumption shape SHALL be unchanged from the prologue-output reads — only the source naming follows the activation boundary model (ADR 0148).
 
-#### Scenario: Mode read from input node
+#### Scenario: Mode read from activation facts
 
 - **WHEN** an approval or gate node dispatches
-- **THEN** the handler SHALL read the run-mode input node output file and inject the `## Run Mode:` block; missing output degrades to manual + warning
+- **THEN** the handler SHALL inject the `## Run Mode:` block from the session activation facts; missing facts degrade to manual + warning
 
-#### Scenario: Constraints read from input node
+#### Scenario: Constraints read from activation facts
 
 - **WHEN** any node dispatches
-- **THEN** the handler SHALL read the constraints input node output file and inject the `## Constraints` block; missing output degrades to empty + warning
+- **THEN** the handler SHALL inject the `## Constraints` block from the pilot-loaded session copy; missing degrades to empty + warning
 
 ### Requirement: Handler SHALL enforce the todo node-boundary lifecycle
 
-atom-phase-handler SHALL clear the platform todo list at every node boundary: dispatch (before task execution) and completion (after the output write, before returning to the pilot). The clear SHALL be unconditional on success/failure and SHALL apply uniformly to main, approval, gate, and activation prologue nodes. The clear SHALL go through the kernel `todo()` primitive's clear semantics — never a platform-specific spelling in the handler body.
+atom-phase-handler SHALL clear the platform todo list at every node boundary: dispatch (before task execution) and completion (after the output write, before returning to the pilot). The clear SHALL be unconditional on success/failure and SHALL apply uniformly to main, approval, and gate nodes. The clear SHALL go through the kernel `todo()` primitive's clear semantics — never a platform-specific spelling in the handler body.
 
 #### Scenario: Dispatch clears the scratchpad
 
@@ -115,16 +115,16 @@ atom-phase-handler SHALL clear the platform todo list at every node boundary: di
 
 ### Requirement: Handler SHALL enforce the Tool usage check self-report
 
-atom-phase-handler SHALL end every main node output with a `Tool usage check:` section — one line per Tool Usage Matrix rule (atom-mcp-contract §Tool Usage Matrix): `used: <tool> — <evidence>` / `n/a: <reason>` / `violated: <rule> — <evidence>`. Any `violated` line SHALL prefix the node output with `[TOOL USAGE VIOLATION: <count>]`, and approval pre-call SHALL scan dependsOn outputs for the marker and append `[TOOL USAGE VIOLATION: <nodeId> × N]` (same aggregation pipeline as constraint violations).
+MODIFIED: the tool-usage self-report SHALL be the `tools:` row of the single `## Checks` block — one line naming chain-head evidence per declared class or an `n/a` structural reason. Any `violated` line SHALL prefix the node output with `[TOOL USAGE VIOLATION: <count>]`; approval pre-call SHALL scan dependsOn outputs for the marker and append `[TOOL USAGE VIOLATION: <nodeId> × N]` (aggregation pipeline unchanged).
 
 #### Scenario: Self-report closes main nodes
 
 - **WHEN** a main node finishes execution
-- **THEN** the output SHALL include the `Tool usage check:` section with per-rule lines
+- **THEN** the output SHALL include the `## Checks` block with a `tools:` row naming per-class evidence or n/a reasons
 
 #### Scenario: Violations prefix and aggregate
 
-- **WHEN** any matrix rule is violated
+- **WHEN** any declared class is violated
 - **THEN** the output SHALL carry `[TOOL USAGE VIOLATION: <count>]`
 - **AND** approval pre-call SHALL surface the marker per dependsOn node
 
@@ -146,7 +146,7 @@ On main-node dispatch, the handler SHALL inject the HLT registry entries for the
 
 ### Requirement: Class-based Tool usage verification
 
-The handler SHALL perform the Tool usage check by declared class: scan the node output for chain-head tool-call evidence per declared class, or an n/a reason; missing evidence SHALL auto-prefix `[TOOL USAGE VIOLATION: <count>]`. A missing `Tool usage check:` block SHALL count as violations for all declared classes. The marker pipeline (approval pre-call scan + pilot stats aggregation) SHALL consume the auto-generated markers unchanged.
+MODIFIED: the handler SHALL perform the tool-usage verification by declared class against the `## Checks` `tools:` row: missing chain-head evidence per declared class, or a missing `tools:` row, SHALL auto-prefix `[TOOL USAGE VIOLATION: <count>]`. A `## Checks` block without a `tools:` row SHALL count as violations for all declared classes. The marker pipeline (approval pre-call scan + pilot stats aggregation) SHALL consume the auto-generated markers unchanged.
 
 #### Scenario: Violation marker auto-generated
 
@@ -156,7 +156,7 @@ The handler SHALL perform the Tool usage check by declared class: scan the node 
 
 #### Scenario: Check block absent counts all classes
 
-- **WHEN** a node output has no `Tool usage check:` block
+- **WHEN** a node output has no `## Checks` block or no `tools:` row
 - **THEN** every declared class SHALL be counted as a violation
 - **AND** the marker SHALL be `[TOOL USAGE VIOLATION: <N>]` with N = declared class count
 
@@ -275,12 +275,12 @@ The run-mode source rule (`## Run Mode` block, absence never auto) SHALL be stat
 
 ### Requirement: Error Handling Unique Rows Only
 
-atom-phase-handler SKILL §Error Handling SHALL contain only rows whose content is not stated elsewhere in the skill family: main-phase-requires-task, channel-resolution failure, task() dispatch failure. Rows duplicating flow steps (unknown type, judge failure, auto-without-recommendation, prologue degradation) SHALL be absent — those live at their flow-step sites.
+atom-phase-handler SKILL §Error Handling SHALL contain only rows whose content is not stated elsewhere in the skill family: main-phase-requires-task, channel-resolution failure, task() dispatch failure. Rows duplicating flow steps (unknown type, judge failure, auto-without-recommendation, activation degrade) SHALL be absent — those live at their flow-step sites.
 
 #### Scenario: Duplicate rows deleted
 
 - **WHEN** reading phase-handler SKILL §Error Handling
-- **THEN** rows 4-7 of the pre-convergence table (unknown type / judge fails / auto no-recommendation / prologue missing) are absent
+- **THEN** rows 4-7 of the pre-convergence table (unknown type / judge fails / auto no-recommendation / activation facts missing) are absent
 - **AND** no other file restates them
 
 ### Requirement: Judge Failure Single Home
@@ -294,11 +294,11 @@ The conservative judge-failure rule (failure -> no hit -> pass through; never fa
 
 ### Requirement: Session-based upstream assembly single home
 
-Upstream context (direct dependsOn + `node:` channels + prologue outputs) SHALL be assembled by the executing agent from its own session — the agent executed the upstream nodes earlier in the run; after session compaction the platform transcript (history addressing) restores full reports. CONTEXT-ASSEMBLY.md §Session-Based Upstream Assembly SHALL hold the assembly rules; schema files SHALL NOT restate them. Prologue outputs (`$load-constraints` constraints, `$run-mode-confirm` mode) are session facts of the activation — assembled the same way; degradation rules (missing/corrupt → manual mode + empty constraints warning) are unchanged.
+Upstream context (direct dependsOn + `node:` channels + prologue outputs) SHALL be assembled by the executing agent from its own session — the agent executed the upstream nodes earlier in the run; after session compaction the platform transcript (history addressing) restores full reports. CONTEXT-ASSEMBLY.md §Session-Based Upstream Assembly SHALL hold the assembly rules; schema files SHALL NOT restate them. Activation facts (`args.mode`, pilot-loaded constraints) are session facts of the activation — assembled the same way; degradation rules (missing/corrupt → manual mode + empty constraints warning) are unchanged.
 
 #### Scenario: Upstream blocks from session
 
-- **WHEN** a node dispatch references upstream reports (dependsOn / `node:` channels / prologue)
+- **WHEN** a node dispatch references upstream reports (dependsOn / `node:` channels / activation facts)
 - **THEN** the handler SHALL assemble `## Upstream:` / `## Constraints` / `## Run Mode:` blocks from the agent session (its own prior outputs, or platform history recovery after compaction)
 - **AND** no dispatch payload content and no file reads are involved
 
@@ -306,3 +306,54 @@ Upstream context (direct dependsOn + `node:` channels + prologue outputs) SHALL 
 
 - **WHEN** an upstream node has not yet produced a report (first round of a retry loop)
 - **THEN** the handler SHALL warn and continue — no failure
+
+### Requirement: Run Frame block assembly
+
+The handler prepends a deterministic frame block to every dispatched node's context.
+
+#### Scenario: Frame precedes other blocks
+
+- **WHEN** the handler assembles context for a dispatched node
+- **THEN** the `## Run Frame` block is the first block of the node context (before Upstream/Constraints blocks) and is generated deterministically from runId, nodeId, node type, and the node's task
+
+### Requirement: Reasoning persistence check
+
+Every main node output closes with a `Reasoning check:` ledger of persisted reasoning carriers.
+
+#### Scenario: Reasoning check block present
+
+- **WHEN** a main node completes
+- **THEN** its output includes a `Reasoning check:` section with one line per carrier: CONTEXT.md term deltas (or `n/a: no new terms`), ADR decision (or `n/a: no decision-worthy change`), design/report chain updates (or `n/a`)
+
+#### Scenario: Missing block is a ledger fact
+
+- **WHEN** a main node output lacks the `Reasoning check:` block
+- **THEN** the absence is reported as a contract violation marker on the node report
+
+### Requirement: Single audit block
+
+The handler SHALL close every main node output with ONE `## Checks` block containing exactly four lines — `constraints:` (ok | violation ×N), `tools:` (chain-head evidence | n/a reason), `reasoning:` (carriers | n/a), `context:` (A/B/C ledger counts + L3 prune count + output estimate). Green rows SHALL collapse to a single line each; violation rows SHALL expand with detail. The four former sections (`Constraint check:`, `Tool usage check:`, `Reasoning check:`, `Context usage check:`) SHALL NOT exist as separate sections.
+
+#### Scenario: All-green node emits four lines
+
+- **WHEN** a main node completes with no violations
+- **THEN** its output contains one `## Checks` block with four one-line rows and no per-axis sections
+
+#### Scenario: Violation row expands
+
+- **WHEN** a main node has a constraint or tool-usage violation
+- **THEN** the corresponding row in the `## Checks` block expands with the violation detail and the marker prefix applies unchanged
+
+### Requirement: Handler frame carries discipline declaration
+
+MODIFIED: the handler-assembled run-frame block for main nodes SHALL include the declared operations from `node.operations` and SHALL name the undeclared discipline operations (read/write/locate per the standard) as out of scope. The frame is the single frame injection point — the signal layer SHALL NOT render or inject frames. A conformance test SHALL pin the discipline line: for a declared operations set, the rendered frame lists exactly the declared operations and names the undeclared discipline operations as out of scope — the line is a deterministic function of `node.operations`.
+
+#### Scenario: Out-of-scope in frame
+
+- **WHEN** a main node declares `[locate, read, review]`
+- **THEN** the frame block lists `declared operations [locate, read, review]` and `out of scope: write`
+
+#### Scenario: discipline line pinned by test
+
+- **WHEN** the handler skill contract tests run
+- **THEN** a test asserts the discipline line for a sample declared set equals the deterministic render (declared list + out-of-scope list) — a change to the render logic fails the test

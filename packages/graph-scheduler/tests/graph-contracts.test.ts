@@ -15,15 +15,14 @@
  * - 2.8 snapshot nodes: advance/jump snapshot enumerates per-node states (M2)
  */
 import { Effect } from 'effect';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 
 import { toTaskflowGraph } from '../src/api/graph-loader.js';
 import { buildSnapshot } from '../src/api/snapshot.js';
-import { validateEntrySkillContracts, validateGraphContracts } from '../src/context/contracts.js';
+import { validateGraphContracts } from '../src/context/contracts.js';
 import type { FsmState, TaskflowGraph } from '../src/fsm/transition.js';
 import type { Taskflow } from '../src/graph-definition.js';
 import { PhaseSchema } from '../src/schemas/phase.js';
@@ -59,9 +58,19 @@ function runningState(): FsmState {
     graphName: 'g',
     startedAt: '2026-08-01T00:00:00.000Z',
     phases: {
-      a: { status: 'done', retryCount: 0, startedAt: 't0', completedAt: 't1', durationMs: 1 },
-      b: { status: 'active', retryCount: 0, startedAt: 't1' },
-      c: { status: 'aborted', retryCount: 1, startedAt: 't0', completedAt: 't1', durationMs: 2 },
+      a: {
+        status: 'done',
+        retryCount: 0,
+        startedAt: '2026-08-01T00:00:00.000Z',
+        completedAt: '2026-08-01T00:01:00.000Z',
+      },
+      b: { status: 'active', retryCount: 0, startedAt: '2026-08-01T00:02:00.000Z' },
+      c: {
+        status: 'aborted',
+        retryCount: 1,
+        startedAt: '2026-08-01T00:00:00.000Z',
+        completedAt: '2026-08-01T00:00:30.000Z',
+      },
     },
     routes: {},
   };
@@ -99,8 +108,8 @@ describe('2.5 main phase skill optional; agent type unregistered', () => {
   it('skill-less main phase passes validation', () => {
     const graph = {
       name: 'test',
-      version: 1,
-      phases: [{ id: 'a', type: 'main', dependsOn: [], task: 'x' }],
+
+      phases: [{ id: 'a', type: 'main', dependsOn: [], task: 'x', operations: [] }],
     };
     const { errors, warnings } = validateGraphContracts(graph, 'test.yaml');
     expect(errors).toHaveLength(0);
@@ -110,8 +119,8 @@ describe('2.5 main phase skill optional; agent type unregistered', () => {
   it('main phase with explicit skill passes validation', () => {
     const graph = {
       name: 'test',
-      version: 1,
-      phases: [{ id: 'a', type: 'main', dependsOn: [], skill: 'code-review', task: 'x' }],
+
+      phases: [{ id: 'a', type: 'main', dependsOn: [], skill: 'code-review', task: 'x', operations: [] }],
     };
     const { errors } = validateGraphContracts(graph, 'test.yaml');
     expect(errors).toHaveLength(0);
@@ -120,9 +129,9 @@ describe('2.5 main phase skill optional; agent type unregistered', () => {
   it('main and approval phases are exempt', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
-        { id: 'm', type: 'main', dependsOn: [], task: 'x' },
+        { id: 'm', type: 'main', dependsOn: [], task: 'x', operations: [] },
         { id: 'ap', type: 'approval', dependsOn: ['m'] },
       ],
     };
@@ -133,7 +142,7 @@ describe('2.5 main phase skill optional; agent type unregistered', () => {
   it('rejects agent phase type at load — GraphDefinitionError (unregistered)', async () => {
     const tf = {
       name: 'test',
-      version: 1,
+
       phases: [{ id: 'a', type: 'agent', dependsOn: [], skill: 'code-review', task: 'x' }],
     } as unknown as Taskflow;
     await expect(Effect.runPromise(toTaskflowGraph(tf))).rejects.toThrow(/Unknown phase type 'agent'/);
@@ -160,11 +169,11 @@ describe('2.2 route-first contract', () => {
   it('rejects redundant transitive dependencies on any phase', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
-        { id: 'a', type: 'main', dependsOn: [], task: 'x' },
-        { id: 'b', type: 'main', dependsOn: ['a'], task: 'x' },
-        { id: 'c', type: 'main', dependsOn: ['a', 'b'], task: 'x' },
+        { id: 'a', type: 'main', dependsOn: [], task: 'x', operations: [] },
+        { id: 'b', type: 'main', dependsOn: ['a'], task: 'x', operations: [] },
+        { id: 'c', type: 'main', dependsOn: ['a', 'b'], task: 'x', operations: [] },
       ],
     };
     const { errors } = validateGraphContracts(graph, 'test.yaml');
@@ -174,11 +183,11 @@ describe('2.2 route-first contract', () => {
   it('accepts minimal direct dependencies', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
-        { id: 'a', type: 'main', dependsOn: [], task: 'x' },
-        { id: 'b', type: 'main', dependsOn: ['a'], task: 'x' },
-        { id: 'c', type: 'main', dependsOn: ['b'], task: 'x' },
+        { id: 'a', type: 'main', dependsOn: [], task: 'x', operations: [] },
+        { id: 'b', type: 'main', dependsOn: ['a'], task: 'x', operations: [] },
+        { id: 'c', type: 'main', dependsOn: ['b'], task: 'x', operations: [] },
       ],
     };
     const { errors } = validateGraphContracts(graph, 'test.yaml');
@@ -188,16 +197,16 @@ describe('2.2 route-first contract', () => {
   it('rejects gate jump targeting a non-upstream (forward) phase', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
-        { id: 'a', type: 'main', dependsOn: [], task: 'x' },
+        { id: 'a', type: 'main', dependsOn: [], task: 'x', operations: [] },
         {
           id: 'g',
           type: 'gate',
           dependsOn: ['a'],
           jumps: [{ when: 'a output shows fail', to: 'downstream' }],
         },
-        { id: 'downstream', type: 'main', dependsOn: ['g'], task: 'x' },
+        { id: 'downstream', type: 'main', dependsOn: ['g'], task: 'x', operations: [] },
       ],
     };
     const { errors } = validateGraphContracts(graph, 'test.yaml');
@@ -209,9 +218,9 @@ describe('2.2 route-first contract', () => {
   it('rejects gate jump targeting a missing phase', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
-        { id: 'a', type: 'main', dependsOn: [], task: 'x' },
+        { id: 'a', type: 'main', dependsOn: [], task: 'x', operations: [] },
         {
           id: 'g',
           type: 'gate',
@@ -228,9 +237,9 @@ describe('2.2 route-first contract', () => {
   it('warns on unbounded jump (no retryCount bound)', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
-        { id: 'a', type: 'main', dependsOn: [], task: 'x' },
+        { id: 'a', type: 'main', dependsOn: [], task: 'x', operations: [] },
         {
           id: 'g',
           type: 'gate',
@@ -247,10 +256,10 @@ describe('2.2 route-first contract', () => {
   it('warns on jump retrying the reviewer node', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
-        { id: 'w', type: 'main', dependsOn: [], task: 'x' },
-        { id: 'r', type: 'main', dependsOn: ['w'], skill: 'code-review', task: 'x' },
+        { id: 'w', type: 'main', dependsOn: [], task: 'x', operations: [] },
+        { id: 'r', type: 'main', dependsOn: ['w'], skill: 'code-review', task: 'x', operations: [] },
         {
           id: 'g',
           type: 'gate',
@@ -268,10 +277,10 @@ describe('2.2 route-first contract', () => {
   it('errors on jump condition referencing a node outside the judgment context', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
-        { id: 'w', type: 'main', dependsOn: [], task: 'x' },
-        { id: 'r', type: 'main', dependsOn: ['w'], task: 'x' },
+        { id: 'w', type: 'main', dependsOn: [], task: 'x', operations: [] },
+        { id: 'r', type: 'main', dependsOn: ['w'], task: 'x', operations: [] },
         {
           id: 'g',
           type: 'gate',
@@ -291,10 +300,10 @@ describe('2.2 route-first contract', () => {
   it('accepts jump condition referencing a declared node: channel target', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
-        { id: 'w', type: 'main', dependsOn: [], task: 'x' },
-        { id: 'r', type: 'main', dependsOn: ['w'], task: 'x' },
+        { id: 'w', type: 'main', dependsOn: [], task: 'x', operations: [] },
+        { id: 'r', type: 'main', dependsOn: ['w'], task: 'x', operations: [] },
         {
           id: 'g',
           type: 'gate',
@@ -311,11 +320,11 @@ describe('2.2 route-first contract', () => {
   it('errors on join: any whose upstreams span a single route', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
-        { id: 'a', type: 'main', dependsOn: [], task: 'x' },
-        { id: 'b', type: 'main', dependsOn: [], task: 'x' },
-        { id: 'j', type: 'main', dependsOn: ['a', 'b'], join: 'any', task: 'x' },
+        { id: 'a', type: 'main', dependsOn: [], task: 'x', operations: [] },
+        { id: 'b', type: 'main', dependsOn: [], task: 'x', operations: [] },
+        { id: 'j', type: 'main', dependsOn: ['a', 'b'], join: 'any', task: 'x', operations: [] },
       ],
     };
     const { errors } = validateGraphContracts(graph, 'test.yaml');
@@ -327,11 +336,11 @@ describe('2.2 route-first contract', () => {
   it('accepts join: any whose upstreams span two routes (track convergence)', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
-        { id: 'a', type: 'main', dependsOn: [], route: 'track-a', task: 'x' },
-        { id: 'b', type: 'main', dependsOn: [], route: 'track-b', task: 'x' },
-        { id: 'j', type: 'main', dependsOn: ['a', 'b'], join: 'any', task: 'x' },
+        { id: 'a', type: 'main', dependsOn: [], route: 'track-a', task: 'x', operations: [] },
+        { id: 'b', type: 'main', dependsOn: [], route: 'track-b', task: 'x', operations: [] },
+        { id: 'j', type: 'main', dependsOn: ['a', 'b'], join: 'any', task: 'x', operations: [] },
       ],
     };
     const { errors } = validateGraphContracts(graph, 'test.yaml');
@@ -341,10 +350,10 @@ describe('2.2 route-first contract', () => {
   it('accepts bounded jump with writer target (no warnings)', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
-        { id: 'w', type: 'main', dependsOn: [], task: 'x' },
-        { id: 'r', type: 'main', dependsOn: ['w'], task: 'x' },
+        { id: 'w', type: 'main', dependsOn: [], task: 'x', operations: [] },
+        { id: 'r', type: 'main', dependsOn: ['w'], task: 'x', operations: [] },
         {
           id: 'g',
           type: 'gate',
@@ -361,8 +370,8 @@ describe('2.2 route-first contract', () => {
   it('warns on a declared route with no approvals at all (provably unselectable)', () => {
     const graph = {
       name: 'test',
-      version: 1,
-      phases: [{ id: 'a', type: 'main', route: 'orphan', dependsOn: [], task: 'x' }],
+
+      phases: [{ id: 'a', type: 'main', route: 'orphan', dependsOn: [], task: 'x', operations: [] }],
     };
     const { errors, warnings } = validateGraphContracts(graph, 'test.yaml');
     expect(errors).toHaveLength(0);
@@ -372,9 +381,9 @@ describe('2.2 route-first contract', () => {
   it('warns on a route NOT referenced by any written routing action — AI-dynamic activation is a soft path even when an approval exists', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
-        { id: 'r', type: 'main', route: 'dyn', dependsOn: [], task: 'x' },
+        { id: 'r', type: 'main', route: 'dyn', dependsOn: [], task: 'x', operations: [] },
         { id: 'ap', type: 'approval', dependsOn: ['r'], task: 't' },
       ],
     };
@@ -387,7 +396,7 @@ describe('2.2 route-first contract', () => {
   it('does NOT warn on a route referenced by a written routing action target', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
         {
           id: 'ap',
@@ -407,9 +416,9 @@ describe('2.2 route-first contract', () => {
   it('warns on retry/jump without explicit target — AI dynamic options need none', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
-        { id: 'r', type: 'main', dependsOn: [], task: 'x' },
+        { id: 'r', type: 'main', dependsOn: [], task: 'x', operations: [] },
         {
           id: 'ap',
           type: 'approval',
@@ -433,9 +442,9 @@ describe('2.2 route-first contract', () => {
   it('errors on routing target referencing missing phase', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
-        { id: 'r', type: 'main', dependsOn: [], task: 'x' },
+        { id: 'r', type: 'main', dependsOn: [], task: 'x', operations: [] },
         {
           id: 'ap',
           type: 'approval',
@@ -453,7 +462,7 @@ describe('2.2 route-first contract', () => {
   it('accepts flow-id target pre-flatten and flattened-style prefixed target', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
         { id: 'create', type: 'flow', use: 'spec-implement', dependsOn: [] },
         {
@@ -558,9 +567,9 @@ describe('2.3 gate jump condition hygiene', () => {
   it('accepts inert .taskflow/outputs text in jump condition — path checks removed', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
-        { id: 'a', type: 'main', dependsOn: [], task: 'x' },
+        { id: 'a', type: 'main', dependsOn: [], task: 'x', operations: [] },
         {
           id: 'g',
           type: 'gate',
@@ -577,9 +586,9 @@ describe('2.3 gate jump condition hygiene', () => {
   it('rejects sibling-output-existence jump condition', () => {
     const graph = {
       name: 'test',
-      version: 1,
+
       phases: [
-        { id: 'a', type: 'main', dependsOn: [], task: 'x' },
+        { id: 'a', type: 'main', dependsOn: [], task: 'x', operations: [] },
         {
           id: 'g',
           type: 'gate',
@@ -600,8 +609,8 @@ describe('2.3 gate jump condition hygiene', () => {
 describe('2.6 approval readiness depends on review node only', () => {
   const phases: Phase[] = [
     // join absent = default all (explicit 'all' rejected by schema — redundant default)
-    { id: 'write-a', type: 'main', dependsOn: [], task: 'x', mode: 'exclusive' },
-    { id: 'write-b', type: 'main', dependsOn: [], task: 'x', mode: 'exclusive' },
+    { id: 'write-a', type: 'main', dependsOn: [], task: 'x', mode: 'exclusive', operations: [] },
+    { id: 'write-b', type: 'main', dependsOn: [], task: 'x', mode: 'exclusive', operations: [] },
     {
       id: 'review',
       type: 'main',
@@ -610,6 +619,8 @@ describe('2.6 approval readiness depends on review node only', () => {
       skill: 'code-review',
       task: 'x',
       mode: 'exclusive',
+
+      operations: [],
     },
     { id: 'accept', type: 'approval', dependsOn: ['review'], mode: 'exclusive' },
   ];
@@ -1067,7 +1078,7 @@ describe('2.13 arch-review-loop three-stage partition topology (requirement + ad
     expect(entry).toBeDefined();
     const task = String(entry?.task);
     expect(entry?.skill).toBe('atom-scope-interview');
-    // Run Mode is a per-activation decision by the built-in $run-mode-confirm prologue node
+    // Run Mode is a per-activation decision at graph_start (args.mode) — graphs declare nothing
     // (args.mode or a question) — graphs declare nothing
     expect(task).not.toMatch(/Auto-approve mode|auto_approve/);
     expect(task).not.toMatch(/routingActions\[0\]/);
@@ -1097,7 +1108,7 @@ describe('2.13 arch-review-loop three-stage partition topology (requirement + ad
     ];
     for (const entry of entries) {
       const g = loadGraph(entry.graph);
-      const phases = g.phases;
+      const phases = g.phases as ReadonlyArray<{ id: string; task?: unknown; skill?: unknown }>;
       const phase = phases.find((p) => p.id === entry.node);
       expect(phase, entry.graph + ' ' + entry.node).toBeDefined();
       const task = String(phase?.task);
@@ -1105,12 +1116,16 @@ describe('2.13 arch-review-loop three-stage partition topology (requirement + ad
       expect(task, entry.graph + ' ' + entry.node + ' directive').toMatch(/per atom-scope-interview/);
     }
     const gen = loadGraph('graph-generate.taskflow.yaml');
-    const genTask = String(gen.phases.find((p) => p.id === 'entry')?.task);
+    const genTask = String(
+      (gen.phases as ReadonlyArray<{ id: string; task?: unknown }>).find((p) => p.id === 'entry')?.task,
+    );
     expect(genTask).toMatch(/dual-name check=graph_name/);
     expect(genTask).toMatch(/context=optional/);
     expect(genTask).toMatch(/output path=user_owned/);
     const adopt = loadGraph('adopt-with-docs.taskflow.yaml');
-    const adoptTask = String(adopt.phases.find((p) => p.id === 'adopt-scope')?.task);
+    const adoptTask = String(
+      (adopt.phases as ReadonlyArray<{ id: string; task?: unknown }>).find((p) => p.id === 'adopt-scope')?.task,
+    );
     expect(adoptTask).toMatch(/output path=derived/);
     expect(adoptTask).not.toMatch(/user_owned/);
   });
@@ -1212,7 +1227,8 @@ describe('2.13 arch-review-loop three-stage partition topology (requirement + ad
     expect(jumps).toHaveLength(1);
     expect(jumps[0].to).toBe('requirement/scope-entry');
     const cond = String(jumps[0].when);
-    expect(cond).toMatch(/run mode is auto/);
+    // consumption boundary — gate is pure machine judgment, no run mode
+    expect(cond).not.toMatch(/run mode/);
     expect(cond).toMatch(/top_rec_remaining: true/);
     // bounded by the round counter (hygiene — not a termination mechanism;
     // ending the loop is always a human decision)
@@ -1289,17 +1305,62 @@ describe('2.13 arch-review-loop three-stage partition topology (requirement + ad
 // ---------------------------------------------------------------------------
 
 describe('2.8 snapshot nodes enumeration (M2)', () => {
-  it('snapshot includes nodes with full state fields', () => {
+  it('snapshot nodes are one-line rows; changed carries full state fields', () => {
     const snap = buildSnapshot(runningState());
     expect(snap.nodes).toHaveLength(3);
+    // One-line rows — jump-target enumeration + progress only
     expect(snap.nodes).toEqual(
       expect.arrayContaining([
-        { nodeId: 'a', status: 'done', retryCount: 0, startedAt: 't0', completedAt: 't1', durationMs: 1 },
-        { nodeId: 'b', status: 'active', retryCount: 0, startedAt: 't1', completedAt: null, durationMs: null },
-        { nodeId: 'c', status: 'aborted', retryCount: 1, startedAt: 't0', completedAt: 't1', durationMs: 2 },
+        { nodeId: 'a', status: 'done', retryCount: 0 },
+        { nodeId: 'b', status: 'active', retryCount: 0 },
+        { nodeId: 'c', status: 'aborted', retryCount: 1 },
       ]),
     );
-    expect(snap.status).toBe('running');
+    // First dispatch — every row is changed (no prior cursor): full fields
+    expect(snap.changed).toEqual(
+      expect.arrayContaining([
+        {
+          nodeId: 'a',
+          status: 'done',
+          retryCount: 0,
+          startedAt: '2026-08-01T00:00:00.000Z',
+          completedAt: '2026-08-01T00:01:00.000Z',
+          durationMs: 60000,
+        },
+        {
+          nodeId: 'b',
+          status: 'active',
+          retryCount: 0,
+          startedAt: '2026-08-01T00:02:00.000Z',
+          completedAt: null,
+          durationMs: null,
+        },
+        {
+          nodeId: 'c',
+          status: 'aborted',
+          retryCount: 1,
+          startedAt: '2026-08-01T00:00:00.000Z',
+          completedAt: '2026-08-01T00:00:30.000Z',
+          durationMs: 30000,
+        },
+      ]),
+    );
+  });
+
+  it('delta snapshot — unchanged rows are dropped from changed on later builds', () => {
+    // Unique run id — the cursor cache is per-run; other tests may have
+    // already cached 'run-1' signatures with identical state.
+    const base = runningState();
+    const state: FsmState = { ...base, runId: 'delta-run-1', status: 'running' } as FsmState;
+    const first = buildSnapshot(state);
+    expect(first.changed).toHaveLength(3);
+    // Same state again — signatures unchanged → no changed rows
+    const second = buildSnapshot({ ...state });
+    expect(second.changed).toBeUndefined();
+  });
+
+  it('snapshot meta fields present', () => {
+    const snap = buildSnapshot(runningState());
     expect(snap.createdAt).toBe('2026-08-01T00:00:00.000Z');
   });
 
@@ -1317,13 +1378,12 @@ describe('2.8 snapshot nodes enumeration (M2)', () => {
   it('snapshot annotates pending nodes on inactive routes with unactivated: true', () => {
     const graph: TaskflowGraph = {
       name: 'g',
-      prologue: [],
       phases: [
-        { id: 'a', type: 'main' },
+        { id: 'a', type: 'main', operations: [] },
         { id: 'gate', type: 'gate', dependsOn: ['a'], jumps: [{ when: 'a output shows x', to: 'a' }] },
-        { id: 't1', type: 'main', dependsOn: ['gate'] },
-        { id: 't2', type: 'main', dependsOn: ['gate'], route: 'alt' },
-        { id: 'done', type: 'main', dependsOn: ['t1'] },
+        { id: 't1', type: 'main', dependsOn: ['gate'], operations: [] },
+        { id: 't2', type: 'main', dependsOn: ['gate'], route: 'alt', operations: [] },
+        { id: 'done', type: 'main', dependsOn: ['t1'], operations: [] },
       ],
     };
     const state: FsmState = {
@@ -1341,230 +1401,11 @@ describe('2.8 snapshot nodes enumeration (M2)', () => {
       routes: {},
     };
     const snap = buildSnapshot(state, graph);
-    // t2 sits on the inactive 'alt' route — never activates
-    expect(snap.nodes.find((n) => n.nodeId === 't2')?.unactivated).toBe(true);
+    // t2 sits on the inactive 'alt' route — never activates (full row in changed)
+    expect(snap.changed?.find((n) => n.nodeId === 't2')?.unactivated).toBe(true);
     // default-route t1 and done — no annotation
-    expect(snap.nodes.find((n) => n.nodeId === 't1')?.unactivated).toBeUndefined();
-    expect(snap.nodes.find((n) => n.nodeId === 'done')?.unactivated).toBeUndefined();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// D6 — entry skill contract alignment (upstream coverage + orphan detection)
-// ---------------------------------------------------------------------------
-
-describe('D6 entry skill contract alignment', () => {
-  function makeSkillsDir(): { dir: string; cleanup: () => void } {
-    const dir = mkdtempSync(join(tmpdir(), 'skills-'));
-    return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
-  }
-
-  it('flags orphan entry skill (declares upstream, zero dispatch)', async () => {
-    const { dir, cleanup } = makeSkillsDir();
-    try {
-      mkdirSync(join(dir, 'ghost-skill'));
-      writeFileSync(
-        join(dir, 'ghost-skill', 'SKILL.md'),
-        `---\nname: ghost-skill\ndescription: x\n---\n\n## Context Requirements\n\n### From upstream\n\n- some-phase\n`,
-      );
-      const { errors } = await validateEntrySkillContracts(
-        [
-          {
-            filePath: 'g.yaml',
-            graph: { name: 'g', version: 1, phases: [{ id: 'p', type: 'main', dependsOn: [], task: 'x' }] },
-          },
-        ],
-        dir,
-      );
-      expect(errors.some((e) => e.includes("orphan entry skill 'ghost-skill'"))).toBe(true);
-    } finally {
-      cleanup();
-    }
-  });
-
-  it('reports upstream coverage mismatch', async () => {
-    const { dir, cleanup } = makeSkillsDir();
-    try {
-      mkdirSync(join(dir, 'picker'));
-      writeFileSync(
-        join(dir, 'picker', 'SKILL.md'),
-        `---\nname: picker\ndescription: x\n---\n\n## Context Requirements\n\n### From upstream\n\n- scope-confirm\n- missing-node\n`,
-      );
-      const { errors } = await validateEntrySkillContracts(
-        [
-          {
-            filePath: 'g.yaml',
-            graph: {
-              name: 'g',
-              version: 1,
-              phases: [
-                // missing-node exists in the graph but is NOT injected into the picker phase
-                { id: 'missing-node', type: 'main', dependsOn: [], task: 'x' },
-                { id: 'p', type: 'main', skill: 'picker', dependsOn: ['scope-confirm'], task: 'x' },
-              ],
-            },
-          },
-        ],
-        dir,
-      );
-      expect(errors.some((e) => e.includes('missing-node'))).toBe(true);
-      expect(errors.some((e) => e.includes('scope-confirm'))).toBe(false);
-    } finally {
-      cleanup();
-    }
-  });
-
-  it('reports placeholder contract error for dispatched skill', async () => {
-    const { dir, cleanup } = makeSkillsDir();
-    try {
-      mkdirSync(join(dir, 'ref-skill'));
-      writeFileSync(
-        join(dir, 'ref-skill', 'SKILL.md'),
-        `---\nname: ref-skill\ndescription: x\n---\n\n## Context Requirements\n\n### From upstream\n\n- <nodeId>\n`,
-      );
-      const { errors } = await validateEntrySkillContracts(
-        [
-          {
-            filePath: 'g.yaml',
-            graph: {
-              name: 'g',
-              version: 1,
-              phases: [{ id: 'p', type: 'main', skill: 'ref-skill', dependsOn: [], task: 'x' }],
-            },
-          },
-        ],
-        dir,
-      );
-      expect(errors.some((e) => e.includes('placeholder'))).toBe(true);
-    } finally {
-      cleanup();
-    }
-  });
-
-  it('ignores fenced placeholder examples — inert, never errors nor orphan', async () => {
-    const { dir, cleanup } = makeSkillsDir();
-    try {
-      mkdirSync(join(dir, 'ref-skill'));
-      writeFileSync(
-        join(dir, 'ref-skill', 'SKILL.md'),
-        `---\nname: ref-skill\ndescription: x\n---\n\n## Body\n\nExample only — real contract lives in the graph:\n\n\`\`\`markdown\n## Context Requirements\n\n### From upstream\n\n- <nodeId>\n\n### Reference skills\n\n- <skill-name>\n\n### Files\n\n- <glob>\n\`\`\`\n`,
-      );
-      const { errors } = await validateEntrySkillContracts(
-        [{ filePath: 'g.yaml', graph: { name: 'g', version: 1, phases: [] } }],
-        dir,
-      );
-      expect(errors).toHaveLength(0);
-    } finally {
-      cleanup();
-    }
-  });
-
-  it('rejects bare-name channels on contract-less review-type skill', async () => {
-    const { dir, cleanup } = makeSkillsDir();
-    try {
-      mkdirSync(join(dir, 'review-skill'));
-      writeFileSync(
-        join(dir, 'review-skill', 'SKILL.md'),
-        `---\nname: review-skill\ndescription: x\n---\n\n## Context Requirements\n\n### From upstream\n\n<!-- contract graph-decided — dispatching graphs declare explicit channels -->\n`,
-      );
-      const { errors } = await validateEntrySkillContracts(
-        [
-          {
-            filePath: 'g.yaml',
-            graph: {
-              name: 'g',
-              version: 1,
-              phases: [
-                { id: 'direct-up', type: 'main', dependsOn: [], task: 'x' },
-                {
-                  id: 'r',
-                  type: 'main',
-                  skill: 'review-skill',
-                  dependsOn: ['direct-up'],
-                  channels: ['direct-up', 'node:other', 'skill:atom-graph-spec', '.graph-scheduler/docs/x.md'],
-                  task: 'x',
-                },
-              ],
-            },
-          },
-        ],
-        dir,
-      );
-      // bare 'direct-up' fails; explicit node:/skill: prefixes and workflow-artifact globs pass
-      expect(errors.some((e) => e.includes('bare name') && e.includes('direct-up'))).toBe(true);
-      expect(errors.some((e) => e.includes('node:other'))).toBe(false);
-      expect(errors.some((e) => e.includes('skill:atom-graph-spec'))).toBe(false);
-      expect(errors.some((e) => e.includes('.graph-scheduler/docs/x.md'))).toBe(false);
-    } finally {
-      cleanup();
-    }
-  });
-
-  it('reports missing reference channel (forward coverage)', async () => {
-    const { dir, cleanup } = makeSkillsDir();
-    try {
-      mkdirSync(join(dir, 'writer-skill'));
-      writeFileSync(
-        join(dir, 'writer-skill', 'SKILL.md'),
-        `---\nname: writer-skill\ndescription: x\n---\n\n## Context Requirements\n\n### Reference skills\n\n- atom-skill-spec\n`,
-      );
-      const { errors } = await validateEntrySkillContracts(
-        [
-          {
-            filePath: 'g.yaml',
-            graph: {
-              name: 'g',
-              version: 1,
-              phases: [{ id: 'w', type: 'main', skill: 'writer-skill', dependsOn: [], task: 'x' }],
-            },
-          },
-        ],
-        dir,
-      );
-      expect(errors.some((e) => e.includes('atom-skill-spec') && e.includes('channels'))).toBe(true);
-    } finally {
-      cleanup();
-    }
-  });
-
-  it('warns on phantom bare node channel and cross-level suggestion', async () => {
-    const { dir, cleanup } = makeSkillsDir();
-    try {
-      mkdirSync(join(dir, 'review-skill'));
-      writeFileSync(
-        join(dir, 'review-skill', 'SKILL.md'),
-        `---\nname: review-skill\ndescription: x\n---\n\n## Context Requirements\n\n### From upstream\n\n- direct-up\n`,
-      );
-      const { errors, warnings } = await validateEntrySkillContracts(
-        [
-          {
-            filePath: 'g.yaml',
-            graph: {
-              name: 'g',
-              version: 1,
-              phases: [
-                { id: 'direct-up', type: 'main', dependsOn: [], task: 'x' },
-                { id: 'other-node', type: 'main', dependsOn: [], task: 'x' },
-                {
-                  id: 'r',
-                  type: 'main',
-                  skill: 'review-skill',
-                  dependsOn: ['direct-up'],
-                  channels: ['other-node'],
-                  task: 'x',
-                },
-              ],
-            },
-          },
-        ],
-        dir,
-      );
-      // other-node is a real graph node outside dependsOn → warning suggesting node: prefix
-      expect(warnings.some((w) => w.includes('other-node') && w.includes('node:other-node'))).toBe(true);
-      expect(errors.some((e) => e.includes('other-node'))).toBe(false);
-    } finally {
-      cleanup();
-    }
+    expect(snap.changed?.find((n) => n.nodeId === 't1')?.unactivated).toBeUndefined();
+    expect(snap.changed?.find((n) => n.nodeId === 'done')?.unactivated).toBeUndefined();
   });
 });
 
@@ -1576,10 +1417,18 @@ describe('4.6 main channels validation', () => {
   it('accepts main phase with channels — ban lifted', () => {
     const graph = {
       name: 't',
-      version: 1,
+
       phases: [
-        { id: 'm', type: 'main', skill: 'atom-graph-spec', channels: ['node:up'], dependsOn: ['up'], task: 'x' },
-        { id: 'up', type: 'main', dependsOn: [], task: 'x' },
+        {
+          id: 'm',
+          type: 'main',
+          skill: 'atom-graph-spec',
+          channels: ['node:up'],
+          dependsOn: ['up'],
+          task: 'x',
+          operations: [],
+        },
+        { id: 'up', type: 'main', dependsOn: [], task: 'x', operations: [] },
       ],
     };
     const { errors } = validateGraphContracts(graph, 't.yaml');
@@ -1589,175 +1438,15 @@ describe('4.6 main channels validation', () => {
   it('main preText rejected at schema level — contract layer has no duplicate mirror', () => {
     const graph = {
       name: 't',
-      version: 1,
-      phases: [{ id: 'm', type: 'main', preText: 'x', task: 't' }],
+
+      phases: [{ id: 'm', type: 'main', preText: 'x', task: 't', operations: [] }],
     };
     // Schema superRefine is the single enforcement point — contract layer passes.
     const { errors } = validateGraphContracts(graph, 't.yaml');
     expect(errors.some((e) => e.includes('preText'))).toBe(false);
     // Schema itself rejects.
-    const parsed = PhaseSchema.safeParse({ id: 'm', type: 'main', preText: 'x', task: 't' });
+    const parsed = PhaseSchema.safeParse({ id: 'm', type: 'main', preText: 'x', task: 't', operations: [] });
     expect(parsed.success).toBe(false);
-  });
-
-  it('rejects contract-less main bare-name channel', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'skills-main-'));
-    try {
-      const { errors } = await validateEntrySkillContracts(
-        [
-          {
-            filePath: 't.yaml',
-            graph: { name: 't', version: 1, phases: [{ id: 'm', type: 'main', channels: ['upstream'], task: 'x' }] },
-          },
-        ],
-        dir,
-      );
-      expect(errors.some((e) => e.includes('bare name'))).toBe(true);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('accepts contract-less main with explicit prefixes only', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'skills-main-'));
-    try {
-      const { errors } = await validateEntrySkillContracts(
-        [
-          {
-            filePath: 't.yaml',
-            graph: {
-              name: 't',
-              version: 1,
-              phases: [
-                {
-                  id: 'm',
-                  type: 'main',
-                  channels: ['node:up', 'skill:atom-graph-spec', 'docs/*.md'],
-                  dependsOn: ['up'],
-                  task: 'x',
-                },
-              ],
-            },
-          },
-        ],
-        dir,
-      );
-      expect(errors.some((e) => e.includes('bare name'))).toBe(false);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('reports contract Reference gap for main phase — forward coverage applies to main', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'skills-main-'));
-    try {
-      mkdirSync(join(dir, 'main-skill'));
-      writeFileSync(
-        join(dir, 'main-skill', 'SKILL.md'),
-        `---\nname: main-skill\ndescription: x\n---\n\n## Context Requirements\n\n### From upstream\n\n- up\n\n### Reference skills\n\n- ref-one\n\n### Files\n\n- docs/*.md\n`,
-      );
-      const { errors } = await validateEntrySkillContracts(
-        [
-          {
-            filePath: 'g.yaml',
-            graph: {
-              name: 'g',
-              version: 1,
-              phases: [
-                {
-                  id: 'm',
-                  type: 'main',
-                  skill: 'main-skill',
-                  channels: ['node:up', 'docs/*.md'],
-                  dependsOn: ['up'],
-                  task: 'x',
-                },
-              ],
-            },
-          },
-        ],
-        dir,
-      );
-      expect(errors.some((e) => e.includes("declares reference 'ref-one' not declared"))).toBe(true);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('warns on phantom graph-node channel for main phase (node: prefix suggestion)', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'skills-main-'));
-    try {
-      mkdirSync(join(dir, 'main-skill'));
-      writeFileSync(
-        join(dir, 'main-skill', 'SKILL.md'),
-        `---\nname: main-skill\ndescription: x\n---\n\n## Context Requirements\n\n### From upstream\n\n- up\n`,
-      );
-      const { warnings, errors } = await validateEntrySkillContracts(
-        [
-          {
-            filePath: 'g.yaml',
-            graph: {
-              name: 'g',
-              version: 1,
-              phases: [
-                { id: 'up', type: 'main', dependsOn: [], task: 'x' },
-                { id: 'other', type: 'main', dependsOn: [], task: 'x' },
-                {
-                  id: 'm',
-                  type: 'main',
-                  skill: 'main-skill',
-                  channels: ['node:up', 'other'],
-                  dependsOn: ['up'],
-                  task: 'x',
-                },
-              ],
-            },
-          },
-        ],
-        dir,
-      );
-      // 'other' is a real graph node outside dependsOn → warning suggesting node: prefix
-      expect(warnings.some((w) => w.includes('other') && w.includes('node:other'))).toBe(true);
-      expect(errors.some((e) => e.includes('other'))).toBe(false);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('errors on unresolvable ghost channel for main phase — same strength as agent', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'skills-main-'));
-    try {
-      mkdirSync(join(dir, 'main-skill'));
-      writeFileSync(
-        join(dir, 'main-skill', 'SKILL.md'),
-        `---\nname: main-skill\ndescription: x\n---\n\n## Context Requirements\n\n### From upstream\n\n- up\n`,
-      );
-      const { errors } = await validateEntrySkillContracts(
-        [
-          {
-            filePath: 'g.yaml',
-            graph: {
-              name: 'g',
-              version: 1,
-              phases: [
-                {
-                  id: 'm',
-                  type: 'main',
-                  skill: 'main-skill',
-                  channels: ['node:up', 'ghost-entry'],
-                  dependsOn: ['up'],
-                  task: 'x',
-                },
-              ],
-            },
-          },
-        ],
-        dir,
-      );
-      expect(errors.some((e) => e.includes('unresolvable channel "ghost-entry"'))).toBe(true);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 });
 
@@ -1769,9 +1458,15 @@ describe('4.7 task text contract', () => {
   it('accepts task text mentioning .taskflow/outputs/ — runtime path checks removed', () => {
     const graph = {
       name: 't',
-      version: 1,
+
       phases: [
-        { id: 'm', type: 'main', dependsOn: [], task: 'Read upstream manually from .taskflow/outputs/up.output.txt' },
+        {
+          id: 'm',
+          type: 'main',
+          dependsOn: [],
+          task: 'Read upstream manually from .taskflow/outputs/up.output.txt',
+          operations: [],
+        },
       ],
     };
     const { errors } = validateGraphContracts(graph, 't.yaml');
@@ -1779,90 +1474,26 @@ describe('4.7 task text contract', () => {
     expect(errors).toEqual([]);
   });
 
-  it('warns on injection claim of undeclared node', () => {
+  it('task-text content checks moved agent-side — engine stays silent (shapes only)', () => {
     const graph = {
       name: 't',
-      version: 1,
+
       phases: [
         {
           id: 'm',
           type: 'main',
           dependsOn: [],
-          task: 'Read ghost-node output (injected via node:ghost-node channel).',
+          task: 'Read ghost-node output (injected via node:ghost-node channel).\nOutput (main agent collects): a, b',
+          operations: [],
         },
       ],
     };
-    const { warnings } = validateGraphContracts(graph, 't.yaml');
-    expect(warnings.some((w) => w.includes("claims injection of 'ghost-node'"))).toBe(true);
-  });
-
-  it('accepts injection claims covered by dependsOn', () => {
-    const graph = {
-      name: 't',
-      version: 1,
-      phases: [
-        { id: 'up', type: 'main', dependsOn: [], task: 'x' },
-        { id: 'down', type: 'main', dependsOn: ['up'], task: 'Read up output (injected).' },
-      ],
-    };
-    const { warnings } = validateGraphContracts(graph, 't.yaml');
+    // Declared-input claims + Task Content Spec spellings are agent-side
+    // consistency-gate checks (estate-maintain) — the engine validates shapes.
+    const { errors, warnings } = validateGraphContracts(graph, 't.yaml');
+    expect(errors).toEqual([]);
     expect(warnings.some((w) => w.includes('claims injection'))).toBe(false);
-  });
-
-  it('accepts injection claims covered by node: channel', () => {
-    const graph = {
-      name: 't',
-      version: 1,
-      phases: [
-        { id: 'up', type: 'main', dependsOn: [], task: 'x' },
-        {
-          id: 'down',
-          type: 'main',
-          dependsOn: [],
-          channels: ['node:up'],
-          task: 'Read up output (injected via node:up channel).',
-        },
-      ],
-    };
-    const { warnings } = validateGraphContracts(graph, 't.yaml');
-    expect(warnings.some((w) => w.includes('claims injection'))).toBe(false);
-  });
-
-  it('accepts injection claims suffix-matched to prefixed node ids (composed graphs)', () => {
-    const graph = {
-      name: 't',
-      version: 1,
-      phases: [
-        { id: 'ops/up', type: 'main', dependsOn: [], task: 'x' },
-        {
-          id: 'ops/down',
-          type: 'main',
-          dependsOn: [],
-          channels: ['node:ops/up'],
-          task: 'Read up output (injected via node:up channel).',
-        },
-      ],
-    };
-    const { warnings } = validateGraphContracts(graph, 't.yaml');
-    expect(warnings.some((w) => w.includes('claims injection'))).toBe(false);
-  });
-
-  it('ignores implicit-mechanism wording — injected via dependsOn', () => {
-    const graph = {
-      name: 't',
-      version: 1,
-      phases: [
-        { id: 'up', type: 'main', dependsOn: [], task: 'x' },
-        {
-          id: 'down',
-          type: 'main',
-          dependsOn: ['up'],
-          task: 'Read up output (injected via dependsOn implicit context).',
-        },
-      ],
-    };
-    const { warnings } = validateGraphContracts(graph, 't.yaml');
-    expect(warnings.some((w) => w.includes('claims injection'))).toBe(false);
+    expect(warnings.some((w) => w.includes('Output contract'))).toBe(false);
   });
 });
 
@@ -1870,241 +1501,24 @@ describe('4.7 task text contract', () => {
 // 4.8 — Task Content Spec: canonical output contract + dedup rules
 // ---------------------------------------------------------------------------
 
-describe('4.8 task content spec', () => {
-  it('rejects non-canonical output-contract spellings — error', () => {
+describe('4.8 task content spec — moved agent-side', () => {
+  it('engine no longer enforces task-text content rules — loads clean (shapes only)', () => {
     const graph = {
       name: 't',
-      version: 1,
-      phases: [{ id: 'm', type: 'main', dependsOn: [], task: 'Work.\nOutput (main agent collects): a, b' }],
-    };
-    const { errors } = validateGraphContracts(graph, 't.yaml');
-    expect(
-      errors.some((e) => e.includes("non-canonical output-contract spelling 'Output (main agent collects):'")),
-    ).toBe(true);
-  });
 
-  it('rejects legacy bare Output: spelling — error', () => {
-    const graph = {
-      name: 't',
-      version: 1,
-      phases: [{ id: 'm', type: 'main', dependsOn: [], task: 'Work.\nOutput: a, b' }],
-    };
-    const { errors } = validateGraphContracts(graph, 't.yaml');
-    expect(errors.some((e) => e.includes("legacy 'Output:' spelling"))).toBe(true);
-  });
-
-  it('warns on substantive main task without canonical Output contract block', () => {
-    const graph = {
-      name: 't',
-      version: 1,
       phases: [
         {
           id: 'm',
           type: 'main',
           dependsOn: [],
-          task: 'Produce the artifact per the confirmed design and write it out.',
+          task: 'Work.\nOutput (main agent collects): a, b\nOutput: legacy',
+          operations: [],
         },
       ],
-    };
-    const { warnings } = validateGraphContracts(graph, 't.yaml');
-    expect(warnings.some((w) => w.includes("lacks the canonical 'Output contract:'"))).toBe(true);
-  });
-
-  it('accepts canonical Output contract block — clean', () => {
-    const graph = {
-      name: 't',
-      version: 1,
-      phases: [{ id: 'm', type: 'main', dependsOn: [], task: 'Work.\n\nOutput contract: a, b (fields).' }],
     };
     const { errors, warnings } = validateGraphContracts(graph, 't.yaml');
-    expect(errors).toHaveLength(0);
-    expect(warnings.some((w) => w.includes('Output contract'))).toBe(false);
-  });
-
-  it('warns on skill-protocol restatement in task text', () => {
-    const graph = {
-      name: 't',
-      version: 1,
-      phases: [
-        {
-          id: 'm',
-          type: 'main',
-          dependsOn: [],
-          task: 'Execute interview({ goal: "design" }) per atom-kernel.\n\nOutput contract: design, scope_complete.',
-        },
-      ],
-    };
-    const { warnings } = validateGraphContracts(graph, 't.yaml');
-    expect(warnings.some((w) => w.includes('restates dispatched-skill protocol'))).toBe(true);
-  });
-
-  it('warns on injection-mechanics wording in task text', () => {
-    const graph = {
-      name: 't',
-      version: 1,
-      phases: [
-        {
-          id: 'm',
-          type: 'main',
-          dependsOn: ['up'],
-          task: 'Read up output (injected via node:up channel).\n\nOutput contract: x.',
-        },
-        { id: 'up', type: 'main', dependsOn: [], task: 'x' },
-      ],
-    };
-    const { warnings } = validateGraphContracts(graph, 't.yaml');
-    expect(warnings.some((w) => w.includes('spells injection mechanics'))).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Graph-level context — global channel entry rules (load-time validation)
-// ---------------------------------------------------------------------------
-
-describe('graph-level context', () => {
-  function makeSkillsDir(): { dir: string; cleanup: () => void } {
-    const dir = mkdtempSync(join(tmpdir(), 'skills-'));
-    return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
-  }
-
-  it('rejects bare-name graph-level entry — explicit prefix/glob required', () => {
-    const graph = {
-      name: 'g',
-      version: 1,
-      context: ['atom-graph-spec'],
-      phases: [{ id: 'm', type: 'main', task: 'x' }],
-    };
-    const { errors } = validateGraphContracts(graph, 'g.yaml');
-    expect(errors.some((e) => e.includes('atom-graph-spec') && e.includes('bare name'))).toBe(true);
-  });
-
-  it('accepts prefixed and workflow-artifact glob graph-level entries', () => {
-    const graph = {
-      name: 'g',
-      version: 1,
-      context: ['skill:atom-graph-spec', '.graph-scheduler/docs/x.md', 'node:m'],
-      phases: [{ id: 'm', type: 'main', task: 'x' }],
-    };
-    const { errors } = validateGraphContracts(graph, 'g.yaml');
     expect(errors).toEqual([]);
-  });
-
-  it('rejects project file glob in graph-level context (three-tier tier violation)', () => {
-    const graph = {
-      name: 'g',
-      version: 1,
-      context: ['docs/adr/*.md', './CONTEXT.md'],
-      phases: [{ id: 'm', type: 'main', task: 'x' }],
-    };
-    const { errors } = validateGraphContracts(graph, 'g.yaml');
-    expect(errors.filter((e) => e.includes('workflow runtime artifacts')).length).toBe(2);
-  });
-
-  it('rejects graph-level node: entry targeting a missing phase', () => {
-    const graph = {
-      name: 'g',
-      version: 1,
-      context: ['node:ghost'],
-      phases: [{ id: 'm', type: 'main', task: 'x' }],
-    };
-    const { errors } = validateGraphContracts(graph, 'g.yaml');
-    expect(errors.some((e) => e.includes('node:ghost') && e.includes('missing phase'))).toBe(true);
-  });
-
-  it('accepts graph-level node: entry targeting a flattened child id', () => {
-    const graph = {
-      name: 'g',
-      version: 1,
-      context: ['node:requirement/arch-review'],
-      phases: [
-        { id: 'm', type: 'main', task: 'x' },
-        { id: 'requirement/arch-review', type: 'main', task: 'y' },
-      ],
-    };
-    const { errors } = validateGraphContracts(graph, 'g.yaml');
-    expect(errors).toEqual([]);
-  });
-
-  it('forward coverage satisfied at graph level — no per-phase declaration needed', async () => {
-    const { dir, cleanup } = makeSkillsDir();
-    try {
-      mkdirSync(join(dir, 'writer-skill'));
-      writeFileSync(
-        join(dir, 'writer-skill', 'SKILL.md'),
-        `---\nname: writer-skill\ndescription: x\n---\n\n## Context Requirements\n\n### Reference skills\n\n- atom-skill-spec\n\n### Files\n\n- CONTEXT.md\n`,
-      );
-      const { errors } = await validateEntrySkillContracts(
-        [
-          {
-            filePath: 'g.yaml',
-            graph: {
-              name: 'g',
-              version: 1,
-              context: ['skill:atom-skill-spec', './CONTEXT.md'],
-              phases: [{ id: 'w', type: 'main', skill: 'writer-skill', dependsOn: [], task: 'x' }],
-            },
-          },
-        ],
-        dir,
-      );
-      expect(errors).toEqual([]);
-    } finally {
-      cleanup();
-    }
-  });
-
-  it('graph-level entry cannot mask a phase-specific contract gap', async () => {
-    const { dir, cleanup } = makeSkillsDir();
-    try {
-      mkdirSync(join(dir, 'writer-skill'));
-      writeFileSync(
-        join(dir, 'writer-skill', 'SKILL.md'),
-        `---\nname: writer-skill\ndescription: x\n---\n\n## Context Requirements\n\n### Reference skills\n\n- atom-skill-spec\n`,
-      );
-      // graph-level declares the reference; phase declares nothing — still covered
-      const covered = await validateEntrySkillContracts(
-        [
-          {
-            filePath: 'g.yaml',
-            graph: {
-              name: 'g',
-              version: 1,
-              context: ['skill:atom-skill-spec'],
-              phases: [{ id: 'w', type: 'main', skill: 'writer-skill', dependsOn: [], task: 'x' }],
-            },
-          },
-        ],
-        dir,
-      );
-      expect(covered.errors).toEqual([]);
-      // graph-level removed → deletion never silent: forward gap surfaces
-      const uncovered = await validateEntrySkillContracts(
-        [
-          {
-            filePath: 'g.yaml',
-            graph: {
-              name: 'g',
-              version: 1,
-              phases: [{ id: 'w', type: 'main', skill: 'writer-skill', dependsOn: [], task: 'x' }],
-            },
-          },
-        ],
-        dir,
-      );
-      expect(uncovered.errors.some((e) => e.includes('atom-skill-spec') && e.includes('channels'))).toBe(true);
-    } finally {
-      cleanup();
-    }
-  });
-
-  it('rejects non-string graph-level entry', () => {
-    const graph = {
-      name: 'g',
-      version: 1,
-      context: [42],
-      phases: [{ id: 'm', type: 'main', task: 'x' }],
-    };
-    const { errors } = validateGraphContracts(graph, 'g.yaml');
-    expect(errors.some((e) => e.includes('graph-level context entry must be a string'))).toBe(true);
+    expect(warnings.some((w) => w.includes('non-canonical'))).toBe(false);
+    expect(warnings.some((w) => w.includes('legacy'))).toBe(false);
   });
 });

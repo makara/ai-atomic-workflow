@@ -1,0 +1,52 @@
+{
+  "name": "@ai-atomic-workflow/graph-fidelity",
+  "version": "0.1.0",
+  "description": "Platform-seam signal discipline for graphs — per-call discipline echo rendered from the handler-assembled run frame (OMP context seam + opencode messages.transform), context fidelity reduction (identical tool-call dedup, errored-result markers), observability accumulation from platform events. Text-level only, zero denial.",
+  "keywords": [
+    "agent",
+    "signal",
+    "seam",
+    "discipline",
+    "run-frame",
+    "omp",
+    "opencode",
+    "opencode-plugin"
+  ],
+  "homepage": "https://github.com/makara/ai-atomic-workflow#readme",
+  "bugs": {
+    "url": "https://github.com/makara/ai-atomic-workflow/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/makara/ai-atomic-workflow.git",
+    "directory": "packages/graph-fidelity"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "makarawang",
+    "email": "makara15@gmail.com"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./omp": "./src/adapters/omp.ts",
+    "./server": "./src/adapters/opencode.ts"
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@oh-my-pi/pi-coding-agent": "17.2.12",
+    "@opencode-ai/plugin": "1.18.16",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  },
+  "omp": {
+    "extensions": [
+      "./src/adapters/omp.ts"
+    ]
+  }
+}

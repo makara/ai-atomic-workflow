@@ -36,7 +36,7 @@ The graph SHALL dispatch three maintain nodes: domains-index via atom-doc-mainta
 
 ### Requirement: Consistency gate in review
 
-The review node SHALL run the consistency gate (mapping / links / counts / derived / requirements) and reverse-validate changes; gate failures SHALL surface in the report, never silently patched. The requirements class SHALL verify the Design Requirements block format (head position, bullet list, no metadata) and that workstream changes comply with each requirement, with consensus evidence from the requirement node output (node:requirement channel) — never in-file source/date confirmation records.
+MODIFIED: the review node SHALL run the consistency gate (mapping / links / counts / derived / requirements) and reverse-validate changes; gate failures SHALL surface in the report, never silently patched. The requirements class SHALL verify the Design Requirements block format (head position, bullet list, no metadata) and that workstream changes comply with each requirement, with consensus evidence from the requirement node output (node:requirement channel) — never in-file source/date confirmation records. The gate SHALL additionally run graph↔skill contract alignment and entry-skill orphan detection (previously engine load-time machinery): every graph channel declaration SHALL be checked against the dispatched skill's `## Context Requirements` contract, and entry skills declaring graph-callable contracts without a dispatching graph phase SHALL be flagged as orphans.
 
 #### Scenario: Gate failure surfaced
 
@@ -48,6 +48,16 @@ The review node SHALL run the consistency gate (mapping / links / counts / deriv
 - **WHEN** the Design Requirements block format is invalid or a workstream change violates a requirement
 - **THEN** the failure SHALL be reported per requirement with evidence and SHALL block accept until resolved or explicitly waived
 - **AND** the evidence SHALL come from the requirement node output (stream consensus), never from in-file records
+
+#### Scenario: alignment defect flagged
+
+- **WHEN** a graph declares a channel its skill contract does not claim
+- **THEN** the consistency gate SHALL flag the mismatch as a defect (agent-side, same evidence base as the removed engine load-time pass)
+
+#### Scenario: orphan entry skill flagged
+
+- **WHEN** a skill declares graph-callable Context Requirements but no graph phase dispatches it
+- **THEN** the consistency gate SHALL flag it as an orphan
 
 ### Requirement: Deployment mirror read-only check
 

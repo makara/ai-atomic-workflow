@@ -122,12 +122,12 @@ When a main phase dispatches sub-agents (e.g. code-review axis agents), the inje
 
 ### Requirement: graph_init SHALL NOT be misused as graph-YAML validation
 
-`graph_init` SHALL remain a config/DB health check — it SHALL NOT be referenced by graph tasks as a graph-YAML validator. Produced-graph validation SHALL be a real load probe: `graph_start` the produced graph, expect a node return + zero contractWarnings, then `graph_force_end` to clean up the probe run.
+`graph_init` SHALL remain a config/DB health check — it SHALL NOT be referenced by graph tasks as a graph-YAML validator. Produced-graph validation SHALL be a real load probe: `graph_start` the produced graph, expect a node return (engine machine validation passes), then `graph_force_end` to clean up the probe run.
 
 #### Scenario: Implement phase validates by load probe
 
 - **WHEN** a maker-journey implement phase validates the produced graph
-- **THEN** it SHALL call `graph_start` on the produced graph (expect node + 0 contractWarnings), then `graph_force_end`
+- **THEN** it SHALL call `graph_start` on the produced graph (expect a node return — machine validation), then `graph_force_end`
 - **AND** it SHALL NOT claim graph_init validates the graph YAML
 
 #### Scenario: Probe run cleaned up

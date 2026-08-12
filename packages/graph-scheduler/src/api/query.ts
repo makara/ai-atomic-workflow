@@ -15,7 +15,7 @@ import { Effect } from 'effect';
 import type { NodeStateEntry } from '../lib/db/repository.js';
 import { GraphRepository } from '../lib/db/repository.js';
 import type { PersistenceError, SchedulerError } from '../types.js';
-import { assembleSnapshot, type IGraphSnapshot, type ISnapshotNode } from './snapshot.js';
+import { assembleSnapshot, type IGraphSnapshot } from './snapshot.js';
 
 /**
  * Build a full GraphSnapshot from a repository GraphRun + NodeStateEntry array.
@@ -29,13 +29,10 @@ function buildFullSnapshot(
   updatedAt: string,
   nodeStates: ReadonlyArray<NodeStateEntry>,
 ): IGraphSnapshot {
-  const nodes: ISnapshotNode[] = nodeStates.map((ns) => ({
+  const nodes = nodeStates.map((ns) => ({
     nodeId: ns.nodeId,
     status: ns.status,
     retryCount: ns.retryCount,
-    startedAt: ns.startedAt,
-    completedAt: ns.completedAt,
-    durationMs: ns.startedAt && ns.completedAt ? Date.parse(ns.completedAt) - Date.parse(ns.startedAt) : null,
   }));
 
   return assembleSnapshot({ runId, graphName, fsmState, createdAt, updatedAt }, nodes);

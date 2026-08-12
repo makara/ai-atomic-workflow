@@ -8,7 +8,7 @@ Defines the two-scope context model: a graph-level global channel (`context:`) f
 
 ### Requirement: Global channel — graph `context:` and config default layer
 
-The graph definition SHALL declare a top-level `context:` list (the global channel): `skill:<name>` references and `node:<id>` stream promotions. `.graph-scheduler/config.json` SHALL declare `context:` as the project default layer. A phase's effective ambient context SHALL be the deterministic union of the convention layer (`CONTEXT.md`, `docs/domains.md` — exact files, default-loaded, absence-tolerant), the config project layer, and the graph `context:` list, deduplicated by exact string — a single deterministic computation, identical for every phase, materialized at dispatch (no per-phase inheritance logic). Every phase of the run SHALL receive the global channel, injected in the fixed block order. File globs SHALL NOT appear in graph `context:` — graph-level file channels SHALL be limited to workflow runtime artifacts (`.graph-scheduler/`, `.taskflow/`); convention and project files arrive via the convention layer and config default layer respectively. The four-level scope hierarchy (project → graph → flow → phase additive merge at dispatch) SHALL NOT exist.
+The graph definition SHALL declare a top-level `context:` list (the global channel): `skill:<name>` references and `node:<id>` stream promotions. `.graph-scheduler/config.json` SHALL declare `context:` as the user-supplement layer (user-owned additions — never the platform-estate carrier). A phase's effective ambient context SHALL be the deterministic union of the convention layer (`CONTEXT.md`, `docs/domains.md` — exact files, default-loaded, absence-tolerant), the config user-supplement layer, and the graph `context:` list, deduplicated by exact string — a single deterministic computation, identical for every phase, materialized at dispatch (no per-phase inheritance logic). Every phase of the run SHALL receive the global channel, injected in the fixed block order. File globs SHALL NOT appear in graph `context:` — graph-level file channels are restricted to workflow runtime artifacts.
 
 #### Scenario: Global channel injected into every phase
 
@@ -17,8 +17,8 @@ The graph definition SHALL declare a top-level `context:` list (the global chann
 
 #### Scenario: Config default layer merges deterministically
 
-- **WHEN** `.graph-scheduler/config.json` declares `context: ["docs/adr/*.md"]` and the graph declares `context: ["node:requirement/arch-review"]`
-- **THEN** the effective global channel SHALL be the convention layer, then `docs/adr/*.md`, then `node:requirement/arch-review` — deduplicated, identical for every phase
+- **WHEN** `.graph-scheduler/config.json` declares `context: ["docs/team/*.md"]` (user supplement) and the graph declares `context: ["node:requirement/arch-review"]`
+- **THEN** the effective global channel SHALL be the convention layer, then the user supplement, then `node:requirement/arch-review` — deduplicated, identical for every phase
 - **THEN** no per-phase inheritance or scope-resolution logic SHALL exist — one deterministic merge
 
 #### Scenario: Graph file glob rejected
@@ -158,20 +158,6 @@ The system SHALL maintain a platform convention layer: exactly two entries — `
 - **WHEN** a convention layer entry is not an exact file path (e.g. `docs/adr/`, `docs/adr/**`, `openspec/specs/**/*.md`)
 - **THEN** the entry SHALL be rejected at configuration validation
 
-### Requirement: Project layer — config.json context, existence-validated
-
-`.graph-scheduler/config.json` `context:` SHALL be the project layer: project-declared layout entries (file globs and exact paths). Existence semantics SHALL be: a glob entry matching zero files SHALL warn (empty set legal — lazy document creation); an exact-file entry that does not exist SHALL be a load error (the project declared a file it does not have).
-
-#### Scenario: Project glob matches nothing
-
-- **WHEN** config.json declares `context: ["docs/adr/*.md"]` and no ADR records exist yet
-- **THEN** the run SHALL start with a warning and an empty ADR block — lazy creation remains legal
-
-#### Scenario: Project exact file missing
-
-- **WHEN** config.json declares `context: ["docs/estate/index.md"]` and the file does not exist
-- **THEN** graph load SHALL fail with a load error naming the missing file
-
 ### Requirement: Graph channels — node:/skill:/workflow artifacts only
 
 File globs SHALL be banned from graph top-level `context:` and phase `channels:` in shipped graphs. Graph-declared channels SHALL be limited to `node:` stream references, `skill:` references, and workflow runtime artifact paths under `.graph-scheduler/` and `.taskflow/`. A graph-declared file glob outside those workflow namespaces SHALL be a load-time error.
@@ -181,16 +167,97 @@ File globs SHALL be banned from graph top-level `context:` and phase `channels:`
 - **WHEN** a graph declares a channel under `.graph-scheduler/` or `.taskflow/`
 - **THEN** load SHALL accept it (workflow-owned namespaces are always valid)
 
-### Requirement: Effective merge — convention, project, graph, phase
+### Requirement: User-supplement layer — config.json context, user-owned, existence-validated
 
-A phase's effective ambient context SHALL be the deterministic union of the convention layer, the config project layer, the graph `context:` list, and the phase `channels:` list — deduplicated by exact string, in that order. Coverage checks (forward: skill contract Files ⊆ channels) SHALL evaluate the effective list including convention and project layers.
+`.graph-scheduler/config.json` `context:` SHALL be the user-supplement layer: user-owned additions to the ambient context (file globs and exact paths the USER chooses to declare). The key SHALL remain optional in the schema (absent = no supplements). Existence semantics SHALL be: a glob entry matching zero files SHALL warn (empty set legal — lazy document creation); an exact-file entry that does not exist SHALL be a load error (the user declared a file the project does not have). The user-supplement layer SHALL NOT be the carrier of platform-estate documents — platform estate is discovered organically (see Platform estate requirement); declaring estate paths in config SHALL be redundant, never required.
+
+#### Scenario: User supplements custom context
+
+- **WHEN** a user declares `context: ["docs/team-guidelines.md"]` in config.json and the file exists
+- **THEN** the file SHALL be injected into every phase's ambient context as a file block
+
+#### Scenario: User-supplement schema optional
+
+- **WHEN** config.json omits `context:`
+- **THEN** the project SHALL run with zero user supplements and zero load errors — graphs SHALL NOT require the key
+
+#### Scenario: User exact file missing errors
+
+- **WHEN** config.json declares `context: ["docs/estate/index.md"]` and the file does not exist
+- **THEN** graph load SHALL fail with a load error naming the missing file (user promise)
+
+#### Scenario: User glob matches nothing warns
+
+- **WHEN** config.json declares `context: ["docs/team/*.md"]` and no files match
+- **THEN** the run SHALL start with a warning and an empty block — lazy creation remains legal
+
+#### Scenario: Platform estate not required in config
+
+- **WHEN** a project declares no config `context:` at all
+- **THEN** platform estate documents SHALL still be usable by graphs (organic discovery) — no estate declaration SHALL be required
+
+### Requirement: Platform estate — organic discovery, never declared
+
+The platform estate — `docs/adr/**` (records, generated index, archive), `openspec/specs/**`, `openspec/changes/**`, `CHANGELOG.md`, `README.md` — SHALL be read organically by the executing agent when present, via the platform's in-project read/locate adapters. The scheduler SHALL NOT inject, validate, existence-check, or require declarations for platform-estate documents. Absence SHALL degrade to empty plus a warning — never a load failure, never a dispatch failure. Graphs and skills SHALL NOT require estate declarations in config and SHALL NOT hardcode estate paths beyond the vocabulary.
+
+#### Scenario: Zero-declaration project runs estate graph
+
+- **WHEN** a project with no config `context:` runs arch-review-loop and has `docs/adr/` records
+- **THEN** the run SHALL start and execute normally; the agent SHALL read the ADR records directly when the review needs them
+
+#### Scenario: Absent estate degrades
+
+- **WHEN** a project has no `docs/adr/` and no `openspec/` tree
+- **THEN** the run SHALL start normally with empty estate blocks plus warnings — no error, no required declaration
+
+#### Scenario: Generated index need not pre-exist
+
+- **WHEN** `docs/adr/index.md` has not been generated yet
+- **THEN** no load or dispatch failure SHALL occur — the generated index is lazily creatable by estate maintenance
+
+### Requirement: Reference vocabulary
+
+The referenceable document vocabulary SHALL be exactly: `./CONTEXT.md`, `docs/domains.md`, `docs/adr/**` (including `docs/adr/index.md` and `docs/adr/archive/**`), `openspec/specs/**`, `openspec/changes/**`, `CHANGELOG.md`, `README.md`. Platform code and conventioned documents (the vocabulary documents themselves) SHALL NOT reference document paths outside the vocabulary; output locations (`docs/reports/`, `docs/specs/`, `.scratch/`, and other platform output homes) SHALL be exempt. Graph file channels SHALL remain restricted to workflow runtime artifacts (`.graph-scheduler/`, `.taskflow/`). User-supplement entries are user-owned declarations passed through generically — the platform SHALL NOT contain project-specific user paths.
+
+#### Scenario: Graph channel outside vocabulary rejected
+
+- **WHEN** a graph declares a file channel under a non-workflow path (e.g. `docs/custom/**`)
+- **THEN** load SHALL fail — graph channels stay workflow-artifact-only, estate paths are not channeled
+
+#### Scenario: Output locations exempt
+
+- **WHEN** a report is written to `docs/reports/2026-08-10-*.md` or scratch files to `.scratch/`
+- **THEN** no vocabulary restriction SHALL apply — outputs are exempt
+
+### Requirement: Effective merge — convention, user-supplement, graph, phase
+
+A phase's effective ambient context SHALL be the deterministic union of the convention layer, the config user-supplement layer, the graph `context:` list, and the phase `channels:` list — deduplicated by exact string, in that order. Forward coverage checks (skill contract Files) SHALL evaluate: platform runtime artifacts (`.graph-scheduler/`, `.taskflow/`) and user-supplement entries SHALL be covered via channels; vocabulary documents (Platform estate requirement) SHALL be covered by existence — a present vocabulary file satisfies the declared Files entry without any channel; a missing one degrades to empty + warning, never a load failure; any Files declaration outside the vocabulary and outside channels SHALL be a load error.
 
 #### Scenario: Coverage satisfied by convention layer
 
 - **WHEN** a skill contract declares `CONTEXT.md` in Files and the graph declares no matching channel
 - **THEN** the forward coverage check SHALL pass — the convention layer covers it
 
-#### Scenario: Coverage satisfied by project layer
+#### Scenario: Vocabulary file coverage by existence
 
-- **WHEN** a skill contract declares `docs/adr/` in Files and config.json declares `docs/adr/*.md`
-- **THEN** the forward coverage check SHALL pass — the project layer covers it
+- **WHEN** a skill contract declares `docs/adr/index.md` in Files and the file exists (or is absent) with no channel declared
+- **THEN** the forward coverage check SHALL pass when present; when absent SHALL degrade to empty plus a warning — never a load failure
+
+#### Scenario: Out-of-vocabulary Files declaration rejected
+
+- **WHEN** a skill contract declares a file outside the vocabulary (e.g. `docs/custom/x.md`) with no matching channel
+- **THEN** graph load SHALL fail naming the file and the vocabulary rule
+
+### Requirement: Uniform project-layer validation surface
+
+User-supplement-layer validation (existence checks) SHALL run identically on every entry surface: `graph_start`, `graph_advance`, `graph_jump`, and `graph_init` health checks SHALL apply the same validation with the same error/warning semantics — no surface SHALL skip the user's declared-file promise.
+
+#### Scenario: Run path validates user supplements
+
+- **WHEN** config.json declares a missing exact file and the pilot calls `graph_start`
+- **THEN** graph start SHALL fail with the same load error that `graph_init` reports
+
+#### Scenario: Warnings identical everywhere
+
+- **WHEN** config.json declares a zero-match glob
+- **THEN** every entry surface SHALL emit the same warning and continue

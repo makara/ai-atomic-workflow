@@ -15,7 +15,7 @@ Graph lifecycle management — the execute→advance loop. Asset: `packages/grap
 - **WHEN** atom-pilot is invoked with a graph name
 - **THEN** it SHALL call `graph_start({ graphName })` to create a run
 - **THEN** on receiving a `NextNode` — it SHALL dispatch to `atom-phase-handler` (single entry, routes by node.type)
-- **THEN** after the handler completes — it SHALL call `graph_advance({ runId, nodeId, durationMs })`
+- **THEN** after the handler completes — it SHALL call `graph_advance({ runId, nodeId })` (duration derived from timestamps, never reported)
 - **THEN** `graph_advance` SHALL return the next `NextNode` or `null` (graph complete)
 - **THEN** the loop SHALL continue until `null` is received
 
@@ -107,3 +107,50 @@ atom-pilot SKILL §Approval Decision Processing / §Gate Decision Routing / §No
 
 - **WHEN** reading atom-pilot SKILL §Run Mode flags
 - **THEN** the "absence never auto" tail is a pointer to the canonical mode sites — no restatement
+
+### Requirement: Run Frame Protocol
+
+Every dispatched node carries a frame block declaring the run position and the input contract for the user.
+
+#### Scenario: Frame block on every dispatch
+
+- **WHEN** a node (main/approval/gate) is dispatched with an active run
+- **THEN** the assembled node context starts with a `## Run Frame` block containing runId, nodeId, node type, a one-line task summary, the statement that user input during the node is node input (scope answers, approval decisions) rather than new instructions, and the obligation to report then advance via `graph_advance`
+
+#### Scenario: First-action rule
+
+- **WHEN** the pilot is invoked with a graph name
+- **THEN** the first tool call must be `graph_start`; any read/analysis tool call before it is a process violation recorded in the node report
+
+### Requirement: Process-Control Language (PCL) routing
+
+User utterances that match the English PCL vocabulary execute as graph routing actions, never as node input. The vocabulary is English-only: back/return (→ `graph_jump`), jump to X (→ `graph_jump`), re-review/re-run (→ `graph_jump`), end/finish (→ endRun), terminate/abort (→ `graph_force_end`), skip (→ continue), status/progress (→ `graph_status`), history (→ `graph_list`). the previous zh utterance forms are removed from the vocabulary and examples.
+
+#### Scenario: Jump-back command
+
+- **WHEN** the user sends a PCL jump-back utterance (e.g. "back to X phase re-review") during an active run
+- **THEN** the pilot routes it via `graph_jump` to the resolved target phase and records the routing in the session; the utterance is not treated as node input
+
+#### Scenario: End command
+
+- **WHEN** the user sends a PCL end utterance (e.g. "end") during an active run
+- **THEN** the pilot completes the run via `graph_advance` with `endRun: true`
+
+#### Scenario: Status command
+
+- **WHEN** the user sends a PCL status utterance (e.g. "status")
+- **THEN** the pilot reports run state via `graph_status` and continues the loop
+
+#### Scenario: Explicit vocabulary
+
+- **WHEN** a PCL term is used
+- **THEN** its mapping (term → routing action → target resolution rule) comes from an explicit on-disk vocabulary, not model improvisation
+
+### Requirement: Advance obligation clause
+
+The pilot loop states that a node boundary is not a stopping point.
+
+#### Scenario: Node boundary continues the loop
+
+- **WHEN** a node completes and the run is not complete
+- **THEN** the pilot reports the node and advances to the next node without treating the boundary as a yield point

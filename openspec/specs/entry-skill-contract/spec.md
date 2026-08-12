@@ -101,3 +101,17 @@ Entry-skill contract declarations (Topics, Output contract, Behavior flags) SHAL
 
 - **WHEN** an entry skill declares its Context Requirements
 - **THEN** it uses glossary terms without local re-definition; CONTEXT.md is the single disambiguation site
+
+### Requirement: Enforcement home is agent-side
+
+The entry-skill callee contract SHALL be enforced agent-side — estate-maintain's consistency gate verifies graph↔skill contract alignment and entry-skill orphan detection. The engine SHALL NOT parse or validate the contract (no `parseContextContract`, no `validateEntrySkillContracts`, no orphan detection in graph-scheduler).
+
+#### Scenario: Alignment verified agent-side
+
+- **WHEN** estate-maintain runs its consistency gate
+- **THEN** graph channel declarations SHALL be aligned against entry-skill contracts and orphan entry skills detected — agent-side, using the same skill files the dispatcher reads
+
+#### Scenario: No engine contract machinery
+
+- **WHEN** the graph-scheduler source is inspected
+- **THEN** no entry-skill contract parsing, alignment pass, or orphan detection code SHALL exist

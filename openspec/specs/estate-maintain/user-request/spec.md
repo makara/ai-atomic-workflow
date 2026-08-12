@@ -22,17 +22,22 @@ The entry phase SHALL classify a `user-request` trigger when the user proposes s
 
 ### Requirement: Requirement grilling node
 
-A requirement node SHALL run after entry on user-request triggers, dispatching grilling in graph mode (mandatory interview, recommendation-first, closing question) to analyze and confirm the proposed requirements. The node task SHALL declare that no ADR decision applies to the requirement flow (user scope — requirements record into domains.md, not ADRs) and that record-keeping is not this node's responsibility — confirmed requirements are emitted as node output.
+A requirement node SHALL run after entry on user-request triggers, dispatching grilling in graph mode under the encapsulation contract (mandatory question rounds — never zero-question, never auto-gated; recommendation-first; closing question) to analyze and confirm the proposed requirements. The node task SHALL declare that no ADR decision applies to the requirement flow (user scope — requirements record into domains.md, not ADRs) and that record-keeping is not this node's responsibility — confirmed requirements are emitted as node output with shape `decisions` + `shared_understanding` (consensus wording retired).
 
 #### Scenario: Requirements confirmed
 
-- **WHEN** the user-request grilling reaches consensus
-- **THEN** the node SHALL output the confirmed requirements (id, statement, status) and consensus
+- **WHEN** the user-request grilling reaches shared understanding
+- **THEN** the node SHALL output the confirmed requirements (id, statement, status) and `decisions` + `shared_understanding` — never `consensus` wording
 
 #### Scenario: No ADR emitted
 
 - **WHEN** the requirement grilling completes
 - **THEN** no ADR SHALL be created and no ADR decision SHALL be asked (graph task text overrides grilling's default ADR question)
+
+#### Scenario: Grilling round never skipped
+
+- **WHEN** the requirement node dispatches with full context coverage
+- **THEN** at least one question round SHALL be presented — zero-question degradation never applies to grilling
 
 ### Requirement: Domains-index records requirements
 

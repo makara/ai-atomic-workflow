@@ -44,6 +44,7 @@ const TAG_TO_CODE: Record<string, string> = {
   RegistryLoadError: 'REGISTRY_LOAD_ERROR',
   DispatchConfigError: 'DISPATCH_CONFIG_ERROR',
   ConfigError: 'CONFIG_ERROR',
+  ModeRequiredError: 'MODE_REQUIRED',
 };
 
 /** Extract _tag from a tagged error object. */
@@ -79,16 +80,23 @@ export const GraphStartSchema = z
       .record(z.string(), z.unknown())
       .optional()
       .describe(
-        'Optional — graph invocation arguments. Values are referenced as {args.key} in task templates; args.mode short-circuits the built-in $run-mode-confirm prologue node',
+        'Optional — graph invocation arguments. Values are referenced as {args.key} in task templates; args.mode (manual | auto) is the activation run mode — REQUIRED at invocation (absent → MODE_REQUIRED)',
       ),
   })
-  .strict();
+  .strict()
+  .superRefine((data, ctx) => {
+    // Activation mode — must be manual | auto when present; absence is
+    // handled at the runtime layer (ModeRequiredError, no run created).
+    const mode = data.args?.mode;
+    if (mode !== undefined && typeof mode !== 'string') {
+      ctx.addIssue({ code: 'custom', path: ['args', 'mode'], message: 'args.mode must be a string (manual | auto)' });
+    }
+  });
 
 export const GraphAdvanceSchema = z
   .object({
     runId: z.string().min(1).describe('Graph run ID — UUID returned by graph_start'),
     nodeId: z.string().min(1).describe('ID of the completed node'),
-    durationMs: z.number().int().min(0).describe('Execution duration in milliseconds'),
     branchTo: z
       .string()
       .min(1)
@@ -167,7 +175,7 @@ server.tool(
   async (args) => {
     const rt = await getRuntime();
     try {
-      const result = await rt.graphAdvance(args.runId, args.nodeId, args.durationMs, args.branchTo, args.endRun);
+      const result = await rt.graphAdvance(args.runId, args.nodeId, args.branchTo, args.endRun);
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result) }],
       };
@@ -272,7 +280,7 @@ server.tool('graph_list', 'List all runs — newest first.', GraphListSchema.sha
 // Tool 7: graph_init — initialise database schema + full-registry health check
 server.tool(
   'graph_init',
-  'Initialize the database (create tables + run migration) plus a full health check (entry-skill contract alignment with orphan detection + config health report). Idempotent — safe to call repeatedly.',
+  'Initialize the database (create tables + run migration) plus a health check (machine graph validation + config health report). Idempotent — safe to call repeatedly.',
   GraphInitSchema.shape,
   async (_args) => {
     const rt = await getRuntime();

@@ -79,7 +79,7 @@ function findTable(md: string, headerAnchor: string): Table | undefined {
 function baseNodeDetailKeys(): Set<string> {
   // `agent` is a main-type field documented in the base table — tolerated
   // here (assertKeysCovered allows it via the type-specific whitelist).
-  return new Set(['nodeId', 'type', 'dependsOn', 'handlerSkill', 'skill', 'agent', 'operations', 'retryCount']);
+  return new Set(['nodeId', 'type', 'dependsOn', 'skill', 'agent', 'operations', 'retryCount']);
 }
 
 function nodeDetailKeys(): Set<string> {
@@ -87,7 +87,6 @@ function nodeDetailKeys(): Set<string> {
     'nodeId',
     'type',
     'dependsOn',
-    'handlerSkill',
     'skill',
     'agent',
     'operations',
@@ -108,7 +107,6 @@ function assertKeysCovered(keys: Set<string>): void {
     nodeId: true,
     type: true,
     dependsOn: true,
-    handlerSkill: true,
     skill: true,
     agent: true,
     operations: true,
@@ -124,7 +122,6 @@ function assertKeysCovered(keys: Set<string>): void {
     nodeId: true,
     type: true,
     dependsOn: true,
-    handlerSkill: true,
     skill: true,
     operations: true,
     retryCount: true,
@@ -174,8 +171,13 @@ describe('contract doc guard — atom-phase-handler NODE-SCHEMA.md', () => {
         .map((r) => (r[0] !== '' ? r[0] : (r[1] ?? '')))
         .filter((f) => f !== ''),
     );
+    // `handlerSkill` was retired from the TS types by engine-skill-decoupling
+    // (the dispatch handler is the constant atom-phase-handler, agent-side
+    // knowledge); the graph-workflow NODE-SCHEMA.md table is updated by the
+    // doc-sync task — tolerated here until then.
+    const retiredDocFields = new Set(['handlerSkill']);
     const missingInDoc = [...tsBase].filter((f) => !docFields.has(f));
-    const extraInDoc = [...docFields].filter((f) => !tsBase.has(f));
+    const extraInDoc = [...docFields].filter((f) => !tsBase.has(f) && !retiredDocFields.has(f));
     expect(missingInDoc, `TS base fields absent from SKILL.md: ${missingInDoc.join(', ')}`).toEqual([]);
     expect(extraInDoc, `SKILL.md base fields absent from TS: ${extraInDoc.join(', ')}`).toEqual([]);
   });

@@ -14,13 +14,15 @@ function childGraph(): Taskflow {
   return {
     name: 'skill-create',
     phases: [
-      { id: 'scope-confirm', type: 'main', mode: 'exclusive', task: 'confirm scope', dependsOn: [] },
+      { id: 'scope-confirm', type: 'main', mode: 'exclusive', task: 'confirm scope', dependsOn: [], operations: [] },
       {
         id: 'skill-write',
         type: 'main',
         mode: 'exclusive',
         task: 'write skill',
         dependsOn: ['scope-confirm'],
+
+        operations: [],
       },
     ],
   };
@@ -38,9 +40,9 @@ describe('flattenFlowPhases — single-level use', () => {
     const parent: Taskflow = {
       name: 'test',
       phases: [
-        { id: 'plan', type: 'main', mode: 'exclusive', dependsOn: [] },
+        { id: 'plan', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
         { id: 'skill-ops', type: 'flow', mode: 'exclusive', use: 'skill-create', dependsOn: ['plan'] },
-        { id: 'review', type: 'main', mode: 'exclusive', dependsOn: ['skill-ops'] },
+        { id: 'review', type: 'main', mode: 'exclusive', dependsOn: ['skill-ops'], operations: [] },
       ],
     };
     const result = flattenFlowPhases(parent, staticLoader, 1, 5);
@@ -66,10 +68,10 @@ describe('flattenFlowPhases — route propagation', () => {
     return {
       name: 'routed-child',
       phases: [
-        { id: 'extract', type: 'main', dependsOn: [], task: 'x' },
-        { id: 'minimal', type: 'main', dependsOn: ['extract'], route: 'minimal-track', task: 'x' },
-        { id: 'detailed', type: 'main', dependsOn: ['extract'], route: 'detailed-track', task: 'x' },
-        { id: 'done', type: 'main', dependsOn: ['minimal', 'detailed'], join: 'any', task: 'x' },
+        { id: 'extract', type: 'main', dependsOn: [], task: 'x', operations: [] },
+        { id: 'minimal', type: 'main', dependsOn: ['extract'], route: 'minimal-track', task: 'x', operations: [] },
+        { id: 'detailed', type: 'main', dependsOn: ['extract'], route: 'detailed-track', task: 'x', operations: [] },
+        { id: 'done', type: 'main', dependsOn: ['minimal', 'detailed'], join: 'any', task: 'x', operations: [] },
       ],
     };
   }
@@ -80,7 +82,7 @@ describe('flattenFlowPhases — route propagation', () => {
       name: 'test',
       phases: [
         { id: 'ops', type: 'flow', use: 'routed-child', dependsOn: [], route: 'proceed' },
-        { id: 'tail', type: 'main', dependsOn: ['ops'] },
+        { id: 'tail', type: 'main', dependsOn: ['ops'], operations: [] },
       ],
     };
     const result = flattenFlowPhases(parent, routedLoader, 1, 5);
@@ -111,45 +113,44 @@ describe('flattenFlowPhases — route propagation', () => {
   });
 });
 
-describe('flattenFlowPhases — reserved prologue ids', () => {
-  it('keeps reserved ids unprefixed inside flows — author override preserved', () => {
-    const reservedChild = (): Taskflow => ({
-      name: 'reserved-child',
+describe('flattenFlowPhases — child id prefixing', () => {
+  it('prefixes ALL child ids inside flows — no reserved ids exist', () => {
+    const child = (): Taskflow => ({
+      name: 'child-graph',
       phases: [
-        { id: '$load-constraints', type: 'main', mode: 'exclusive', dependsOn: [], task: 'custom source' },
-        { id: 'child-node', type: 'main', mode: 'exclusive', dependsOn: [] },
+        { id: 'entry-node', type: 'main', mode: 'exclusive', dependsOn: [], task: 'x', operations: [] },
+        { id: 'child-node', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
       ],
     });
-    const loader = (name: string): Taskflow | null => (name === 'reserved-child' ? reservedChild() : null);
+    const loader = (name: string): Taskflow | null => (name === 'child-graph' ? child() : null);
     const parent: Taskflow = {
       name: 'test',
-      phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'reserved-child', dependsOn: [] }],
+      phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'child-graph', dependsOn: [] }],
     };
     const result = flattenFlowPhases(parent, loader, 1, 5);
     const ids = result.phases.map((p) => p.id);
-    // Reserved id stays global (graph-level contract) — no flow prefix
-    expect(ids).toContain('$load-constraints');
-    expect(ids).not.toContain('ops/$load-constraints');
-    // Ordinary child nodes keep the prefix
+    // Every child id gets the flow prefix
+    expect(ids).toContain('ops/entry-node');
     expect(ids).toContain('ops/child-node');
+    expect(ids).not.toContain('entry-node');
   });
 
-  it('rewrites dependsOn references TO reserved ids unprefixed', () => {
-    const reservedChild = (): Taskflow => ({
-      name: 'reserved-child',
+  it('rewrites dependsOn references inside children with the prefix', () => {
+    const child = (): Taskflow => ({
+      name: 'child-graph',
       phases: [
-        { id: '$load-constraints', type: 'main', mode: 'exclusive', dependsOn: [], task: 'custom source' },
-        { id: 'child-node', type: 'main', mode: 'exclusive', dependsOn: ['$load-constraints'] },
+        { id: 'entry-node', type: 'main', mode: 'exclusive', dependsOn: [], task: 'x', operations: [] },
+        { id: 'child-node', type: 'main', mode: 'exclusive', dependsOn: ['entry-node'], operations: [] },
       ],
     });
-    const loader = (name: string): Taskflow | null => (name === 'reserved-child' ? reservedChild() : null);
+    const loader = (name: string): Taskflow | null => (name === 'child-graph' ? child() : null);
     const parent: Taskflow = {
       name: 'test',
-      phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'reserved-child', dependsOn: [] }],
+      phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'child-graph', dependsOn: [] }],
     };
     const result = flattenFlowPhases(parent, loader, 1, 5);
-    const child = result.phases.find((p) => p.id === 'ops/child-node');
-    expect(child?.dependsOn).toEqual(['$load-constraints']);
+    const childPhase = result.phases.find((p) => p.id === 'ops/child-node');
+    expect(childPhase?.dependsOn).toEqual(['ops/entry-node']);
   });
 });
 
@@ -169,16 +170,16 @@ describe('flattenFlowPhases — recursive', () => {
       if (name === 'inner-flow') {
         return {
           name: 'inner-flow',
-          phases: [{ id: 'inner-node', type: 'main', mode: 'exclusive', dependsOn: [] }],
+          phases: [{ id: 'inner-node', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] }],
         };
       }
       if (name === 'outer-child') {
         return {
           name: 'outer-child',
           phases: [
-            { id: 'pre', type: 'main', mode: 'exclusive', dependsOn: [] },
+            { id: 'pre', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
             { id: 'mid', type: 'flow', mode: 'exclusive', use: 'inner-flow', dependsOn: ['pre'] },
-            { id: 'post', type: 'main', mode: 'exclusive', dependsOn: ['mid'] },
+            { id: 'post', type: 'main', mode: 'exclusive', dependsOn: ['mid'], operations: [] },
           ],
         };
       }
@@ -187,9 +188,9 @@ describe('flattenFlowPhases — recursive', () => {
     const parent: Taskflow = {
       name: 'root',
       phases: [
-        { id: 'start', type: 'main', mode: 'exclusive', dependsOn: [] },
+        { id: 'start', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
         { id: 'outer', type: 'flow', mode: 'exclusive', use: 'outer-child', dependsOn: ['start'] },
-        { id: 'end', type: 'main', mode: 'exclusive', dependsOn: ['outer'] },
+        { id: 'end', type: 'main', mode: 'exclusive', dependsOn: ['outer'], operations: [] },
       ],
     };
     const result = flattenFlowPhases(parent, grandchildLoader, 1, 5);
@@ -242,7 +243,7 @@ describe('flattenFlowPhases — name conflict', () => {
       name: 'test',
       phases: [
         { id: 'skill-ops', type: 'flow', mode: 'exclusive', use: 'skill-create', dependsOn: [] },
-        { id: 'skill-ops/scope-confirm', type: 'main', mode: 'exclusive', dependsOn: [] },
+        { id: 'skill-ops/scope-confirm', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
       ],
     };
     expect(() => flattenFlowPhases(parent, staticLoader, 1, 5)).toThrow();
@@ -278,15 +279,17 @@ describe('flattenFlowPhases — graph not found', () => {
 function skillDeleteGraph(): Taskflow {
   return {
     name: 'skill-delete',
-    version: 1,
+
     phases: [
-      { id: 'skill-select', type: 'main', mode: 'exclusive', dependsOn: [], task: 'select skill' },
+      { id: 'skill-select', type: 'main', mode: 'exclusive', dependsOn: [], task: 'select skill', operations: [] },
       {
         id: 'impact-analysis',
         type: 'main',
         mode: 'exclusive',
         dependsOn: ['skill-select'],
         task: 'analyze impact',
+
+        operations: [],
       },
       {
         id: 'delete-confirm',
@@ -294,6 +297,8 @@ function skillDeleteGraph(): Taskflow {
         mode: 'exclusive',
         dependsOn: ['impact-analysis'],
         task: 'confirm delete',
+
+        operations: [],
       },
       {
         id: 'skill-delete-execute',
@@ -301,6 +306,8 @@ function skillDeleteGraph(): Taskflow {
         mode: 'exclusive',
         dependsOn: ['delete-confirm'],
         task: 'execute delete',
+
+        operations: [],
       },
       {
         id: 'delete-review',
@@ -308,6 +315,8 @@ function skillDeleteGraph(): Taskflow {
         mode: 'exclusive',
         dependsOn: ['skill-delete-execute'],
         task: 'review',
+
+        operations: [],
       },
       { id: 'delete-accept', type: 'approval', mode: 'exclusive', dependsOn: ['delete-review'] },
     ],
@@ -317,11 +326,25 @@ function skillDeleteGraph(): Taskflow {
 function docSyncGraph(): Taskflow {
   return {
     name: 'doc-sync',
-    version: 1,
+
     phases: [
-      { id: 'doc-trigger', type: 'main', mode: 'exclusive', dependsOn: [], task: 'classify trigger' },
-      { id: 'doc-maintain', type: 'main', mode: 'exclusive', dependsOn: ['doc-trigger'], task: 'maintain' },
-      { id: 'doc-review', type: 'main', mode: 'exclusive', dependsOn: ['doc-maintain'], task: 'review' },
+      { id: 'doc-trigger', type: 'main', mode: 'exclusive', dependsOn: [], task: 'classify trigger', operations: [] },
+      {
+        id: 'doc-maintain',
+        type: 'main',
+        mode: 'exclusive',
+        dependsOn: ['doc-trigger'],
+        task: 'maintain',
+        operations: [],
+      },
+      {
+        id: 'doc-review',
+        type: 'main',
+        mode: 'exclusive',
+        dependsOn: ['doc-maintain'],
+        task: 'review',
+        operations: [],
+      },
       { id: 'doc-accept', type: 'approval', mode: 'exclusive', dependsOn: ['doc-review'] },
     ],
   };
@@ -336,16 +359,15 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
   it('flattens multiple flow phases with correct prefix and terminal rewiring', () => {
     const parent: Taskflow = {
       name: 'skill-change-workflow',
-      version: 1,
+
       phases: [
-        { id: 'plan-scope', type: 'main', mode: 'exclusive', dependsOn: [], task: 'plan scope' },
+        { id: 'plan-scope', type: 'main', mode: 'exclusive', dependsOn: [], task: 'plan scope', operations: [] },
         { id: 'plan-accept', type: 'approval', mode: 'exclusive', dependsOn: ['plan-scope'] },
         {
           id: 'skill-delete-foo',
           type: 'flow',
           mode: 'exclusive',
           use: 'skill-delete',
-          with: { skillName: 'example' },
           dependsOn: ['plan-accept'],
         },
         {
@@ -353,7 +375,6 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
           type: 'flow',
           mode: 'exclusive',
           use: 'doc-sync',
-          with: { docs: ['CONTEXT.md'] },
           dependsOn: ['plan-accept'],
         },
         {
@@ -362,6 +383,8 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
           mode: 'exclusive',
           skill: 'code-review',
           dependsOn: ['skill-delete-foo', 'doc-sync'],
+
+          operations: [],
         },
         { id: 'change-accept', type: 'approval', mode: 'exclusive', dependsOn: ['cross-review'] },
       ],
@@ -395,21 +418,20 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
     // change-accept preserved
     expect(ids).toContain('change-accept');
   });
-  it('injects with: args statically on flow phase (preserved as metadata)', () => {
+  it('flattens a flow with static metadata on the flow phase', () => {
     const parent: Taskflow = {
       name: 'orchestrated',
-      version: 1,
+
       phases: [
-        { id: 'plan', type: 'main', mode: 'exclusive', dependsOn: [], task: 'plan' },
+        { id: 'plan', type: 'main', mode: 'exclusive', dependsOn: [], task: 'plan', operations: [] },
         {
           id: 'skill-ops',
           type: 'flow',
           mode: 'exclusive',
           use: 'skill-delete',
-          with: { skillName: 'foo', dryRun: true },
           dependsOn: ['plan'],
         },
-        { id: 'done', type: 'main', mode: 'exclusive', dependsOn: ['skill-ops'] },
+        { id: 'done', type: 'main', mode: 'exclusive', dependsOn: ['skill-ops'], operations: [] },
       ],
     };
     const result = flattenFlowPhases(parent, orchestrationLoader, 1, 5);
@@ -429,9 +451,9 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
   it('child dependsOn rewired with prefix inside child graph', () => {
     const parent: Taskflow = {
       name: 'orchestrated',
-      version: 1,
+
       phases: [
-        { id: 'plan', type: 'main', mode: 'exclusive', dependsOn: [], task: 'plan' },
+        { id: 'plan', type: 'main', mode: 'exclusive', dependsOn: [], task: 'plan', operations: [] },
         { id: 'ops', type: 'flow', mode: 'exclusive', use: 'skill-delete', dependsOn: ['plan'] },
       ],
     };
@@ -445,7 +467,7 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
   it('preserves non-flow phase properties through flatten', () => {
     const parent: Taskflow = {
       name: 'orchestrated',
-      version: 1,
+
       phases: [
         {
           id: 'plan',
@@ -454,6 +476,8 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
           dependsOn: [],
           task: 'plan work',
           channels: ['atom-kernel'],
+
+          operations: [],
         },
         { id: 'ops', type: 'flow', mode: 'exclusive', use: 'skill-delete', dependsOn: ['plan'] },
         {
@@ -464,6 +488,8 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
           dependsOn: ['ops'],
           task: 'cross review',
           channels: ['code-review'],
+
+          operations: [],
         },
       ],
     };
@@ -481,8 +507,8 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
     const parent: Taskflow = {
       name: 'topo-test',
       phases: [
-        { id: 'plan', type: 'main', mode: 'exclusive', dependsOn: [], task: 'plan' },
-        { id: 'verify', type: 'main', mode: 'exclusive', dependsOn: ['plan'], task: 'verify' },
+        { id: 'plan', type: 'main', mode: 'exclusive', dependsOn: [], task: 'plan', operations: [] },
+        { id: 'verify', type: 'main', mode: 'exclusive', dependsOn: ['plan'], task: 'verify', operations: [] },
         { id: 'ops', type: 'flow', mode: 'exclusive', use: 'skill-delete', dependsOn: ['plan', 'verify'] },
       ],
     };
@@ -498,8 +524,8 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
     const childWithTemplate: Taskflow = {
       name: 'template-test',
       phases: [
-        { id: 'step1', type: 'main', mode: 'exclusive', dependsOn: [], task: 'do the work' },
-        { id: 'step2', type: 'main', mode: 'exclusive', dependsOn: ['step1'], task: 'finish' },
+        { id: 'step1', type: 'main', mode: 'exclusive', dependsOn: [], task: 'do the work', operations: [] },
+        { id: 'step2', type: 'main', mode: 'exclusive', dependsOn: ['step1'], task: 'finish', operations: [] },
       ],
     };
     const loader = (name: string): Taskflow | null => {
@@ -509,7 +535,7 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
     const parent: Taskflow = {
       name: 'with-test',
       phases: [
-        { id: 'plan', type: 'main', mode: 'exclusive', dependsOn: [], task: 'plan' },
+        { id: 'plan', type: 'main', mode: 'exclusive', dependsOn: [], task: 'plan', operations: [] },
         { id: 'ops', type: 'flow', mode: 'exclusive', use: 'template-test', dependsOn: ['plan'] },
       ],
     };
@@ -530,6 +556,8 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
           dependsOn: [],
           task: 'load',
           channels: ['atom-kernel'],
+
+          operations: [],
         },
       ],
     };
@@ -559,13 +587,15 @@ describe('flattenFlowPhases — node: channel prefixing', () => {
     const child: Taskflow = {
       name: 'sub-graph',
       phases: [
-        { id: 'writer', type: 'main', mode: 'exclusive', dependsOn: [], channels: [] },
+        { id: 'writer', type: 'main', mode: 'exclusive', dependsOn: [], channels: [], operations: [] },
         {
           id: 'reader',
           type: 'main',
           mode: 'exclusive',
           dependsOn: ['writer'],
           channels: ['node:writer'],
+
+          operations: [],
         },
       ],
     };
@@ -573,7 +603,7 @@ describe('flattenFlowPhases — node: channel prefixing', () => {
     const parent: Taskflow = {
       name: 'parent',
       phases: [
-        { id: 'seed', type: 'main', mode: 'exclusive', dependsOn: [] },
+        { id: 'seed', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
         { id: 'ops', type: 'flow', mode: 'exclusive', use: 'sub-graph', dependsOn: ['seed'] },
       ],
     };
@@ -584,13 +614,15 @@ describe('flattenFlowPhases — node: channel prefixing', () => {
   it('keeps node: channel targets pointing at parent-level nodes unprefixed', () => {
     const child: Taskflow = {
       name: 'sub-graph',
-      phases: [{ id: 'writer', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['node:seed'] }],
+      phases: [
+        { id: 'writer', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['node:seed'], operations: [] },
+      ],
     };
     const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
     const parent: Taskflow = {
       name: 'parent',
       phases: [
-        { id: 'seed', type: 'main', mode: 'exclusive', dependsOn: [] },
+        { id: 'seed', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
         { id: 'ops', type: 'flow', mode: 'exclusive', use: 'sub-graph', dependsOn: [] },
       ],
     };
@@ -605,9 +637,9 @@ describe('flattenFlowPhases — flow channels rejected (no input interface)', ()
     const child: Taskflow = {
       name: 'sub-graph',
       phases: [
-        { id: 'a', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['./CONTEXT.md'] },
-        { id: 'b', type: 'main', mode: 'exclusive', dependsOn: [], channels: [] },
-        { id: 'c', type: 'main', mode: 'exclusive', dependsOn: ['a'] },
+        { id: 'a', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['./CONTEXT.md'], operations: [] },
+        { id: 'b', type: 'main', mode: 'exclusive', dependsOn: [], channels: [], operations: [] },
+        { id: 'c', type: 'main', mode: 'exclusive', dependsOn: ['a'], operations: [] },
       ],
     };
     const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
@@ -637,13 +669,15 @@ describe('flattenFlowPhases — flow channels rejected (no input interface)', ()
   it('flow without channels — child behavior unchanged', () => {
     const child: Taskflow = {
       name: 'sub-graph',
-      phases: [{ id: 'entry', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['node:seed'] }],
+      phases: [
+        { id: 'entry', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['node:seed'], operations: [] },
+      ],
     };
     const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
     const parent: Taskflow = {
       name: 'parent',
       phases: [
-        { id: 'seed', type: 'main', mode: 'exclusive', dependsOn: [] },
+        { id: 'seed', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
         { id: 'ops', type: 'flow', mode: 'exclusive', use: 'sub-graph', dependsOn: [] },
       ],
     };
@@ -655,7 +689,16 @@ describe('flattenFlowPhases — flow channels rejected (no input interface)', ()
   it('child node: channel to non-child id stays unprefixed — cross-flow read edge (spec-extract pattern)', () => {
     const child: Taskflow = {
       name: 'sub-graph',
-      phases: [{ id: 'entry', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['node:adopt/spec-propose'] }],
+      phases: [
+        {
+          id: 'entry',
+          type: 'main',
+          mode: 'exclusive',
+          dependsOn: [],
+          channels: ['node:adopt/spec-propose'],
+          operations: [],
+        },
+      ],
     };
     const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
     const parent: Taskflow = {
@@ -671,7 +714,7 @@ describe('flattenFlowPhases — flow channels rejected (no input interface)', ()
         : name === 'other-graph'
           ? ({
               name: 'other-graph',
-              phases: [{ id: 'spec-propose', type: 'main', mode: 'exclusive', dependsOn: [] }],
+              phases: [{ id: 'spec-propose', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] }],
             } as Taskflow)
           : null;
     const result = flattenFlowPhases(parent, loader2, 1, 5);
@@ -684,8 +727,8 @@ describe('flattenFlowPhases — flow channels rejected (no input interface)', ()
     const child: Taskflow = {
       name: 'sub-graph',
       phases: [
-        { id: 'entry', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['node:sibling'] },
-        { id: 'sibling', type: 'main', mode: 'exclusive', dependsOn: [] },
+        { id: 'entry', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['node:sibling'], operations: [] },
+        { id: 'sibling', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
       ],
     };
     const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
@@ -706,9 +749,9 @@ describe('flattenFlowPhases — child graph-level context inheritance', () => {
       name: 'sub-graph',
       context: ['./CONTEXT.md', 'skill:atom-graph-spec'],
       phases: [
-        { id: 'a', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['node:x'] },
-        { id: 'b', type: 'main', mode: 'exclusive', dependsOn: [], channels: [] },
-        { id: 'c', type: 'main', mode: 'exclusive', dependsOn: ['a'] },
+        { id: 'a', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['node:x'], operations: [] },
+        { id: 'b', type: 'main', mode: 'exclusive', dependsOn: [], channels: [], operations: [] },
+        { id: 'c', type: 'main', mode: 'exclusive', dependsOn: ['a'], operations: [] },
       ],
     };
     const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
@@ -731,7 +774,16 @@ describe('flattenFlowPhases — child graph-level context inheritance', () => {
     const child: Taskflow = {
       name: 'sub-graph',
       context: ['./CONTEXT.md'],
-      phases: [{ id: 'entry', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['./CONTEXT.md', 'node:own'] }],
+      phases: [
+        {
+          id: 'entry',
+          type: 'main',
+          mode: 'exclusive',
+          dependsOn: [],
+          channels: ['./CONTEXT.md', 'node:own'],
+          operations: [],
+        },
+      ],
     };
     const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
     const parent: Taskflow = {
@@ -748,7 +800,7 @@ describe('flattenFlowPhases — child graph-level context inheritance', () => {
     const child: Taskflow = {
       name: 'sub-graph',
       context: ['node:sibling'],
-      phases: [{ id: 'sibling', type: 'main', mode: 'exclusive', dependsOn: [] }],
+      phases: [{ id: 'sibling', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] }],
     };
     const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
     const parent: Taskflow = {
@@ -764,7 +816,7 @@ describe('flattenFlowPhases — child graph-level context inheritance', () => {
     const child: Taskflow = {
       name: 'sub-graph',
       context: ['atom-graph-spec'],
-      phases: [{ id: 'sibling', type: 'main', mode: 'exclusive', dependsOn: [] }],
+      phases: [{ id: 'sibling', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] }],
     };
     const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
     const parent: Taskflow = {
@@ -817,7 +869,7 @@ describe('flattenFlowPhases — parent routing/eval target remap', () => {
     const child = (): Taskflow => ({
       name: 'child',
       phases: [
-        { id: 'write', type: 'main', mode: 'exclusive', task: 'x', dependsOn: [] },
+        { id: 'write', type: 'main', mode: 'exclusive', task: 'x', dependsOn: [], operations: [] },
         {
           id: 'gate',
           type: 'gate',
@@ -834,7 +886,7 @@ describe('flattenFlowPhases — parent routing/eval target remap', () => {
     const parent: Taskflow = {
       name: 'test',
       phases: [
-        { id: 'parent-node', type: 'main', mode: 'exclusive', dependsOn: [] },
+        { id: 'parent-node', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
         { id: 'ops', type: 'flow', mode: 'exclusive', use: 'child', dependsOn: [] },
       ],
     };
@@ -857,7 +909,7 @@ describe('flattenFlowPhases — parent routing/eval target remap', () => {
     const child = (): Taskflow => ({
       name: 'child',
       phases: [
-        { id: 'write', type: 'main', mode: 'exclusive', task: 'x', dependsOn: [] },
+        { id: 'write', type: 'main', mode: 'exclusive', task: 'x', dependsOn: [], operations: [] },
         {
           id: 'gate',
           type: 'approval',
@@ -942,8 +994,8 @@ describe('flattenFlowPhases — entry-rooted flow branch prefixing and loop targ
     return {
       name: 'pipeline',
       phases: [
-        { id: 'grill', type: 'main', mode: 'exclusive', task: 'grill', dependsOn: [] },
-        { id: 'create', type: 'main', mode: 'exclusive', task: 'create', dependsOn: ['grill'] },
+        { id: 'grill', type: 'main', mode: 'exclusive', task: 'grill', dependsOn: [], operations: [] },
+        { id: 'create', type: 'main', mode: 'exclusive', task: 'create', dependsOn: ['grill'], operations: [] },
         {
           id: 'accept',
           type: 'gate',
@@ -962,10 +1014,10 @@ describe('flattenFlowPhases — entry-rooted flow branch prefixing and loop targ
     const parent: Taskflow = {
       name: 'loop',
       phases: [
-        { id: 'review', type: 'main', mode: 'exclusive', dependsOn: [] },
+        { id: 'review', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
         { id: 'review-accept', type: 'approval', mode: 'exclusive', dependsOn: ['review'] },
         { id: 'implement', type: 'flow', mode: 'exclusive', use: 'pipeline', dependsOn: [] },
-        { id: 'verify', type: 'main', mode: 'exclusive', dependsOn: ['implement'] },
+        { id: 'verify', type: 'main', mode: 'exclusive', dependsOn: ['implement'], operations: [] },
       ],
     };
     const result = flattenFlowPhases(parent, loopLoader, 1, 5);
@@ -994,10 +1046,10 @@ describe('flattenFlowPhases — entry-rooted flow branch prefixing and loop targ
     const parent: Taskflow = {
       name: 'loop',
       phases: [
-        { id: 'review', type: 'main', mode: 'exclusive', dependsOn: [] },
+        { id: 'review', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
         { id: 'review-accept', type: 'approval', mode: 'exclusive', dependsOn: ['review'] },
         { id: 'implement', type: 'flow', mode: 'exclusive', use: 'pipeline', dependsOn: [] },
-        { id: 'verify', type: 'main', mode: 'exclusive', dependsOn: ['implement'] },
+        { id: 'verify', type: 'main', mode: 'exclusive', dependsOn: ['implement'], operations: [] },
         {
           id: 'loop-accept',
           type: 'approval',

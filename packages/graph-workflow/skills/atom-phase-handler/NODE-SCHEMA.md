@@ -8,12 +8,13 @@
 |-|-|-|-|
 |`nodeId`|string|yes|Phase node identifier|
 |`type`|string|yes|Phase type - determines dispatch routing: `main`, `approval`, `gate`|
-|`handlerSkill`|string|yes|Handler skill name - the named handler skill for {node, snapshot?} dispatch|
 |`skill`|string?|all|Execution skill - phase `skill` field; the skill that executes this phase's work (main type)|
 |`agent`|string[]?|main|Agent hints - priority-ordered sub-agent type preferences. Advisory: consumed by skills when they dispatch sub-agents (first available wins, fallback platform default). Arrives as `## Agent hints:` block.|
-|`operations`|string[]?|main|Operation classes - phase `operations:` declaration (HLT closed set). Union with the skill's `Operation classes` default feeds SKILL.md §Registry Injection + class-based verification.|
+|`operations`|string[]?|main|Operation classes - phase `operations:` declaration (HLT closed set, 10 classes). Union with the skill's `Operation classes` default feeds SKILL.md §Registry Injection + class-based verification.|
 |`retryCount`|number|yes|Current retry count, 0-based - the node's own jump re-execution count (never zeroed). Gate jump bounds reference the TARGET node's `retryCount` from the snapshot (single counter - atom-graph-spec §Gate Jump Conditions).|
 |`dependsOn`|string[]?|all|Upstream node IDs - scheduling only (topological order, JUMP closure, join resolution). Direct dependsOn outputs arrive as context for ALL types (main parity - gate/approval judgment context included)|
+
+The dispatch handler skill is the constant `atom-phase-handler` for main/approval/gate - agent-side knowledge, never carried in the payload (no `handlerSkill` NodeDetail field). Run mode + constraints are NOT NodeDetail fields - they arrive at activation (graph_start `args.mode`; pilot-loaded constraints) as session facts.
 
 ## Type-Specific Fields
 
@@ -62,13 +63,13 @@ Field list + JSON shapes + card-selection mapping: see atom-kernel APPROVAL-CARD
 |`runId`|string|Graph run unique identifier|
 |`graphName`|string|Graph name|
 |`fsmState`|string|FSM state - `idle`, `running`, `completed`, `terminated`|
-|`status`|string|Alias of `fsmState` - spec-compliant run status field (graph-mcp-api)|
 |`currentPhaseId`|string \| null|Currently active phase node ID - `null` when none|
 |`nodeCount`|number|Total node count|
 |`completedCount`|number|Completed node count|
 |`createdAt`|string|ISO 8601 run creation timestamp|
 |`updatedAt`|string|ISO 8601 update timestamp|
-|`nodes`|ISnapshotNode[]|Per-node states `{nodeId, status, retryCount, startedAt, completedAt, durationMs}` - jump-target enumeration data source (M2). Node status values: `pending` \| `active` \| `done` \| `aborted` - runtime FSM produced set; `completed` is a run-level fsmState, NOT a node status. Unselected route members and pass-through targets stay `pending` (never activated).|
+|`nodes`|one-line rows|Per-node one-line states `{nodeId, status, retryCount}` - jump-target enumeration data source (M2) + progress display. Node status values: `pending` \| `active` \| `done` \| `aborted` - runtime FSM produced set; `completed` is a run-level fsmState, NOT a node status. Unselected route members and pass-through targets stay `pending` (never activated).|
+|`changed`|ISnapshotNode[]?|Delta rows - full-field states `{nodeId, status, retryCount, startedAt, completedAt, durationMs}` for nodes whose state changed since the last dispatch (per-run signature cursor). Present on dispatch responses; absent when nothing changed or on pure status queries.|
 
 ## fsmState Logic
 

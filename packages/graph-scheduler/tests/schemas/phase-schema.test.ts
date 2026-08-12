@@ -23,6 +23,8 @@ describe('PhaseSchema — happy path', () => {
       agent: ['reviewer', 'task'],
       skill: 'my-agent',
       task: 'Run analysis task',
+
+      operations: [],
     };
 
     const result = PhaseSchema.safeParse(raw);
@@ -44,6 +46,8 @@ describe('PhaseSchema — happy path', () => {
       type: 'main',
       skill: 'skill://my-agent',
       task: 'Run analysis task',
+
+      operations: [],
     };
 
     const result = PhaseSchema.safeParse(raw);
@@ -73,7 +77,7 @@ describe('PhaseSchema — happy path', () => {
   });
 
   it('parses minimal phase — only id + type', () => {
-    const raw = { id: 'step-1', type: 'main' };
+    const raw = { id: 'step-1', type: 'main', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -108,25 +112,25 @@ describe('PhaseSchema — invalid input', () => {
   });
 
   it('rejects missing id', () => {
-    const raw = { type: 'main' };
+    const raw = { type: 'main', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
   });
 
   it('rejects id that is not a string', () => {
-    const raw = { id: null, type: 'main' };
+    const raw = { id: null, type: 'main', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
   });
 
   it('rejects dependsOn that is not an array', () => {
-    const raw = { id: 'p1', type: 'main', dependsOn: 'phase-0' };
+    const raw = { id: 'p1', type: 'main', dependsOn: 'phase-0', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
   });
 
   it('rejects dependsOn containing non-string elements', () => {
-    const raw = { id: 'p1', type: 'main', dependsOn: ['valid', 42] };
+    const raw = { id: 'p1', type: 'main', dependsOn: ['valid', 42], operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
   });
@@ -147,7 +151,7 @@ describe('PhaseSchema — invalid input', () => {
 
 describe('PhaseSchema — removed fields stripped silently', () => {
   it('strips retry — no retry config surface', () => {
-    const raw = { id: 'p1', type: 'main', task: 'x', retry: { max: 3 } };
+    const raw = { id: 'p1', type: 'main', task: 'x', retry: { max: 3 }, operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -165,7 +169,7 @@ describe('PhaseSchema — removed fields stripped silently', () => {
   });
 
   it('strips legacy context field', () => {
-    const raw = { id: 'p1', type: 'main', task: 'x', context: ['legacy'] };
+    const raw = { id: 'p1', type: 'main', task: 'x', context: ['legacy'], operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -204,7 +208,7 @@ describe('PhaseSchema — removed fields stripped silently', () => {
 
 describe('PhaseSchema — type semantics', () => {
   it('rejects preText on main type', () => {
-    const raw = { id: 'p1', type: 'main', task: 'x', preText: 'card text' };
+    const raw = { id: 'p1', type: 'main', task: 'x', preText: 'card text', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
   });
@@ -248,6 +252,8 @@ describe('PhaseSchema — type semantics', () => {
       type: 'main',
       task: 'x',
       eval: [{ when: 'x', action: 'retry', target: 'w' }],
+
+      operations: [],
     };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
@@ -344,7 +350,7 @@ describe('PhaseSchema — type semantics', () => {
 
 describe('PhaseSchema — boundary', () => {
   it('allows empty dependsOn array', () => {
-    const raw = { id: 'p1', type: 'main', dependsOn: [] };
+    const raw = { id: 'p1', type: 'main', dependsOn: [], operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -353,7 +359,7 @@ describe('PhaseSchema — boundary', () => {
   });
 
   it('allows absent skill field', () => {
-    const raw = { id: 'p1', type: 'main' };
+    const raw = { id: 'p1', type: 'main', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -363,7 +369,7 @@ describe('PhaseSchema — boundary', () => {
 
   it('allows empty string id', () => {
     // zod string() allows empty strings by default — no min(1) constraint
-    const raw = { id: '', type: 'main' };
+    const raw = { id: '', type: 'main', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
   });
@@ -375,7 +381,7 @@ describe('PhaseSchema — boundary', () => {
 
 describe('PhaseSchema — join mode (presence means any)', () => {
   it('rejects explicit join: "all" — redundant default (presence means any)', () => {
-    const raw = { id: 'p1', type: 'main', join: 'all' };
+    const raw = { id: 'p1', type: 'main', join: 'all', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
     const issue = result.error!.issues.find((i) => i.path.join('.') === 'join');
@@ -383,7 +389,7 @@ describe('PhaseSchema — join mode (presence means any)', () => {
   });
 
   it('parses join: "any"', () => {
-    const raw = { id: 'p1', type: 'main', join: 'any' };
+    const raw = { id: 'p1', type: 'main', join: 'any', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -392,7 +398,7 @@ describe('PhaseSchema — join mode (presence means any)', () => {
   });
 
   it('join absent stays undefined — consumption defaults to all (topology)', () => {
-    const raw = { id: 'p1', type: 'main' };
+    const raw = { id: 'p1', type: 'main', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -401,13 +407,13 @@ describe('PhaseSchema — join mode (presence means any)', () => {
   });
 
   it('rejects invalid join value', () => {
-    const raw = { id: 'p1', type: 'main', join: 'none' };
+    const raw = { id: 'p1', type: 'main', join: 'none', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
   });
 
   it('rejects join that is not a string', () => {
-    const raw = { id: 'p1', type: 'main', join: 42 };
+    const raw = { id: 'p1', type: 'main', join: 42, operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
   });
@@ -415,7 +421,7 @@ describe('PhaseSchema — join mode (presence means any)', () => {
 
 describe('PhaseSchema — when guard removed (route-first redesign)', () => {
   it('rejects when with migration hint — conditional behavior expresses via gate jumps', () => {
-    const raw = { id: 'p1', type: 'main', when: 'upstream output indicates skip' };
+    const raw = { id: 'p1', type: 'main', when: 'upstream output indicates skip', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
     const issue = result.error!.issues.find((i) => i.path.join('.') === 'when');
@@ -426,7 +432,7 @@ describe('PhaseSchema — when guard removed (route-first redesign)', () => {
   });
 
   it('allows absent when field', () => {
-    const raw = { id: 'p1', type: 'main' };
+    const raw = { id: 'p1', type: 'main', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -443,24 +449,24 @@ describe('PhaseSchema — when guard removed (route-first redesign)', () => {
 });
 
 describe('PhaseSchema — constraints/runMode removed fields, loud rejection', () => {
-  it('rejects constraints with migration hint — project constraints load via $load-constraints', () => {
-    const raw = { id: 'p1', type: 'main', constraints: ['no git operations'] };
+  it('rejects constraints with migration hint — constraints load at activation (pilot)', () => {
+    const raw = { id: 'p1', type: 'main', constraints: ['no git operations'], operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
     const issue = result.error!.issues.find((i) => i.path.join('.') === 'constraints');
     expect(issue).toBeDefined();
     expect(issue!.message).toContain("'constraints' is removed");
-    expect(issue!.message).toContain('$load-constraints');
+    expect(issue!.message).toContain('activation');
   });
 
-  it('rejects runMode with migration hint — run mode is decided by $run-mode-confirm', () => {
-    const raw = { id: 'p1', type: 'main', runMode: 'auto' };
+  it('rejects runMode with migration hint — run mode passes via graph_start args.mode', () => {
+    const raw = { id: 'p1', type: 'main', runMode: 'auto', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
     const issue = result.error!.issues.find((i) => i.path.join('.') === 'runMode');
     expect(issue).toBeDefined();
     expect(issue!.message).toContain("'runMode' is removed");
-    expect(issue!.message).toContain('$run-mode-confirm');
+    expect(issue!.message).toContain('args.mode');
   });
 
   it('rejects both fields on any type — loud rejection, never silent strip', () => {
@@ -480,7 +486,7 @@ describe('PhaseSchema — constraints/runMode removed fields, loud rejection', (
   });
 
   it('allows absent constraints/runMode fields', () => {
-    const raw = { id: 'p1', type: 'main' };
+    const raw = { id: 'p1', type: 'main', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -491,32 +497,15 @@ describe('PhaseSchema — constraints/runMode removed fields, loud rejection', (
 });
 
 describe('PhaseSchema — activation prologue reserved ids', () => {
-  it('accepts $run-mode-confirm and $load-constraints declarations (override)', () => {
-    for (const id of ['$run-mode-confirm', '$load-constraints']) {
-      const raw = { id, type: 'main', task: 'custom protocol' };
-      const result = PhaseSchema.safeParse(raw);
-      expect(result.success, `${id} should be declarable`).toBe(true);
-    }
-  });
-
-  it('rejects any other $-prefixed id — reserved prefix', () => {
-    for (const id of ['$lang-confirm', '$foo', '$run-mode-confirm-extra']) {
-      const raw = { id, type: 'main', task: 'x' };
+  it('rejects ALL $-prefixed ids — the activation prologue was removed', () => {
+    for (const id of ['$run-mode-confirm', '$load-constraints', '$lang-confirm', '$foo', '$run-mode-confirm-extra']) {
+      const raw = { id, type: 'main', task: 'x', operations: [] };
       const result = PhaseSchema.safeParse(raw);
       expect(result.success, `${id} should be rejected`).toBe(false);
       const issue = result.error!.issues.find((i) => i.path.join('.') === 'id');
       expect(issue).toBeDefined();
       expect(issue!.message).toContain("'$' prefix is reserved");
     }
-  });
-
-  it('rejects reserved-id declarations with upstream dependencies — must be entry phases', () => {
-    const raw = { id: '$load-constraints', type: 'main', dependsOn: ['other'], task: 'x' };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-    const issue = result.error!.issues.find((i) => i.path.join('.') === 'dependsOn');
-    expect(issue).toBeDefined();
-    expect(issue!.message).toContain('entry phases');
   });
 });
 
@@ -541,7 +530,7 @@ describe('PhaseSchema — flow phase type', () => {
   });
 
   it('accepts non-flow types without use (backward compat)', () => {
-    const raw = { id: 'agent-1', type: 'main', task: 'do it', dependsOn: [] };
+    const raw = { id: 'agent-1', type: 'main', task: 'do it', dependsOn: [], operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
   });
@@ -756,12 +745,20 @@ describe('PhaseSchema — HLT operations declaration', () => {
     }
   });
 
-  it('omits operations when absent — skill default applies', () => {
+  it('rejects a main phase without operations — mandatory declaration (phase-aware enforcement allowed-set)', () => {
     const raw = { id: 'step-1', type: 'main' };
     const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.operations).toBeUndefined();
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'operations');
+      expect(issue).toBeDefined();
+      expect(issue?.message).toContain("main phase must declare 'operations'");
     }
+  });
+
+  it('accepts an empty operations array on a main phase — conversation-only', () => {
+    const raw = { id: 'scope-entry', type: 'main', operations: [] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(true);
   });
 });

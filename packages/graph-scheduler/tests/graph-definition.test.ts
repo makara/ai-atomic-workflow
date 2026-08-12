@@ -24,10 +24,12 @@ description: A test graph
 phases:
   - id: agent-init
     type: main
+    operations: []
     task: |
       Initialize {args.mode}
   - id: agent-verify
     type: main
+    operations: []
     task: |
       Verify {steps.agent-init.output}
     dependsOn:

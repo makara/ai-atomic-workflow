@@ -53,7 +53,7 @@ Semantics + schema rejection: see ROUTING.md §Join Mode Rules (single home).
 - **Gate jumps** - `jumps: [{when, to}]`: natural-language rework conditions, first match wins; hit = backward jump resetting target + downstream terminals. Detail: see ROUTING.md §Gate Jump Conditions, §Jump Semantics.
 - **Approval routing** - default card + `routing` actions semantics: see ROUTING.md §Approval Decision Confirmation (single home).
 - **Channels** - phase-level `channels:` context additions; `node:<id>` = read edge to a non-`dependsOn` stream; graph `context:` = global channel. Detail: see PHASESCHEMA.md §YAML channels Field.
-- **Run Mode** - per-activation auto-approve convention (auto executes AI recommendation; manual/absent -> card; interviews never gated): see §Activation Prologue (single site).
+- **Run Mode** - per-activation auto-approve convention (auto executes AI recommendation; manual/absent -> card; interviews never gated): see §Activation (single site).
 
 ---
 
@@ -111,24 +111,20 @@ Skill-side contract rules - single definition site (atom-skill-spec points here)
 
 ---
 
-# Activation Prologue
+# Activation
 
-Activation prefix (P) = graph-level abstract-node mechanism carrying user-layer facts (run mode, constraints) as agent-executed nodes, not backend fields. Two reserved-id built-ins, synthesized at load, executed before every round:
+Activation facts (run mode, constraints) live at the invocation boundary — never as graph nodes. Two facts, loaded per activation:
 
-|Node|Reserved id|Behavior (built-in default)|
+|Fact|Source|Behavior|
 |-|-|-|
-|Constraints load|`$load-constraints`|Compiled-artifact protocol - `.graph-scheduler/constraints.json` exists -> emit its `constraints` array verbatim (fast path, zero markdown I/O); missing -> caveman-compile `.graph-scheduler/constraints.md` `## Rules` into the artifact (`compiled_at` audit metadata) and emit. Existence = validity; deletion = reset; invalid JSON -> recompile. Output JSON `{"constraints": [...]}`.|
-|Run mode confirm|`$run-mode-confirm`|Emit `args.mode` when set (`{args.mode}` interpolation); otherwise presents the approval() card (no mode block exists yet -> manual branch; Manual recommended - absence NEVER auto). Output JSON `{"mode": "manual"\|"auto"}`. Re-decides EVERY activation - round restarts re-ask (no echo).|
-
-Synthesis order is load-first: `$load-constraints` dispatches before `$run-mode-confirm`, so the confirm decision card carries the `## Constraints` block.
+|Constraints load|pilot startup|Compiled-artifact protocol - `.graph-scheduler/constraints.json` exists -> emit its `constraints` array verbatim (fast path, zero markdown I/O); missing -> caveman-compile `.graph-scheduler/constraints.md` `## Rules` into the artifact (`compiled_at` audit metadata) and emit. Existence = validity; deletion = reset; invalid JSON -> recompile. Session fact `{"constraints": [...]}`.|
+|Run mode|`graph_start` `args.mode`|`manual` \| `auto`, REQUIRED at invocation — absent -> `MODE_REQUIRED` response, no run created. The pilot asks the user before starting when no flag was passed (Manual recommended - absence NEVER auto). Session fact `{"mode": "manual"\|"auto"}`. Re-decided EVERY activation.|
 
 Mechanics:
 
-- **Synthesis** - P is NOT part of the author DAG: excluded from topology, contract checks, and jump-closure math. `$load-constraints` is always synthesized and dispatches FIRST; `$run-mode-confirm` only when the flattened graph contains an approval node (approval-less graphs get no mode question).
-- **Reserved ids** - `$` prefix is reserved for the two prologue built-ins. Declaring the same id in YAML REPLACES the built-in (custom constraints source, forced-auto CI graph, disabled confirm); any other `$` id and any non-entry reserved declaration are schema-rejected.
-- **Activation rule** - P runs at run start AND on every backward reset (gate branchTo or graph_jump) whose target is an entry node (flattened in-degree 0): round restart re-runs the prefix (constraints re-emitted, mode re-confirmed). Mid-graph rework never touches P.
-- **Gating** - while any P node is not terminal, ONLY P nodes are eligible; author nodes dispatch after the prefix completes. P nodes are run members (snapshot `nodes` visible).
-- **Consumption** - handler reads P output files per dispatch, formats `## Run Mode:` / `## Constraints:` blocks (main/approval/gate alike). Missing/corrupt P output -> degrade (manual mode, empty constraints) + warning - never blocks.
-- Flow composition needs no plumbing - nested graphs share the run activation; confirm output applies at any nesting depth.
-- Graphs SHALL NOT declare a mode topic in entry task texts - the mode question lives in the built-in confirm node.
-- The implement pipeline's grilling is a **mandatory interview** in graph dispatch (zero-question degradation disabled).
+- **No prologue nodes** - runs contain author phases only; `$`-prefixed ids are schema-rejected (the prefix is reserved; the activation prologue was removed).
+- **Activation rule** - facts are fixed per activation: a backward reset (gate branchTo or graph_jump) targeting an entry node re-runs the entry directly; mode and constraints are NOT re-asked (session facts persist for the run).
+- **Consumption** - the handler formats `## Run Mode:` / `## Constraints:` blocks from the session facts per dispatch (main/approval/gate alike). Missing facts -> degrade (manual mode, empty constraints) + warning - never blocks.
+- Flow composition needs no plumbing - nested graphs share the run activation; the mode applies at any nesting depth.
+- Graphs SHALL NOT declare a mode topic in entry task texts - the mode lives at the invocation boundary.
+- Grilling nodes in graph dispatch carry an encapsulation contract in their task text (mandatory question rounds, never zero-question, never auto-gated — the upstream grilling skill body is never modified).

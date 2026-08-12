@@ -6,7 +6,6 @@
 |-|-|-|-|
 |`name`|string|yes|Graph identifier - resolved by scheduler registry. Kebab-case.|
 |`description`|string|no|Purpose-focused free text - states what the graph does/produces (identity metadata, displayed in the pilot banner before the first node; carried by `graph_start`). Optional, non-enumerated, zero behavior branching - a description is identity for humans, never a machine-consumed directive.|
-|`version`|number|no|Schema version. Defaults to 1 - omit.|
 |`phases`|Phase[]|yes|Phase list. Declaration order cosmetic - execution order resolved exclusively by dependsOn DAG. List in dependency order for readability.|
 
 ## Phase Fields
@@ -53,11 +52,10 @@ After merge-at-load, `skill-ops` replaced by `skill-ops/scope-confirm` through `
 
 Auto-supplied fields (NEVER write in YAML):
 
-- `handlerSkill` (string) - constant `atom-phase-handler` for main/approval/gate (no registry).
 - `skill` (string) - resolved from `skill` field; the execution skill for the phase's work.
 - `retryCount` (number) - runtime counter. 0-based. The node's own jump re-execution count; gate jump bounds reference the TARGET node's `retryCount` (single counter - see §Gate Jump Conditions).
 
-Run mode and project constraints are NOT NodeDetail fields - they arrive via the activation prologue node outputs (§Activation Prologue). `constraints`/`runMode` declared in YAML -> schema rejection with migration hints.
+The dispatch handler skill is the constant `atom-phase-handler` for main/approval/gate — agent-side knowledge, never carried in the payload (no `handlerSkill` NodeDetail field). Run mode and project constraints are NOT NodeDetail fields - they arrive at activation (graph_start `args.mode`; pilot-loaded constraints, §Activation). `constraints`/`runMode` declared in YAML -> schema rejection with migration hints; `$`-prefixed ids -> schema rejection (activation prologue removed).
 
 ## Route Field (all phase types)
 
@@ -115,17 +113,17 @@ The removed `preText`/`reads` fields are rejected globally - see §Gate Type (si
 
 ## Skill-Contract Channel Derivation
 
-Phases whose work consumes a spec skill SHALL declare the executing `skill:` (e.g. graph production: spec -> `atom-graph-design`, implement -> `atom-graph-writer`); the skill's `## Context Requirements` reference tables derive the phase's spec channels (`skill:atom-graph-spec`) deterministically. Graph-level `context:` remains the ambient fallback layer (dual-track: skill contract + graph context). This is the systematic replacement for per-graph hand-declared spec channels - a phase with a declared skill keeps its task text to Directive + output contract (see §Skill Dedup Deletion Test).
+Phases whose work consumes a spec skill SHALL declare the executing `skill:` (e.g. graph production: spec -> `atom-graph-design`, implement -> `atom-graph-writer`); the agent reads the skill's `## Context Requirements` reference tables when assembling context and derives the phase's spec channels (`skill:atom-graph-spec`) from the declared `skill:` entries. Graph-level `context:` remains the ambient fallback layer. This is the systematic replacement for per-graph hand-declared spec channels - a phase with a declared skill keeps its task text to Directive + output contract (see §Skill Dedup Deletion Test). The engine never parses the contract — channel _shape_ is machine-validated, contract _content_ is agent-side knowledge.
 
 ## Constraints
 
-1. Channel entries resolve BEFORE dispatch against the entry skill contract - unresolvable entry -> phase fails (no fallback search).
+1. Channel entries are shape-validated by the engine at load (explicit prefixes, glob namespaces, run-scope); `skill:` entries pass through to the agent, which reads the skill itself.
 2. File globs truncated to reasonable size before delivery.
 3. Upstream outputs arrive as `## Upstream: <nodeId>` blocks in the sub-agent prompt.
 4. Reference skills arrive as `## Reference: <skill-name>` blocks.
 5. File contents arrive as `## File: <path>` blocks.
-6. Contract Reference skills / Files entries missing from graph channels -> CLI validate error (channel deletion is never silent).
-7. Skill `## Context Requirements` is the single source of truth - machine-parseable four-subsection lists, no `<configurable>` placeholders.
+6. Contract Reference skills / Files entries missing from graph channels -> flagged by the agent-side consistency gate (estate-maintain Contract alignment — channel deletion is never silent; the engine holds no contract machinery).
+7. Skill `## Context Requirements` is the agent-side single source of truth for context assembly — consumed when the handler reads the dispatched skill; the engine never parses it.
 
 > **Terminology**: context contract = skill `## Context Requirements`; context channels = graph `channels` field; context = `## Upstream:` / `## Reference:` / `## File:` prompt blocks assembled at dispatch.
 

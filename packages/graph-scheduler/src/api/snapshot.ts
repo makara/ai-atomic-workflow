@@ -21,9 +21,6 @@ import type { Phase } from '../schemas/index.js';
 
 import { DispatchConfigError, type NodeDetailInput } from '../types.js';
 
-/** Constant handler skill — dispatch types main/approval share it. */
-const HANDLER_SKILL = 'atom-phase-handler';
-
 /** per-node state entry in snapshots — status + retry + timing */
 export interface ISnapshotNode {
   readonly nodeId: string;
@@ -44,15 +41,22 @@ export interface IGraphSnapshot {
   readonly runId: string;
   readonly graphName: string;
   readonly fsmState: string;
-  /** alias of fsmState — spec-compliant run status field (graph-mcp-api) */
-  readonly status: string;
   readonly currentPhaseId: string | null;
   readonly nodeCount: number;
   readonly completedCount: number;
   readonly createdAt: string;
   readonly updatedAt: string;
-  /** per-node execution states — enables jump-target enumeration without graph_status */
-  readonly nodes: ReadonlyArray<ISnapshotNode>;
+  /**
+   * Per-node one-line states (`nodeId`, `status`, `retryCount`) — complete
+   * jump-target enumeration + progress display. Always present.
+   */
+  readonly nodes: ReadonlyArray<{ readonly nodeId: string; readonly status: string; readonly retryCount: number }>;
+  /**
+   * Delta rows — full-field states for nodes whose state changed since the
+   * last dispatch (per-run signature cursor). Present on dispatch responses;
+   * absent when nothing changed or on pure status queries.
+   */
+  readonly changed?: ReadonlyArray<ISnapshotNode>;
 }
 
 /** Metrics extracted from a collection of node states. */
@@ -90,15 +94,14 @@ export function aggregateNodeMetrics(
 }
 
 /**
- * Find the first active node — prologue nodes first (they dispatch before
- * author nodes at each activation), then author phases in declaration order.
+ * Find the first active node — author phases in declaration order.
  * Returns null if none.
  */
 export function findActiveNode(
   phases: Record<string, FsmNodeState>,
   graph: TaskflowGraph,
 ): { phaseId: string; nodeState: FsmNodeState } | null {
-  for (const p of [...graph.prologue, ...graph.phases]) {
+  for (const p of graph.phases) {
     const ns = phases[p.id];
     if (ns && ns.status === 'active') {
       return { phaseId: p.id, nodeState: ns };
@@ -110,20 +113,17 @@ export function findActiveNode(
 /**
  * Build a NodeDetail from a phase + its FSM state.
  *
- * Handler resolution is static by type (main/approval); handlerSkill is the
- * constant atom-phase-handler, loaded by plain name per the skill-resolution convention.
- * Run mode / constraints are NOT NodeDetail fields — they come from the
- * activation prologue outputs (agent-side consumption). Node-scope gate:
- * `node:` channel targets outside the run's flattened node set are stripped
- * at dispatch (shared predicate — stale-file protection).
+ * Handler resolution is static by type (main/approval); the dispatch handler
+ * skill is the constant atom-phase-handler (agent-side knowledge — not carried
+ * in the payload). Run mode / constraints are NOT NodeDetail fields — they
+ * arrive at activation (graph_start args.mode; pilot-loaded constraints).
+ * Node-scope gate: `node:` channel targets outside the run's flattened node
+ * set are stripped at dispatch (shared predicate — stale-file protection).
  */
 export function buildNodeDetail(input: NodeDetailInput): Effect.Effect<INodeDetail | null, DispatchConfigError> {
   return Effect.try({
     try: () => {
-      // Prologue nodes dispatch like any other — look them up in the
-      // synthesized prefix first, then author phases.
-      const allPhases = [...input.graph.prologue, ...input.graph.phases];
-      const phase = allPhases.find((p) => p.id === input.phaseId);
+      const phase = input.graph.phases.find((p) => p.id === input.phaseId);
       if (!phase) return null;
 
       // Global-channel merge — two-scope context model: the default layer
@@ -155,8 +155,7 @@ export function buildNodeDetail(input: NodeDetailInput): Effect.Effect<INodeDeta
 
       // Dispatch-time run-scope gate — strip cross-run `node:` targets before
       // they reach the agent (the agent can no longer see out-of-run references).
-      // Run node set = author phases + prologue (prologue is in every run).
-      const runNodeIds = new Set(allPhases.map((p) => p.id));
+      const runNodeIds = new Set(input.graph.phases.map((p) => p.id));
       const { channels, warnings } = stripCrossRunChannels(selfSkipped, runNodeIds);
       for (const w of warnings) {
         debugLog('runtime', { event: 'cross_run_channel_stripped', nodeId: input.phaseId, warning: w });
@@ -167,7 +166,6 @@ export function buildNodeDetail(input: NodeDetailInput): Effect.Effect<INodeDeta
         nodeId: input.phaseId,
         type: phase.type,
         dependsOn: phase.dependsOn,
-        handlerSkill: HANDLER_SKILL,
         skill: phase.skill,
         operations: phase.operations,
         retryCount: input.nodeState.retryCount,
@@ -179,7 +177,6 @@ export function buildNodeDetail(input: NodeDetailInput): Effect.Effect<INodeDeta
         retryCount: input.nodeState.retryCount,
         startedAt: input.nodeState.startedAt,
         completedAt: input.nodeState.completedAt,
-        durationMs: input.nodeState.durationMs,
       };
 
       // Static type dispatch — main/approval; unknown type fails dispatch.
@@ -202,11 +199,25 @@ export function buildNodeDetail(input: NodeDetailInput): Effect.Effect<INodeDeta
   });
 }
 
+/** Module-level per-run snapshot cursor — nodeId → 'status:retryCount' signature of the last dispatched snapshot. */
+const snapshotCursorCache = new Map<string, Map<string, string>>();
+
+/** Drop a run's snapshot cursor — run lifecycle cleanup (force-end/clean). */
+export function dropSnapshotCursor(runId: string): void {
+  snapshotCursorCache.delete(runId);
+}
+
+/** Clear all snapshot cursors — clean-all path. */
+export function snapshotCursorCacheClear(): void {
+  snapshotCursorCache.clear();
+}
+
 /** Build a GraphSnapshot from an FsmState. */
 export function buildSnapshot(state: FsmState, graph?: TaskflowGraph): IGraphSnapshot {
   if (state.status === 'idle') {
     return assembleSnapshot(
       { runId: '', graphName: '', fsmState: 'idle', createdAt: '', updatedAt: new Date().toISOString() },
+      [],
       [],
     );
   }
@@ -222,15 +233,32 @@ export function buildSnapshot(state: FsmState, graph?: TaskflowGraph): IGraphSna
     }
   }
 
-  const nodes: ISnapshotNode[] = Object.entries(state.phases).map(([id, ns]) => ({
-    nodeId: id,
-    status: ns.status,
-    retryCount: ns.retryCount,
-    startedAt: ns.startedAt ?? null,
-    completedAt: ns.completedAt ?? null,
-    durationMs: ns.durationMs ?? null,
-    unactivated: unactivated.has(id) || undefined,
-  }));
+  // Delta snapshot — full rows only for nodes whose state changed since the
+  // last dispatch (per-run signature cursor); one-line rows for everyone.
+  const signatures = new Map<string, string>();
+  for (const [id, ns] of Object.entries(state.phases)) {
+    signatures.set(id, `${ns.status}:${ns.retryCount}`);
+  }
+  const prev = snapshotCursorCache.get(state.runId);
+  const changed: ISnapshotNode[] = [];
+  for (const [id, ns] of Object.entries(state.phases)) {
+    if (!prev || prev.get(id) !== signatures.get(id)) {
+      changed.push({
+        nodeId: id,
+        status: ns.status,
+        retryCount: ns.retryCount,
+        startedAt: ns.startedAt ?? null,
+        completedAt: ns.completedAt ?? null,
+        durationMs: ns.startedAt && ns.completedAt ? Date.parse(ns.completedAt) - Date.parse(ns.startedAt) : null,
+        unactivated: unactivated.has(id) || undefined,
+      });
+    }
+  }
+  snapshotCursorCache.set(state.runId, signatures);
+
+  const nodes: Array<{ nodeId: string; status: string; retryCount: number }> = Object.entries(state.phases).map(
+    ([id, ns]) => ({ nodeId: id, status: ns.status, retryCount: ns.retryCount }),
+  );
 
   return assembleSnapshot(
     {
@@ -241,12 +269,16 @@ export function buildSnapshot(state: FsmState, graph?: TaskflowGraph): IGraphSna
       updatedAt: new Date().toISOString(),
     },
     nodes,
+    changed,
   );
 }
 
 /**
  * Assemble an IGraphSnapshot from run metadata + per-node states.
  * Shared by buildSnapshot() (FSM path) and query.ts buildFullSnapshot() (repository path).
+ * `changed` carries full-field rows for nodes whose state changed since the
+ * last dispatch (delta payload); `nodes` carries one-line rows (jump-target
+ * enumeration + progress display).
  */
 export function assembleSnapshot(
   meta: {
@@ -256,19 +288,20 @@ export function assembleSnapshot(
     readonly createdAt: string;
     readonly updatedAt: string;
   },
-  nodes: ReadonlyArray<ISnapshotNode>,
+  nodes: ReadonlyArray<{ readonly nodeId: string; readonly status: string; readonly retryCount: number }>,
+  changed?: ReadonlyArray<ISnapshotNode>,
 ): IGraphSnapshot {
   const metrics = aggregateNodeMetrics(nodes, meta.fsmState);
   return {
     runId: meta.runId,
     graphName: meta.graphName,
     fsmState: meta.fsmState,
-    status: meta.fsmState,
     currentPhaseId: metrics.currentPhaseId,
     nodeCount: metrics.nodeCount,
     completedCount: metrics.completedCount,
     createdAt: meta.createdAt,
     updatedAt: meta.updatedAt,
     nodes,
+    ...(changed && changed.length > 0 ? { changed } : {}),
   };
 }

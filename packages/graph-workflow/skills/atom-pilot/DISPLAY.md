@@ -55,7 +55,7 @@ Verbose + raw MCP JSON, `retryCount` per node, internal state changes.
 
 ## Context stats
 
-**Context stats** - after "done", aggregate from `headroom_stats` (session-level compression) corroborated with Tool usage check evidence (`used:` headroom lines - bytes/savings reported there): `📉 ctx` row in the final report table - `<N> nodes · <X> KB · <Y>% saved · proxy <status>` - `<status>` reflects proxy health (`ok` / `cold` / `down`); no per-node context manifests exist; headroom_stats + Tool usage check are the sole sources.
+**Context stats** - after "done", aggregate: per-node `## Checks` block `context:` rows from node outputs (atom-phase-handler §Checks Block - reference/working/growth rows per node, L3 prune count, output estimate) + session-level compression from `headroom_stats` corroborated with Checks `tools:` headroom evidence (bytes/savings reported there). Platform observability facts accumulated by graph-fidelity (`appendEntry` `graph-fidelity.observability` - requests, input/cache tokens, compaction count, TTSR triggers, tool executions) MAY corroborate the aggregation when present (ADR 0150 - factual, not self-reported). `📉 ctx` row in the final report table - `<N> nodes · <X> KB · <Y>% saved · <Z> L3 pruned · proxy <status>` - `<status>` reflects proxy health (`ok` / `cold` / `down`); violation count (`[CONTEXT VIOLATION]` markers per atom-phase-handler §Markers) appended when non-zero. Degradation: a node without a `## Checks` block contributes its node row as `-` (block contract is unconditional; absence is itself a ledger fact); headroom_stats unavailable -> state the adapter state and omit adapter-derived values only.
 
 ## Tools stats
 

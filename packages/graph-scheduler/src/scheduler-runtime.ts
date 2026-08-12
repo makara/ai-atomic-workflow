@@ -52,7 +52,6 @@ export function createDefaultConfig(): SchedulerConfig {
   };
 }
 
-import { resolveSkillsDir, setConfiguredSkillsDir } from './api/graph-loader.js';
 import { debugLog } from './debug.js';
 import { FileSystem, FileSystemError } from './filesystem.js';
 import { buildService, GraphRepository, makeRepositoryLayer, type RunSummaryItem } from './lib/db/repository.js';
@@ -70,8 +69,9 @@ import type { ConfigError } from './types.js';
 export interface RunSummary {
   readonly runId: string;
   readonly graphName: string;
-  readonly status: string;
-  readonly startedAt: string;
+  readonly fsmState: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
 }
 
 /** Promise-typed facade over the FSM-driven graph-scheduling domain. */
@@ -83,8 +83,6 @@ export interface SchedulerRuntime {
   ) => Promise<{
     readonly runId: string;
     readonly node: NodeDetail | null;
-    /** contract warnings captured at load — empty when clean (optional) */
-    readonly contractWarnings?: string[];
     /** resolution source of the loaded graph — project | builtin | fallback */
     readonly resolvedFrom: 'project' | 'builtin' | 'fallback';
     /** absolute path the graph was loaded from */
@@ -96,11 +94,11 @@ export interface SchedulerRuntime {
   }>;
 
   /** Advance a run — report node completion + get next node.
-   *  Output NOT passed — lives in agent session or on-disk files. */
+   *  Output NOT passed — lives in agent session or on-disk files.
+   *  Duration derived from timestamps — never reported. */
   readonly graphAdvance: (
     runId: string,
     nodeId: string,
-    durationMs: number,
     branchTo?: string,
     endRun?: boolean,
   ) => Promise<{
@@ -178,10 +176,6 @@ function loadConfigFile(): { config: Partial<SchedulerConfig> } | null {
     if (typeof cfg['dbPath'] === 'string') {
       cfg['dbPath'] = normalizeDbPath(cfg['dbPath']);
     }
-    // skillsDir same resolution rule — project-root relative.
-    if (typeof cfg['skillsDir'] === 'string' && !path.isAbsolute(cfg['skillsDir'])) {
-      cfg['skillsDir'] = path.resolve(cfg['skillsDir']);
-    }
     // Validate structure — reject malformed config
     const parsed = ConfigFileSchema.safeParse(cfg);
     if (!parsed.success) {
@@ -205,8 +199,6 @@ interface ResolvedConfig {
   /** Ordered search dirs — project first, built-in last. First file found wins. */
   readonly taskflowDirs: readonly string[];
   readonly registryPaths: readonly string[];
-  /** skills package dir for entry-skill alignment — undefined = probing fallback. */
-  readonly skillsDir: string | undefined;
   /** project-level ambient context (config.json `context`) — default layer of the global channel. */
   readonly context: readonly string[];
 }
@@ -234,7 +226,6 @@ function resolveConfig(override?: Partial<SchedulerConfig>): ResolvedConfig {
     dbPath: normalizeDbPath(override?.dbPath ?? process.env['GS_DB_PATH'] ?? fileConfig?.dbPath ?? BUILTIN_DB_PATH),
     taskflowDirs,
     registryPaths,
-    skillsDir: override?.skillsDir ?? fileConfig?.skillsDir,
     context: override?.context ?? fileConfig?.context ?? [],
   };
 }
@@ -299,10 +290,7 @@ function makeTaskflowFileSystemLayer(taskflowDirs: readonly string[]): Layer.Lay
 export function createRuntime(config?: Partial<SchedulerConfig>): Effect.Effect<SchedulerRuntime, ConfigError> {
   return Effect.gen(function* () {
     const resolved = resolveConfig(config);
-    const { dbPath, taskflowDirs, registryPaths, skillsDir } = resolved;
-
-    // Configured skills package dir — consumed by load-time alignment.
-    setConfiguredSkillsDir(skillsDir);
+    const { dbPath, taskflowDirs, registryPaths } = resolved;
 
     debugLog('load', {
       event: 'createRuntime',
@@ -354,6 +342,7 @@ export function createRuntime(config?: Partial<SchedulerConfig>): Effect.Effect<
     // Layer 2c: runtime config — project-level ambient context for dispatch merge
     const configServiceLayer = Layer.succeed(ConfigService, {
       context: resolved.context,
+      dbPath: resolved.dbPath,
     });
 
     // Compose: persistence + fs + registry + config
@@ -387,8 +376,8 @@ export function createRuntime(config?: Partial<SchedulerConfig>): Effect.Effect<
     const schedulerRuntime: SchedulerRuntime = {
       graphStart: (graphName: string, args?: Record<string, unknown>) => run(graphStart(graphName, args)),
 
-      graphAdvance: (runId: string, nodeId: string, durationMs: number, branchTo?: string, endRun?: boolean) =>
-        run(graphAdvance(runId, nodeId, durationMs, branchTo, endRun)),
+      graphAdvance: (runId: string, nodeId: string, branchTo?: string, endRun?: boolean) =>
+        run(graphAdvance(runId, nodeId, branchTo, endRun)),
 
       graphJump: (runId: string, targetPhaseId: string) => run(graphJump(runId, targetPhaseId)),
 
@@ -403,8 +392,9 @@ export function createRuntime(config?: Partial<SchedulerConfig>): Effect.Effect<
             return items.map((item: RunSummaryItem): RunSummary => ({
               runId: item.runId,
               graphName: item.graphName,
-              status: item.fsmState,
-              startedAt: item.createdAt,
+              fsmState: item.fsmState,
+              createdAt: item.createdAt,
+              updatedAt: item.updatedAt,
             }));
           }),
         ),
@@ -414,7 +404,6 @@ export function createRuntime(config?: Partial<SchedulerConfig>): Effect.Effect<
           cwd: process.cwd(),
           projectTaskflowDir: taskflowDirs.length > 1 ? taskflowDirs[0] : null,
           builtinGraphsDir: BUILTIN_TASKFLOW_DIR,
-          skillsDir: resolveSkillsDir(),
           projectContext: resolved.context,
         };
         return run(graphInit(scan));

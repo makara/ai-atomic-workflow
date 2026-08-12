@@ -10,6 +10,7 @@ phases:
     type: main
     dependsOn: []
     skill: atom-scope-interview
+    operations: []
     task: |
       Execute scope interview per atom-scope-interview.
 
@@ -23,13 +24,22 @@ phases:
       Output contract: scope_complete, idea_goal, doc_trace_intent,
       input_document (path | none).
 
-  # Adoption conversation — grilling adopts the produced requirements.
+  # Adoption conversation — grilling explores and adopts the produced
+  # requirements (encapsulation contract — upstream skill untouched).
   - id: adopting
     type: main
     dependsOn: [adopt-scope]
     skill: grilling
+    operations: []
     task: |
-      Execute grilling graph mode per grilling skill.
+      Execute grilling per grilling skill. Graph dispatch encapsulation
+      contract: MANDATORY question rounds — at least one round, whole
+      frontier per round, never zero-question, never auto-gated (cards in
+      any mode); output shape { decisions: [{ decision, rationale }],
+      shared_understanding: boolean } — never 'consensus'. End with the
+      mandatory closing question "Anything to add?" (recommended: no/complete)
+      — shared_understanding only after the user confirms the frontier is
+      empty and nothing is missing.
 
       Input document (from adopt-scope output): present → record appends to it
       (appended_to set); absent → record_path grilling-derived — never asked.
@@ -40,8 +50,8 @@ phases:
       CONTEXT.md term updates; ADR decision — always asked, three-condition
       test shapes the recommendation, never the decision.
 
-      Output contract: consensus, change_name, adr_created,
-      adr_path, input_document, appended_to, record_path.
+      Output contract: decisions, shared_understanding, change_name,
+      adr_created, adr_path, input_document, appended_to, record_path.
 
   # Adoption approval — Continue → spec production; re-adopt/restart dynamic.
   - id: adopt-accept
@@ -62,6 +72,7 @@ phases:
     type: main
     dependsOn: [adopt-accept]
     skill: openspec-propose
+    operations: [read, write, run]
     channels:
       - node:adopting
     task: |

@@ -26,19 +26,17 @@ describe('config: valid shapes', () => {
     }
   });
 
-  it('accepts dbPath/taskflowDir/registryPaths/skillsDir', () => {
+  it('accepts dbPath/taskflowDir/registryPaths', () => {
     const config = baseConfig({
       dbPath: '.graph-scheduler/data/graph-scheduler.db',
       taskflowDir: '.graph-scheduler/graphs',
       registryPaths: ['.graph-scheduler/graphs/registry.json'],
-      skillsDir: 'packages/graph-workflow/skills',
     });
 
     const result = ConfigFileSchema.safeParse(config);
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.dbPath).toBe('.graph-scheduler/data/graph-scheduler.db');
-      expect(result.data.skillsDir).toBe('packages/graph-workflow/skills');
     }
   });
 
@@ -89,7 +87,7 @@ describe('config: valid shapes', () => {
 
   it('rejects legacy agentRegistry field — loud error, no silent strip', () => {
     const config = baseConfig({
-      agentRegistry: [{ type: 'main', skill: 'atom-phase-handler' }],
+      agentRegistry: [{ type: 'main', skill: 'atom-phase-handler', operations: [] }],
     });
 
     const result = ConfigFileSchema.safeParse(config);

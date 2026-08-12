@@ -22,12 +22,12 @@ The registry SHALL define a closed set of high-level tools, each identified by a
 
 ### Requirement: Entry anatomy — contract, chain, enforcement, tier
 
-Every registry entry SHALL carry four views: `contract` (declared I/O, obligations, n/a rules), `chain` (execution order — the scenario's designated adapter; in-project code: two-plane chain; in-project non-code text: serena FS tier (+ jcodemunch for indexed locate); in-project special types / out-of-project: platform-native; run: platform shell; compress: headroom-ai; utility: declared tools), `enforcement` (per-platform application view — allowed/denied/mandatory tool sets per platform; may record deferred implementation), and `scenario` key (in-project code | in-project non-code text indexed/unindexed | in-project special | out-of-project | run | compress | utility). A registry entry missing any view SHALL fail validation.
+MODIFIED: every registry entry SHALL carry four views: `contract` (declared I/O, obligations, n/a rules), `chain` (execution order — the scenario's designated adapter; in-project code: two-plane chain; in-project non-code text: serena FS tier (+ jcodemunch for indexed locate); in-project special types / out-of-project: platform-native; run: platform shell; compress: headroom-ai; utility: declared tools), `discipline` (signal-distribution view of the classification lattice — the handler assembly and the graph-fidelity plugin distribute scheduler run-state signals: the per-turn run-frame declaration (single frame: declared operations + out-of-scope list) and pre-emission session fidelity (L3 mechanization, identical-call dedup + errored reduction); no static TTSR rule is distributed — the project rule file is deleted (ADR 0154); platform-native in-band TTSR reminders remain platform capability, observed via `ttsr_triggered` events, never project-distributed).
 
 #### Scenario: Entry completeness is validated
 
 - **WHEN** the registry is validated
-- **THEN** every entry SHALL have contract, chain, enforcement, and scenario views
+- **THEN** every entry SHALL have contract, chain, discipline, and scenario views
 - **AND** an entry missing a view SHALL be a validation error
 
 #### Scenario: Core-class chains are single-tool
@@ -60,10 +60,15 @@ Every registry entry SHALL carry four views: `contract` (declared I/O, obligatio
 - **THEN** it SHALL declare its use cases and n/a rules
 - **AND** utility tools SHALL never appear as the designated adapter of a core scenario
 
-#### Scenario: Enforcement view may defer implementation
+#### Scenario: Discipline distributed without denial
 
-- **WHEN** an entry's enforcement view records a platform's application shape but the adaptation module is not yet implemented
-- **THEN** the view SHALL be marked deferred and the generic-layer behavior SHALL remain fully functional without it
+- **WHEN** a run is active with the graph-fidelity plugin installed
+- **THEN** discipline signals are distributed (run frame, per-call echo, session fidelity — no static TTSR reminder) and no tool call is ever blocked or redirected; no steer interleave and no tool-surface annotation exist
+
+#### Scenario: Registry is static prose
+
+- **WHEN** the registry content changes
+- **THEN** the change is a direct prose edit; no generation step exists and validation does not depend on generated output
 
 ### Requirement: Chains are capability-tiered within serena, never cross-tool
 
@@ -159,3 +164,49 @@ Tool parameter tables SHALL live in exactly one file — the schemas (SERENA/JCO
 - **WHEN** an allocation audit finds a parameter table duplicated between schemas and HLT-REGISTRY entries
 - **THEN** the duplicate SHALL be deleted from the entry
 - **AND** the entry SHALL reference the schemas home
+
+### Requirement: Rule-first adapter resolution
+
+The adapter for an HLT registered call is resolved by a static rule, not by table enumeration: in-project code → serena; in-project text-indexed → jcodemunch (locate/read only); in-project special or out-of-project → platform-native; run → platform shell; compress → headroom; graph-ops → graph-scheduler. The rule lives in the atom-kernel hot surface; the cold HLT-REGISTRY.md carries only exceptions and per-operation obligations.
+
+#### Scenario: Code target locate
+
+- **WHEN** a node declares `locate` and the target is in-project code
+- **THEN** the adapter is serena and no other tool family is offered
+
+#### Scenario: Indexed text read
+
+- **WHEN** a node declares `read` and the target is in-project indexed text
+- **THEN** the adapter is jcodemunch
+
+### Requirement: Single operation-class vocabulary
+
+`HLT_OPERATION_CLASSES` in the engine is the single source of the operation-class vocabulary (exactly 10 classes: locate, read, write, verify, compress, review, run, archive, graph-ops, register_edit). The plugin tool map (if any) and the kernel registry prose are pinned to it by bidirectional mirror tests; no class exists in only one surface.
+
+#### Scenario: Unknown class
+
+- **WHEN** a graph declares an operation class outside the closed set
+- **THEN** graph load fails with a loud rejection naming the class
+
+#### Scenario: Mirror drift
+
+- **WHEN** a surface vocabulary diverges from the engine constant
+- **THEN** the mirror pin test fails
+
+### Requirement: Folded sub-capabilities
+
+The query-plane, mutation-plane, atomic-step-flows, and hlt-heat-layering capabilities cease to exist as separate specs; their behavior contracts fold into this capability (adapter rule, per-operation obligations, heat placement of the rule).
+
+#### Scenario: Archive
+
+- **WHEN** the change archives
+- **THEN** the four folded capability specs are removed from the spec estate and their requirements appear under high-level-tool
+
+### Requirement: Per-operation obligations preserved
+
+Every registered operation keeps its obligations after the fold: write → verify after write (+ register_edit while jcodemunch in use); read → read chain; evidence loop bound 3 (per-call override); adapter unavailable → loud failure, never silent fallback.
+
+#### Scenario: Write verification
+
+- **WHEN** a write call completes
+- **THEN** the executor verifies the result before reporting success

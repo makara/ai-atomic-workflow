@@ -26,12 +26,12 @@ import type { Taskflow } from '../../src/graph-definition.js';
 
 /** Minimal valid main phase. */
 function mainPhase(id: string, task: string, overrides?: Record<string, unknown>) {
-  return { id, type: 'main', task, ...overrides };
+  return { id, type: 'main', task, ...overrides, operations: [] };
 }
 
 /** Build a Taskflow object from phases. */
 function mkTaskflow(name: string, phases: Array<ReturnType<typeof mainPhase>>): Taskflow {
-  return { name, version: 1, phases } as Taskflow;
+  return { name, phases } as Taskflow;
 }
 
 const run = (tf: Taskflow) => Effect.runPromise(toTaskflowGraph(tf));
@@ -58,7 +58,7 @@ describe('toTaskflowGraph', () => {
   it('rejects removed agent type at load — no silent fallback', async () => {
     const agentTf = {
       name: 'agent-graph',
-      version: 1,
+
       phases: [{ id: 'a1', type: 'agent', task: 'do something' }],
     } as unknown as Taskflow;
 
@@ -133,7 +133,6 @@ describe('toTaskflowGraph', () => {
 
   it('defaults graph name to "unnamed" when name is missing', async () => {
     const tf = {
-      version: 1,
       phases: [mainPhase('a1', 'task', { skill: 'atom-scope-interview' })],
     } as unknown as Taskflow;
 

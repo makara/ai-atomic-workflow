@@ -48,7 +48,7 @@ describe('defaults single source', () => {
         taskflowDir: resolve(repoRoot, '.graph-scheduler/graphs'),
         registryPaths: [resolve(repoRoot, '.graph-scheduler/graphs/registry.json')],
       });
-      const res = yield* Effect.either(Effect.tryPromise(() => rt.graphStart('adapter-e2e')));
+      const res = yield* Effect.either(Effect.tryPromise(() => rt.graphStart('adapter-e2e', { mode: 'auto' })));
       yield* Effect.tryPromise(() => rt.dispose());
       return res;
     });

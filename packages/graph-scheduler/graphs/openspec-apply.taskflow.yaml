@@ -5,6 +5,7 @@ phases:
     type: main
     dependsOn: []
     skill: openspec-apply-change
+    operations: [read, write, run, verify]
     channels:
       - node:change-review
     task: |
@@ -31,6 +32,7 @@ phases:
     type: main
     dependsOn: [apply-change]
     skill: code-review
+    operations: [locate, read, review]
     agent: [reviewer, explore, task, general]
     channels:
       - node:apply-change
@@ -74,6 +76,7 @@ phases:
     type: main
     dependsOn: [change-accept]
     skill: openspec-archive-change
+    operations: [read, run, archive]
     channels:
       - node:apply-change
     task: |

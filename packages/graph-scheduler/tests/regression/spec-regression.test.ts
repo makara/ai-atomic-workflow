@@ -41,24 +41,19 @@ function writeFixtureFile(fix: Fixture, filename: string, data: unknown): string
 function validGraph(overrides?: Record<string, unknown>): Record<string, unknown> {
   return {
     name: 'test-graph',
-    version: 1,
-    phases: [{ id: 'agent-step', type: 'main', skill: 'entry-agent-skill', task: 'do work' }],
+
+    phases: [{ id: 'agent-step', type: 'main', skill: 'entry-agent-skill', task: 'do work', operations: [] }],
     ...overrides,
   };
 }
 
 /** Create a minimal runtime connected to the fixture directory. */
-/** Advance the activation prologue prefix (P nodes) and return the first author node. */
+/** First author node — runs start directly at author nodes (no prefix). */
 async function afterPrologue(
   rt: SchedulerRuntime,
   start: { runId: string; node: { nodeId: string } | null },
-): Promise<{ nodeId: string; skill?: string; handlerSkill?: string; type?: string } | null> {
-  let node = start.node;
-  while (node?.nodeId.startsWith('$')) {
-    const next = await rt.graphAdvance(start.runId, node.nodeId, 10);
-    node = next.node;
-  }
-  return node;
+): Promise<{ nodeId: string; skill?: string; type?: string } | null> {
+  return start.node;
 }
 
 async function createTestRuntime(
@@ -99,14 +94,12 @@ describe('Graph loading chain (name → registry → .taskflow.yaml)', () => {
     });
 
     const rt = await createTestRuntime(fix, { registryPaths: [registryPath] });
-    const result = await rt.graphStart('registered-graph');
+    const result = await rt.graphStart('registered-graph', { mode: 'auto' });
 
     expect(result.runId).toBeTruthy();
     expect(result.node).toBeDefined();
-    expect(result.node?.nodeId).toBe('$load-constraints');
-    const author = await afterPrologue(rt, result);
-    expect(author?.nodeId).toBe('agent-step');
-    expect(author?.type).toBe('main');
+    expect(result.node?.nodeId).toBe('agent-step');
+    expect(result.node?.type).toBe('main');
   });
 
   it('falls back to {name}.taskflow.yaml when name not in registry', async () => {
@@ -118,17 +111,15 @@ describe('Graph loading chain (name → registry → .taskflow.yaml)', () => {
     });
 
     const rt = await createTestRuntime(fix, { registryPaths: [join(fix.taskflowDir, 'reg.json')] });
-    const result = await rt.graphStart('fallback-graph');
+    const result = await rt.graphStart('fallback-graph', { mode: 'auto' });
 
     expect(result.runId).toBeTruthy();
-    expect(result.node?.nodeId).toBe('$load-constraints');
-    const author = await afterPrologue(rt, result);
-    expect(author?.nodeId).toBe('agent-step');
+    expect(result.node?.nodeId).toBe('agent-step');
   });
 
   it('throws when graph is not found anywhere', async () => {
     const rt = await createTestRuntime(fix); // empty dir — no graph files
-    await expect(rt.graphStart('missing-graph')).rejects.toThrow();
+    await expect(rt.graphStart('missing-graph', { mode: 'auto' })).rejects.toThrow();
   });
 
   it('throws when graph is not found — with registry but no matching entry', async () => {
@@ -136,7 +127,7 @@ describe('Graph loading chain (name → registry → .taskflow.yaml)', () => {
       graphs: [{ name: 'other-graph', path: 'other.taskflow.yaml' }],
     });
     const rt = await createTestRuntime(fix, { registryPaths: [join(fix.taskflowDir, 'reg.json')] });
-    await expect(rt.graphStart('unknown-name')).rejects.toThrow();
+    await expect(rt.graphStart('unknown-name', { mode: 'auto' })).rejects.toThrow();
   });
 });
 
@@ -157,53 +148,48 @@ describe('Schema validation (valid / invalid taskflow YAML)', () => {
   it('accepts valid graph with version:1 and correct phase types', async () => {
     writeFixtureFile(fix, 'valid.taskflow.yaml', {
       name: 'valid',
-      version: 1,
+
       phases: [
-        { id: 'a1', type: 'main', skill: 'entry-agent-skill', task: 'step 1' },
+        { id: 'a1', type: 'main', skill: 'entry-agent-skill', task: 'step 1', operations: [] },
         // approval — decision confirmation after the main step
         { id: 'ap1', type: 'approval', task: 'decide', dependsOn: ['a1'] },
       ],
     });
 
     const rt = await createTestRuntime(fix);
-    const result = await rt.graphStart('valid');
+    const result = await rt.graphStart('valid', { mode: 'auto' });
     expect(result.runId).toBeTruthy();
-    expect(result.node?.nodeId).toBe('$load-constraints');
-    const author = await afterPrologue(rt, result);
-    expect(author?.nodeId).toBe('a1');
-    expect(author?.skill).toBe('entry-agent-skill');
+    expect(result.node?.nodeId).toBe('a1');
+    expect(result.node?.skill).toBe('entry-agent-skill');
   });
 
-  it('accepts version as string (lenient validation)', async () => {
+  it('rejects a graph declaring the version field — dead field, loud rejection', async () => {
     writeFixtureFile(fix, 'bad-version.taskflow.yaml', validGraph({ version: '1.0' }));
 
     const rt = await createTestRuntime(fix);
-    // Own validator does not enforce version type — graph starts
-    const result = await rt.graphStart('bad-version');
-    expect(result.runId).toBeTruthy();
+    await expect(rt.graphStart('bad-version', { mode: 'auto' })).rejects.toThrow();
   });
 
   it('accepts unknown phase field (lenient — allows skill)', async () => {
     writeFixtureFile(fix, 'bad-field.taskflow.yaml', {
       name: 'bad-field',
-      version: 1,
-      phases: [{ id: 'p1', type: 'main', skill: 'entry-agent-skill', task: 'x', garbageField: 42 }],
+
+      phases: [{ id: 'p1', type: 'main', skill: 'entry-agent-skill', task: 'x', garbageField: 42, operations: [] }],
     });
 
     const rt = await createTestRuntime(fix);
     // Own validator allows unknown fields — graph starts
-    const result = await rt.graphStart('bad-field');
+    const result = await rt.graphStart('bad-field', { mode: 'auto' });
     expect(result.runId).toBeTruthy();
   });
 
   it('rejects missing phases array', async () => {
     writeFixtureFile(fix, 'no-phases.taskflow.yaml', {
       name: 'no-phases',
-      version: 1,
     });
 
     const rt = await createTestRuntime(fix);
-    await expect(rt.graphStart('no-phases')).rejects.toThrow();
+    await expect(rt.graphStart('no-phases', { mode: 'auto' })).rejects.toThrow();
   });
 
   it('rejects non-YAML graph file', async () => {
@@ -211,7 +197,7 @@ describe('Schema validation (valid / invalid taskflow YAML)', () => {
     writeFileSync(filePath, 'this is not yaml {{{');
 
     const rt = await createTestRuntime(fix);
-    const err = await rt.graphStart('bad-yaml').catch((e: unknown) => e);
+    const err = await rt.graphStart('bad-yaml', { mode: 'auto' }).catch((e: unknown) => e);
     expect(err).toBeDefined();
 
     let msg = '';
@@ -239,14 +225,14 @@ describe('Agent registry merge (builtin + project override)', () => {
   it('rejects removed agent type at load (GraphDefinitionError — schema enum gate)', async () => {
     writeFixtureFile(fix, 'skills-default.taskflow.yaml', {
       name: 'skills-default',
-      version: 1,
+
       phases: [{ id: 'a1', type: 'agent', task: 'run' }],
     });
 
     const rt = await createTestRuntime(fix);
     // Phase type 'agent' is not in the closed enum — schema parse fails first
     // (GraphDefinitionError with the enum violation).
-    const err = (await rt.graphStart('skills-default').catch((e: unknown) => e)) as {
+    const err = (await rt.graphStart('skills-default', { mode: 'auto' }).catch((e: unknown) => e)) as {
       _tag?: string;
       message?: string;
     };
@@ -255,19 +241,19 @@ describe('Agent registry merge (builtin + project override)', () => {
     expect(String(err?.message)).toContain('Schema validation failed');
   });
 
-  it('applies phase skill — handlerSkill is the constant', async () => {
+  it('applies phase skill — skill comes from phase.skill', async () => {
     writeFixtureFile(fix, 'skills-override.taskflow.yaml', {
       name: 'skills-override',
-      version: 1,
-      phases: [{ id: 'a1', type: 'main', skill: 'my-custom-agent-skill', task: 'custom agent' }],
+
+      phases: [{ id: 'a1', type: 'main', skill: 'my-custom-agent-skill', task: 'custom agent', operations: [] }],
     });
 
     const rt = await createTestRuntime(fix);
 
-    const result = await rt.graphStart('skills-override');
-    // skill comes from phase.skill; handlerSkill is the constant
+    const result = await rt.graphStart('skills-override', { mode: 'auto' });
+    // skill comes from phase.skill — no handlerSkill field on NodeDetail
+    // (dispatch handler is the constant atom-phase-handler, agent-side knowledge)
     const author = await afterPrologue(rt, result);
     expect(author?.skill).toBe('my-custom-agent-skill');
-    expect(author?.handlerSkill).toBe('atom-phase-handler');
   });
 });

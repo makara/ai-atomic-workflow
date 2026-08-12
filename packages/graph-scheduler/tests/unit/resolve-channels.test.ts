@@ -1,205 +1,61 @@
 /**
- * Unit tests for resolve-channels — scoped-context contract parser + channel resolver.
+ * Unit tests for resolve-channels — engine-side channel shape validation.
  *
- * Contract: skill `## Context Requirements` three subsections are the single
- * source of truth; channel type derived from contract lookup; explicit
- * `skill:`/`node:` prefixes always win; no fallback search; no-match = error;
- * dependsOn duplicate = warning.
+ * The engine validates what it owns: channel shape (explicit prefixes, glob
+ * namespaces, convention guard, run-scope protection). Skill `## Context
+ * Requirements` contracts are agent-side knowledge — the engine never parses
+ * skill prose. All contract-parsing machinery (parseContextContract,
+ * resolveChannels, stripAnnotation) is deleted.
  */
 
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_CONVENTIONS,
   isConventionFile,
+  isGlobShape,
+  isNodeInRun,
+  isVocabularyFile,
+  isWorkflowArtifactGlob,
   mergeChannelScopes,
-  parseContextContract,
-  resolveChannels,
-  stripAnnotation,
+  normFile,
+  REFERENCE_VOCABULARY,
+  runScopeWarning,
+  stripCrossRunChannels,
+  stripPrefix,
 } from '../../src/context/resolve-channels.js';
 
-const SAMPLE_SKILL = `---
-name: sample-skill
-description: test
----
-
-## Context Requirements
-
-### From upstream
-
-- scope-confirm
-- plan-parse
-
-### Reference skills
-
-- atom-graph-spec
-
-### Files
-
-- CONTEXT.md
-- docs/adr/
-
-## Entry
-
-**MUST run**
-`;
-
-describe('parseContextContract', () => {
-  it('parses three subsections into typed lists', () => {
-    const c = parseContextContract(SAMPLE_SKILL);
-    expect(c.upstream).toEqual(['scope-confirm', 'plan-parse']);
-    expect(c.references).toEqual(['atom-graph-spec']);
-    expect(c.files).toEqual(['CONTEXT.md', 'docs/adr/']);
-    expect(c.errors).toEqual([]);
+describe('stripPrefix', () => {
+  it('strips explicit skill: prefix', () => {
+    expect(stripPrefix('skill:atom-graph-spec')).toEqual({ type: 'skill', target: 'atom-graph-spec' });
   });
 
-  it('returns empty contract when section absent', () => {
-    const c = parseContextContract('no requirements here');
-    expect(c.upstream).toEqual([]);
-    expect(c.references).toEqual([]);
-    expect(c.files).toEqual([]);
-    expect(c.errors).toEqual([]);
+  it('strips explicit node: prefix', () => {
+    expect(stripPrefix('node:plan-parse')).toEqual({ type: 'node', target: 'plan-parse' });
   });
 
-  it('rejects placeholder entries', () => {
-    const c = parseContextContract(`## Context Requirements
+  it('returns null for unprefixed entries — no fallback', () => {
+    expect(stripPrefix('scope-confirm')).toBeNull();
+    expect(stripPrefix('./CONTEXT.md')).toBeNull();
+    expect(stripPrefix('')).toBeNull();
+  });
+});
 
-### From upstream
-
-- <configurable — decided at graph authoring>
-`);
-    expect(c.errors.length).toBeGreaterThan(0);
-    expect(c.errors[0]).toContain('placeholder');
+describe('isGlobShape', () => {
+  it('detects path separators and glob wildcards', () => {
+    expect(isGlobShape('docs/designs/*.md')).toBe(true);
+    expect(isGlobShape('src/file?.ts')).toBe(true);
+    expect(isGlobShape('file-[0-9].md')).toBe(true);
   });
 
-  it('stops subsection scan at next ### heading', () => {
-    const c = parseContextContract(`## Context Requirements
-
-### From upstream
-
-- a-node
-
-### Reference skills
-
-- a-skill
-
-## Entry
-
-- not-a-reference
-`);
-    expect(c.upstream).toEqual(['a-node']);
-    expect(c.references).toEqual(['a-skill']);
-  });
-
-  it('ignores fenced subsection examples — fence content never contributes entries', () => {
-    const c = parseContextContract(`## Context Requirements
-
-### From upstream
-
-- real-node
-
-\`\`\`markdown
-### From upstream
-
-- fake-node
-\`\`\`
-
-### Files
-
-- real-file
-`);
-    expect(c.upstream).toEqual(['real-node']);
-    expect(c.files).toEqual(['real-file']);
-  });
-
-  it('treats skill whose only Context Requirements is fenced as contract-less', () => {
-    const c = parseContextContract(`## Body
-
-\`\`\`markdown
-## Context Requirements
-
-### From upstream
-
-- <nodeId>
-
-### Reference skills
-
-- <skill-name>
-
-### Files
-
-- <glob>
-\`\`\`
-`);
-    expect(c.upstream).toEqual([]);
-    expect(c.references).toEqual([]);
-    expect(c.files).toEqual([]);
-    expect(c.errors).toEqual([]);
-  });
-
-  it('fenced placeholder examples produce no placeholder errors', () => {
-    const c = parseContextContract(`## Context Requirements
-
-### From upstream
-
-- real-node
-
-\`\`\`
-### From upstream
-
-- <configurable — decided at graph authoring>
-\`\`\`
-`);
-    expect(c.upstream).toEqual(['real-node']);
-    expect(c.errors).toEqual([]);
-  });
-
-  it('strips trailing parenthetical annotation from Files entries', () => {
-    const c = parseContextContract(`## Context Requirements
-
-### Files
-
-- ./CONTEXT.md (project glossary per domain-modeling CONTEXT-FORMAT.md)
-- docs/adr/*.md
-`);
-    expect(c.files).toEqual(['./CONTEXT.md', 'docs/adr/*.md']);
-    expect(c.errors).toEqual([]);
-  });
-
-  it('strips trailing parenthetical annotation from upstream and reference entries', () => {
-    const c = parseContextContract(`## Context Requirements
-
-### From upstream
-
-- up (review output)
-
-### Reference skills
-
-- codebase-design (vocabulary)
-`);
-    expect(c.upstream).toEqual(['up']);
-    expect(c.references).toEqual(['codebase-design']);
-    expect(c.errors).toEqual([]);
-  });
-
-  it('placeholder detection sees the stripped value - annotated placeholder still rejected', () => {
-    const c = parseContextContract(`## Context Requirements
-
-### Files
-
-- <configurable> (decided at authoring)
-`);
-    expect(c.files).toEqual(['<configurable>']);
-    expect(c.errors.length).toBeGreaterThan(0);
-    expect(c.errors[0]).toContain('placeholder');
-  });
-
-  it('stripAnnotation leaves non-annotated entries unchanged', () => {
-    expect(stripAnnotation('docs/adr/*.md')).toBe('docs/adr/*.md');
-    expect(stripAnnotation('scope-entry')).toBe('scope-entry');
+  it('rejects bare names', () => {
+    expect(isGlobShape('scope-confirm')).toBe(false);
+    expect(isGlobShape('atom-graph-spec')).toBe(false);
   });
 });
 
 describe('isConventionFile', () => {
   it('matches convention-layer paths by normalized membership', () => {
+    expect(DEFAULT_CONVENTIONS).toEqual(['./CONTEXT.md', 'docs/domains.md']);
     expect(isConventionFile('./CONTEXT.md')).toBe(true);
     expect(isConventionFile('CONTEXT.md')).toBe(true);
     expect(isConventionFile('docs/domains.md')).toBe(true);
@@ -213,171 +69,68 @@ describe('isConventionFile', () => {
   });
 });
 
-describe('resolveChannels', () => {
-  const contract = parseContextContract(SAMPLE_SKILL);
-
-  it('resolves explicit skill: prefix to reference', () => {
-    const r = resolveChannels({ channels: ['skill:atom-graph-spec'], dependsOn: [], contract });
-    expect(r.references).toEqual(['atom-graph-spec']);
-    expect(r.errors).toEqual([]);
+describe('isVocabularyFile', () => {
+  it('matches exact vocabulary paths', () => {
+    expect(isVocabularyFile('README.md')).toBe(true);
+    expect(isVocabularyFile('./CHANGELOG.md')).toBe(true);
+    expect(isVocabularyFile('docs/domains.md')).toBe(true);
   });
 
-  it('resolves explicit node: prefix to upstream (cross-level allowed)', () => {
-    const r = resolveChannels({ channels: ['node:plan-parse'], dependsOn: ['scope-confirm'], contract });
-    expect(r.upstream).toEqual(['plan-parse']);
-    expect(r.errors).toEqual([]);
-    expect(r.warnings).toEqual([]);
+  it('matches dir/** vocabulary patterns against the directory and descendants', () => {
+    expect(REFERENCE_VOCABULARY).toContain('docs/adr/**');
+    expect(isVocabularyFile('docs/adr')).toBe(true);
+    expect(isVocabularyFile('docs/adr/2026-08-11-foo.md')).toBe(true);
+    expect(isVocabularyFile('docs/adr/nested/dir/file.md')).toBe(true);
   });
 
-  it('resolves bare contract upstream match', () => {
-    const r = resolveChannels({ channels: ['scope-confirm'], dependsOn: ['scope-confirm'], contract });
-    expect(r.upstream).toEqual([]); // implicit coverage — skipped
-    expect(r.warnings.join(' ')).toContain('scope-confirm'); // redundant declaration
+  it('rejects paths outside the vocabulary', () => {
+    expect(isVocabularyFile('docs/designs/blueprint.md')).toBe(false);
+    expect(isVocabularyFile('src/main.ts')).toBe(false);
+    expect(isVocabularyFile('docs/adr.md')).toBe(false); // near-miss, not under docs/adr/
+  });
+});
+
+describe('isWorkflowArtifactGlob', () => {
+  it('accepts workflow runtime artifact namespace globs', () => {
+    expect(isWorkflowArtifactGlob('.graph-scheduler/artifacts/*.md')).toBe(true);
+    expect(isWorkflowArtifactGlob('.taskflow/**')).toBe(true);
+    expect(isWorkflowArtifactGlob('.graph-scheduler')).toBe(true);
   });
 
-  it('warns on bare cross-level upstream — node: prefix required', () => {
-    const r = resolveChannels({ channels: ['plan-parse'], dependsOn: ['scope-confirm'], contract });
-    expect(r.upstream).toEqual(['plan-parse']);
-    expect(r.warnings.length).toBeGreaterThan(0);
-    expect(r.warnings[0]).toContain('node:');
+  it('rejects non-artifact glob targets', () => {
+    expect(isWorkflowArtifactGlob('docs/designs/*.md')).toBe(false);
+    expect(isWorkflowArtifactGlob('docs/adr/*.md')).toBe(false);
+  });
+});
+
+describe('normFile', () => {
+  it('strips leading ./ and trailing /', () => {
+    expect(normFile('./CONTEXT.md')).toBe('CONTEXT.md');
+    expect(normFile('docs/adr/')).toBe('docs/adr');
+    expect(normFile('./docs/domains.md')).toBe('docs/domains.md');
+    expect(normFile('README.md')).toBe('README.md');
+  });
+});
+
+describe('isNodeInRun', () => {
+  it('true when the target is in the run node set', () => {
+    expect(isNodeInRun('scope-confirm', new Set(['scope-confirm', 'plan-parse']))).toBe(true);
   });
 
-  it('resolves exact contract files match without glob shape', () => {
-    const r = resolveChannels({ channels: ['CONTEXT.md'], dependsOn: [], contract });
-    expect(r.files).toEqual(['CONTEXT.md']);
+  it('false when the target is outside the run node set', () => {
+    expect(isNodeInRun('loop-entry', new Set(['scope-confirm', 'plan-parse']))).toBe(false);
   });
 
-  it('resolves bare contract reference match', () => {
-    const r = resolveChannels({ channels: ['atom-graph-spec'], dependsOn: [], contract });
-    expect(r.references).toEqual(['atom-graph-spec']);
+  it('absent runNodeIds skips the gate — validation paths', () => {
+    expect(isNodeInRun('anything', undefined)).toBe(true);
   });
+});
 
-  it('resolves file glob by shape', () => {
-    const r = resolveChannels({ channels: ['./CONTEXT.md', 'docs/adr/*.md'], dependsOn: [], contract });
-    expect(r.files).toEqual(['./CONTEXT.md', 'docs/adr/*.md']);
-    expect(r.errors).toEqual([]);
-  });
-
-  it('resolves single-char wildcard and character-class glob shapes', () => {
-    const r = resolveChannels({ channels: ['src/file?.ts', 'file-[0-9].md'], dependsOn: [], contract });
-    expect(r.files).toEqual(['src/file?.ts', 'file-[0-9].md']);
-    expect(r.errors).toEqual([]);
-  });
-
-  it('rejects empty channel entry with clear error', () => {
-    const r = resolveChannels({ channels: ['', '  '], dependsOn: [], contract });
-    expect(r.errors).toHaveLength(2);
-    expect(r.errors[0]).toContain('empty channel entry');
-  });
-
-  it('warns on dependsOn duplicate and skips implicit-covered upstream', () => {
-    const r = resolveChannels({
-      channels: ['scope-confirm', 'node:scope-confirm'],
-      dependsOn: ['scope-confirm'],
-      contract,
-    });
-    expect(r.upstream).toEqual([]);
-    expect(r.warnings.length).toBe(2);
-  });
-
-  it('classifies convention-layer channel as file — implicit coverage, no error', () => {
-    const r = resolveChannels({ channels: ['./CONTEXT.md', 'docs/domains.md'], dependsOn: [], contract });
-    expect(r.files).toEqual(['./CONTEXT.md', 'docs/domains.md']);
-    expect(r.errors).toEqual([]);
-  });
-
-  it('errors on no-match entry — no fallback search', () => {
-    const r = resolveChannels({ channels: ['mystery-name'], dependsOn: [], contract });
-    expect(r.errors.length).toBeGreaterThan(0);
-    expect(r.errors[0]).toContain('mystery-name');
-  });
-
-  it('aggregates multiple errors across entries', () => {
-    const r = resolveChannels({ channels: ['a', 'b'], dependsOn: [], contract });
-    expect(r.errors).toHaveLength(2);
-  });
-
-  it('handles undefined channels and dependsOn', () => {
-    const r = resolveChannels({ channels: undefined, dependsOn: undefined, contract });
-    expect(r.upstream).toEqual([]);
-    expect(r.references).toEqual([]);
-    expect(r.files).toEqual([]);
-    expect(r.errors).toEqual([]);
-  });
-
-  it('run-scoped: node: target outside the current run warns and skips — stale file never resolves', () => {
-    const r = resolveChannels({
-      channels: ['node:loop-entry'],
-      dependsOn: [],
-      contract,
-      runNodeIds: new Set(['scope-detect', 'arch-review']),
-    });
-    expect(r.upstream).toEqual([]);
-    expect(r.errors).toEqual([]);
-    expect(r.warnings.length).toBeGreaterThan(0);
-    expect(r.warnings[0]).toContain('node:loop-entry');
-    expect(r.warnings[0]).toContain('current run');
-  });
-
-  it('run-scoped: node: target inside the current run resolves normally', () => {
-    const r = resolveChannels({
-      channels: ['node:loop-entry'],
-      dependsOn: [],
-      contract,
-      runNodeIds: new Set(['loop-entry', 'arch-review']),
-    });
-    expect(r.upstream).toEqual(['loop-entry']);
-    expect(r.errors).toEqual([]);
-    expect(r.warnings).toEqual([]);
-  });
-
-  it('run-scoped: contract upstream match outside the run warns and skips', () => {
-    const r = resolveChannels({
-      channels: ['plan-parse'],
-      dependsOn: [],
-      contract,
-      runNodeIds: new Set(['scope-confirm']),
-    });
-    expect(r.upstream).toEqual([]);
-    expect(r.warnings.join(' ')).toContain('plan-parse');
-  });
-
-  it('run-scoped: dependsOn-covered target stays implicit — no scope warning', () => {
-    const r = resolveChannels({
-      channels: ['node:scope-confirm'],
-      dependsOn: ['scope-confirm'],
-      contract,
-      runNodeIds: new Set(['scope-confirm']),
-    });
-    expect(r.upstream).toEqual([]);
-    expect(r.warnings.join(' ')).toContain('redundant declaration');
-    expect(r.warnings.join(' ')).not.toContain('current run');
-  });
-
-  it('run-scoped: absent runNodeIds keeps legacy behavior (validation paths)', () => {
-    const r = resolveChannels({ channels: ['node:plan-parse'], dependsOn: [], contract });
-    expect(r.upstream).toEqual(['plan-parse']);
-    expect(r.warnings).toEqual([]);
-  });
-
-  it('run-scoped: flow-propagated node: channel observes the same scope (in-run resolves, out-of-run warns)', () => {
-    // flow input channels propagate to entry children as plain node:
-    // entries — the same run-scope gate applies
-    const inRun = resolveChannels({
-      channels: ['node:loop-entry'],
-      dependsOn: [],
-      contract,
-      runNodeIds: new Set(['loop-entry', 'review/arch-review']),
-    });
-    expect(inRun.upstream).toEqual(['loop-entry']);
-    const outRun = resolveChannels({
-      channels: ['node:loop-entry'],
-      dependsOn: [],
-      contract,
-      runNodeIds: new Set(['review/arch-review']),
-    });
-    expect(outRun.upstream).toEqual([]);
-    expect(outRun.warnings.join(' ')).toContain('current run');
+describe('runScopeWarning', () => {
+  it('mentions the display target and the run-scope protection rationale', () => {
+    const w = runScopeWarning('node:loop-entry');
+    expect(w).toContain('node:loop-entry');
+    expect(w).toContain('current run');
   });
 });
 
@@ -403,5 +156,42 @@ describe('mergeChannelScopes', () => {
   it('preserves per-scope order and skips empty middle scopes', () => {
     const merged = mergeChannelScopes(['a', 'b'], [], undefined, ['c', 'a']);
     expect(merged).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('stripCrossRunChannels', () => {
+  const runNodeIds = new Set(['scope-confirm', 'plan-parse']);
+
+  it('returns input reference unchanged when nothing is stripped', () => {
+    const channels = ['skill:atom-graph-spec', 'node:scope-confirm'];
+    const r = stripCrossRunChannels(channels, runNodeIds);
+    expect(r.channels).toBe(channels);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it('strips out-of-run node: entries and warns', () => {
+    const r = stripCrossRunChannels(['node:loop-entry', 'node:scope-confirm'], runNodeIds);
+    expect(r.channels).toEqual(['node:scope-confirm']);
+    expect(r.warnings).toHaveLength(1);
+    expect(r.warnings[0]).toContain('node:loop-entry');
+  });
+
+  it('lazy copy preserves prior entries when stripping mid-list', () => {
+    const r = stripCrossRunChannels(['skill:a', 'node:loop-entry', 'node:plan-parse'], runNodeIds);
+    expect(r.channels).toEqual(['skill:a', 'node:plan-parse']);
+    expect(r.warnings).toHaveLength(1);
+  });
+
+  it('skips stripping when runNodeIds is absent — validation paths', () => {
+    const channels = ['node:loop-entry'];
+    const r = stripCrossRunChannels(channels, undefined);
+    expect(r.channels).toBe(channels);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it('handles undefined channels', () => {
+    const r = stripCrossRunChannels(undefined, runNodeIds);
+    expect(r.channels).toBeUndefined();
+    expect(r.warnings).toEqual([]);
   });
 });

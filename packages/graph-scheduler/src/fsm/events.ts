@@ -22,11 +22,10 @@ export type FsmEvent =
   | {
       readonly type: 'COMPLETE';
       readonly phaseId: string;
-      readonly durationMs: number;
       /**
        * Routing decision target (route-first): gate jump target (backward
        * rework — target must be an upstream terminal node) or approval
-       * branch-route target (node or route id — activates the route).
+       * branch-route target (node or route id — activates route).
        */
       readonly branchTo?: string;
       /** Approval `end` action — complete the run immediately (no end node). */

@@ -12,6 +12,7 @@ phases:
     type: main
     dependsOn: []
     skill: atom-scope-interview
+    operations: []
     task: |
       Execute scope interview per atom-scope-interview.
 
@@ -38,6 +39,7 @@ phases:
     type: main
     dependsOn: [scope-entry]
     skill: improve-codebase-architecture
+    operations: [locate, read, write, review]
     agent: [explore, scout, task, general]
     task: |
       Execute architecture review per improve-codebase-architecture (use ## Agent hints for the Explore sub-agent).

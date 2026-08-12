@@ -21,13 +21,6 @@ export const ConfigFileSchema = z
     registryPaths: z.array(z.string().min(1)).optional(),
 
     /**
-     * graph-workflow skills package directory — load-time entry-skill alignment
-     * and graph_init validation prefer it; absent → repo-root + package-sibling
-     * probing. Global installs point this at the skills package.
-     */
-    skillsDir: z.string().min(1).optional(),
-
-    /**
      * Project-level ambient context — the default layer of the global
      * channel. Merged once at graph load with the graph's top-level
      * `context:` (dedup, config entries first) and injected into every

@@ -123,6 +123,8 @@ describe('PhaseSchema — eval field removed (route-first redesign)', () => {
       id: 'some-main',
       type: 'main',
       task: 'do something inline',
+
+      operations: [],
     };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);

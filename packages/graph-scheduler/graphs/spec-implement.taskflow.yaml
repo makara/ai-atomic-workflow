@@ -5,6 +5,7 @@ phases:
   - id: spec-extract
     type: main
     dependsOn: []
+    operations: [read]
     channels:
       # Composition read edges — the produced change + adoption record arrive
       # via these streams when composed (adopt stage); standalone runs strip
@@ -63,6 +64,7 @@ phases:
     type: main
     dependsOn: [minimal-track, detailed-track]
     join: any
+    operations: [read]
     channels:
       - node:spec-extract
       - node:minimal-track/archive

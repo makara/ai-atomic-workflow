@@ -6,105 +6,6 @@
 
 ## Requirements
 
-### Requirement: graph_start — create run and return first node
-
-System SHALL create a new graph execution run and immediately return the first ready node, combining run creation and initial askNext into a single atomic call. The response SHALL include the run snapshot (`runId`, `graphName`, `fsmState`/`status`, `currentPhaseId`, `nodeCount`, `completedCount`, timestamp, `nodes` array — isomorphic with graph_advance/graph_jump) — the first node (entry dispatch) carries the snapshot for jump-target enumeration and progress display. The first node SHALL be an activated prefix node (when approvals exist, `$run-mode-confirm` comes first, then `$load-constraints`), and only then the author entry node.
-
-#### Scenario: graph_start creates run for valid graph
-
-- **WHEN** `graph_start({ graphName: "ci-pipeline" })` is called
-- **THEN** a new run SHALL be created with status `running` and a unique `runId`
-- **THEN** all phases SHALL be initialized as `pending`
-- **THEN** the first ready batch SHALL be resolved and the first node returned as `NextNode`
-- **THEN** `NextNode` SHALL include: `runId`, `graphName`, `nodeId`, `type`, and type-specific fields
-
-#### Scenario: graph_start returns snapshot with node states
-
-- **WHEN** `graph_start` returns the first node
-- **THEN** the response SHALL include a `snapshot` with run-level fields and a `nodes` array (nodeId/status/retryCount/startedAt/completedAt/durationMs per phase)
-- **AND** the first node SHALL be `active` in the snapshot
-
-#### Scenario: graph_start with args passes args to graph
-
-- **WHEN** `graph_start({ graphName: "...", args: { branch: "main" } })` is called
-- **THEN** the args SHALL be stored with the run and available for template interpolation
-
-#### Scenario: First node is prologue when approvals exist
-
-- **WHEN** `graph_start` creates a run with approval nodes
-- **THEN** the first dispatched node is `$run-mode-confirm`, followed by `$load-constraints`, then the author entry node
-
-#### Scenario: First node is load only for approval-less graph
-
-- **WHEN** `graph_start` creates a run without approval nodes
-- **THEN** the first dispatched node is `$load-constraints` (no confirm synthesized)
-
-#### Scenario: graph_start fails on unknown graph
-
-- **WHEN** `graph_start` references a graph name with no corresponding `.taskflow.yaml`
-- **THEN** an MCP error SHALL be returned with code indicating the graph was not found
-
-### Requirement: graph_advance — report completion and get next node
-
-System SHALL accept a node completion report and return the next ready node, combining notify and askNext into a single atomic call. The call SHALL accept `durationMs`, optional `branchTo` (routing decision target), and optional `endRun` (approval end action). The call SHALL NOT accept an `output` parameter — node content is produced and consumed in the agent session (platform-persisted), never persisted by the scheduler. The call SHALL NOT accept a `status` or failure flag — a phase that failed during execution SHALL be recorded by the scheduler as `done` (failure semantics live in the agent session, not the scheduler DB).
-
-#### Scenario: graph_advance returns next ready node
-
-- **WHEN** `graph_advance({ runId, nodeId: "lint", durationMs: 1234 })` is called
-- **THEN** the `lint` node SHALL be marked `done` with the reported duration
-- **AND** the next ready node SHALL be returned with its dispatch payload
-
-#### Scenario: graph_advance reports output
-
-- **WHEN** `graph_advance({ runId, nodeId: "lint", durationMs: 1234 })` is called
-- **THEN** the `lint` node SHALL be marked `done` with the reported duration
-- **AND** no output SHALL be accepted or persisted — node content stays in the agent session (platform-persisted)
-
-#### Scenario: Upstream outputs delivered with dispatch
-
-- **WHEN** `graph_advance` or `graph_jump` returns the next node
-- **THEN** the response SHALL include channel/dependsOn declarations but SHALL NOT include upstream output text — consumers assemble upstream context from the executing agent's session (platform-persisted), never from the payload or files
-
-#### Scenario: graph_advance returns null when graph complete
-
-- **WHEN** `graph_advance` completes the final phase (all phases `done` or `skipped`)
-- **THEN** `null` SHALL be returned — indicating graph execution is complete
-
-#### Scenario: graph_advance with skip marks node as skipped
-
-- **WHEN** `graph_advance({ runId, nodeId: "...", durationMs: 0, skip: true })` is called
-- **THEN** the node SHALL be marked `skipped` instead of `done`
-
-#### Scenario: graph_advance fails on unknown runId
-
-- **WHEN** `graph_advance` references a non-existent `runId`
-- **THEN** an MCP error SHALL be returned with code indicating the run was not found
-
-#### Scenario: failed phase advances as done
-
-- **WHEN** a phase fails and the agent calls `graph_advance` without a status parameter
-- **THEN** the scheduler SHALL record the node as `done` and dispatch the next node
-
-### Requirement: graph_jump — directed jump to target phase
-
-System SHALL reset a target phase and its downstream terminal nodes to `pending`, then return the next node. When the target is an entry node (in-degree 0 after flattening), SHALL also reset the activation prefix and dispatch it first; when the target is a non-entry node, SHALL NOT touch P (in-round rework).
-
-#### Scenario: graph_jump resets target and upstream
-
-- **WHEN** `graph_jump({ runId, targetPhaseId: "loop-entry" })` and loop-entry is an entry node
-- **THEN** the target and its downstream terminal nodes are reset to `pending` (upstream preserved)
-- **THEN** P is reset and dispatched first (confirm/load re-run), followed by the target node
-
-#### Scenario: graph_jump to mid-graph keeps P
-
-- **WHEN** `graph_jump` targets a non-entry node (re-running the review node)
-- **THEN** P state is preserved — this round's confirm/load outputs remain valid
-
-#### Scenario: graph_jump fails on non-existent phase
-
-- **WHEN** `graph_jump` references a `targetPhaseId` not in the graph
-- **THEN** an MCP error SHALL be returned
-
 ### Requirement: graph_force_end — force terminate a run
 
 System SHALL force-terminate a running graph: all non-terminal nodes marked `skipped`, run status set to `terminated`. Operation is irreversible.
@@ -214,34 +115,14 @@ System SHALL communicate via MCP JSON-RPC 2.0 over stdio. Domain errors SHALL ma
 - **WHEN** a `PersistenceError` occurs — MCP error code SHALL indicate internal error
 - **THEN** each error response SHALL include a human-readable message with context (runId, phaseId, file path)
 
-### Requirement: graph_start — mode parameter
-
-`graph_start` SHALL NOT accept a `mode` parameter (removed — the separation-from-args semantics is finalized). Mode is consumed by the `$run-mode-confirm` node via `args.mode` (an `{args.X}` interpolation variable) — args keep their graph-level input semantics unchanged.
-
-#### Scenario: graph_start with mode creates auto run
-
-- **WHEN** `graph_start({ graphName: "...", mode: "auto" })` is called
-- **THEN** input validation rejects the unknown top-level parameter `mode` — graph-level mode is passed via `args: { mode: "auto" }` (callers must migrate)
-
-#### Scenario: graph_start without mode defaults manual
-
-- **WHEN** `graph_start({ graphName: "..." })` is called and args.mode is not set
-- **THEN** the `$run-mode-confirm` node asks per the absence-never-auto protocol (Manual recommended default) — no run-level default injection
-
-#### Scenario: mode is distinct from args
-
-- **WHEN** `graph_start({ graphName: "...", args: { mode: "auto", changeName: "x" } })` is called
-- **THEN** `args.mode` participates in `{args.X}` interpolation — the confirm node's task text carries the value and emits `{ "mode": "auto" }`; the remaining args keep their semantics unchanged
-
 ### Requirement: graph_start — snapshot response unchanged
 
-`graph_start` SHALL continue to return the run snapshot (isomorphic with graph_advance/graph_jump). Snapshot consumption points = jump-target enumeration (M2) + progress display + API self-containment; P nodes SHALL appear in the snapshot `nodes` (status/retryCount visible).
+`graph_start` SHALL continue to return the run snapshot (isomorphic with graph_advance/graph_jump). Snapshot consumption points = jump-target enumeration (M2) + progress display + API self-containment.
 
 #### Scenario: graph_start returns snapshot with node states
 
 - **WHEN** `graph_start` returns the first node
 - **THEN** the response SHALL include a `snapshot` with run-level fields and a `nodes` array (nodeId/status/retryCount/startedAt/completedAt/durationMs per phase)
-- **AND** P nodes are included in `nodes` (`$run-mode-confirm`, `$load-constraints`)
 
 #### Scenario: advance and jump snapshots unchanged
 
@@ -263,16 +144,6 @@ The PhaseSchema `skill:` field SHALL reject URI-form values (`skill://…`) at s
 
 - **WHEN** a graph declares `skill: atom-scope-interview`
 - **THEN** the phase SHALL load with `skill` passed through as the plain name
-
-### Requirement: handlerSkill SHALL be name-based
-
-NodeDetail `handlerSkill` SHALL carry the plain skill name (`atom-phase-handler`) and SHALL be documented as "load skill named X per the skill-resolution convention" — never "load via `skill://<name>`".
-
-#### Scenario: NodeDetail documents name-based loading
-
-- **WHEN** NodeDetail is constructed with `handlerSkill: 'atom-phase-handler'`
-- **THEN** the consuming agent SHALL load the skill by the resolution convention (plain name → SKILL.md)
-- **AND** the documented loading mechanism SHALL contain no URI form
 
 ### Requirement: graph_advance SHALL carry branch routing
 
@@ -308,3 +179,178 @@ NodeDetail `handlerSkill` SHALL carry the plain skill name (`atom-phase-handler`
 - **WHEN** a validation probe run is force-ended
 - **THEN** the run SHALL be `terminated` with no active nodes
 - **AND** subsequent probe runs SHALL NOT collide with it
+
+### Requirement: graph_advance — report completion without durationMs
+
+System SHALL accept a node completion report and return the next ready node, combining notify and askNext into a single atomic call. The call SHALL accept optional `branchTo` (routing decision target) and optional `endRun` (approval end action) and SHALL NOT accept `durationMs` — node duration is derived by the scheduler from `startedAt`/`completedAt` timestamps, never reported. The call SHALL NOT accept an `output` parameter — node content is produced and consumed in the agent session (platform-persisted), never persisted by the scheduler. The call SHALL NOT accept a `status` or failure flag — a phase that failed during execution SHALL be recorded by the scheduler as `done` (failure semantics live in the agent session, not the scheduler DB). No `skip` parameter SHALL exist — there is no skip state (unchosen branches stay pending forever).
+
+#### Scenario: graph_advance returns next ready node
+
+- **WHEN** `graph_advance({ runId, nodeId: "lint" })` is called
+- **THEN** the `lint` node SHALL be marked `done` with `completedAt` set
+- **AND** the next ready node SHALL be returned with its dispatch payload
+
+#### Scenario: graph_advance derives duration from timestamps
+
+- **WHEN** a node has `startedAt` and `completedAt` set
+- **THEN** the snapshot's `durationMs` for that node SHALL equal `Date.parse(completedAt) - Date.parse(startedAt)`
+
+#### Scenario: graph_advance reports output
+
+- **WHEN** `graph_advance({ runId, nodeId: "lint" })` is called
+- **THEN** no output SHALL be accepted or persisted — node content stays in the agent session (platform-persisted)
+
+#### Scenario: Upstream outputs delivered with dispatch
+
+- **WHEN** `graph_advance` or `graph_jump` returns the next node
+- **THEN** the response SHALL include channel/dependsOn declarations but SHALL NOT include upstream output text — consumers assemble upstream context from the executing agent's session (platform-persisted), never from the payload or files
+
+#### Scenario: graph_advance returns null when graph complete
+
+- **WHEN** `graph_advance` completes the final phase (all phases `done` or `aborted`)
+- **THEN** `null` SHALL be returned — indicating graph execution is complete
+
+#### Scenario: graph_advance has no skip parameter
+
+- **WHEN** an agent calls `graph_advance` attempting a `skip` flag
+- **THEN** the call SHALL fail schema validation — no skip state exists, unchosen branch-route nodes stay `pending` forever
+
+#### Scenario: graph_advance fails on unknown runId
+
+- **WHEN** `graph_advance` references a non-existent `runId`
+- **THEN** an MCP error SHALL be returned with code indicating the run was not found
+
+#### Scenario: failed phase advances as done
+
+- **WHEN** a phase fails and the agent calls `graph_advance` without a status parameter
+- **THEN** the scheduler SHALL record the node as `done` and dispatch the next node
+
+### Requirement: graph_start — snapshot response without contract warnings
+
+The `graph_start` response SHALL include the run snapshot, resolution identity (`resolvedFrom`, `resolvedPath`, `description`), and the first node — and SHALL NOT include `contractWarnings` (the load-time skill-contract pass is removed from the engine; entry-skill alignment runs agent-side in estate-maintain).
+
+#### Scenario: graph_start response carries no contract warnings
+
+- **WHEN** `graph_start({ graphName })` returns a node
+- **THEN** the response SHALL have no `contractWarnings` field regardless of graph/skill contract state
+
+### Requirement: snapshot carries fsmState only
+
+The run snapshot SHALL carry `fsmState` as the single run-status field; a `status` alias SHALL NOT exist. `graphList` SHALL return the same shape from every path (runId, graphName, fsmState, createdAt, updatedAt).
+
+#### Scenario: snapshot has no status alias
+
+- **WHEN** any tool returns a run snapshot
+- **THEN** `fsmState` SHALL be present and `status` SHALL be absent
+
+#### Scenario: graph_list shape unified
+
+- **WHEN** `graph_list` is called
+- **THEN** every entry SHALL carry runId, graphName, fsmState, createdAt, updatedAt — identical across code paths
+
+### Requirement: NodeDetail carries no handlerSkill
+
+NodeDetail SHALL NOT carry `handlerSkill` — the handler skill for main/approval/gate dispatch is the constant `atom-phase-handler` known agent-side.
+
+#### Scenario: NodeDetail omits the constant field
+
+- **WHEN** graph_start/graph_advance/graph_jump returns a NodeDetail
+- **THEN** the payload SHALL have no `handlerSkill` field
+
+### Requirement: graph_advance SHALL carry branch routing without durationMs
+
+MODIFIED: `graph_advance` SHALL accept an optional branch routing parameter (branch target node id) alongside runId/nodeId — and SHALL NOT accept `durationMs` (derived from timestamps). The scheduler SHALL apply it as a BRANCH event (activate target or JUMP-reset per target state).
+
+#### Scenario: Advance applies forward branch
+
+- **WHEN** the agent advances a gate node with a selected branch target
+- **THEN** the scheduler SHALL activate that target as the next node
+
+#### Scenario: Advance reports no duration
+
+- **WHEN** an agent calls `graph_advance({ runId, nodeId, branchTo })`
+- **THEN** the call SHALL succeed without a durationMs argument — the node's duration is derived from startedAt/completedAt
+
+### Requirement: Snapshot delta payload
+
+Every dispatch response (`graph_start`, `graph_advance`, `graph_jump`) carries the run snapshot in delta form: the full `node`, `snapshot.changed` (nodes whose state changed since the previous dispatch, full fields), and `snapshot.nodes` (one compact line per node: `nodeId`, `status`, `retryCount`). Jump navigation and progress display keep their existing semantics; the compact list remains the complete jump-target enumeration.
+
+#### Scenario: Dispatch with changes
+
+- **WHEN** a node completes and `graph_advance` returns the next node
+- **THEN** the response includes the completing node's full state in `changed` and a one-line status entry for every run node
+
+#### Scenario: Dispatch without changes
+
+- **WHEN** a dispatch returns without any node state change
+- **THEN** `snapshot.changed` is empty and `snapshot.nodes` carries one-line entries only
+
+### Requirement: graph_start mode parameter
+
+`graph_start` accepts `args.mode` (`manual` | `auto`). When absent, the response reports `mode_required` (no run created). When present, the run activates immediately with that mode.
+
+#### Scenario: Mode provided
+
+- **WHEN** `graph_start` is called with `args.mode: "manual"`
+- **THEN** a run is created and the response includes `runId`, the first author node, and the delta snapshot
+
+#### Scenario: Mode omitted
+
+- **WHEN** `graph_start` is called without `args.mode`
+- **THEN** the response reports `mode_required` and no run is created
+
+### Requirement: graph_advance signature unchanged
+
+`graph_advance(runId, nodeId, branchTo?, endRun?)` keeps its exact parameter surface; no new parameters are added and none are removed.
+
+#### Scenario: Advance
+
+- **WHEN** a pilot reports a completed node via `graph_advance`
+- **THEN** the scheduler records progress and returns the next pending node with a delta snapshot
+
+### Requirement: graph_start — create run and return first author node
+
+System SHALL create a new graph execution run and immediately return the first ready node, combining run creation and initial askNext into a single atomic call. The response SHALL include the run snapshot (`runId`, `graphName`, `fsmState`/`status`, `currentPhaseId`, `nodeCount`, `completedCount`, timestamp, `nodes` array — isomorphic with graph_advance/graph_jump) — the first node (entry dispatch) carries the snapshot for jump-target enumeration and progress display. The first node SHALL be the graph's first author entry node — no activation prefix exists (activation facts live at the invocation boundary: `graph_start` `args.mode`; the pilot loads constraints).
+
+#### Scenario: graph_start creates run for valid graph
+
+- **WHEN** `graph_start({ graphName: "ci-pipeline" })` is called
+- **THEN** a new run SHALL be created with status `running` and a unique `runId`
+- **THEN** all phases SHALL be initialized as `pending`
+- **THEN** the first ready batch SHALL be resolved and the first node returned as `NextNode`
+- **THEN** `NextNode` SHALL include: `runId`, `graphName`, `nodeId`, `type`, and type-specific fields
+
+#### Scenario: graph_start returns snapshot with node states
+
+- **WHEN** `graph_start` returns the first node
+- **THEN** the response SHALL include a `snapshot` with run-level fields and a `nodes` array (nodeId/status/retryCount/startedAt/completedAt/durationMs per phase)
+- **AND** the first node SHALL be `active` in the snapshot
+
+#### Scenario: graph_start with args passes args to graph
+
+- **WHEN** `graph_start({ graphName: "...", args: { branch: "main" } })` is called
+- **THEN** the args SHALL be stored with the run and available for template interpolation
+
+#### Scenario: graph_start fails on unknown graph
+
+- **WHEN** `graph_start` references a graph name with no corresponding `.taskflow.yaml`
+- **THEN** an MCP error SHALL be returned with code indicating the graph was not found
+
+### Requirement: graph_jump — reset target and downstream
+
+System SHALL reset a target phase and its downstream terminal nodes to `pending`, then return the next node. Jump targets are node ids; jumps never touch an activation prefix (no prefix exists — entry-node jumps reset author nodes only).
+
+#### Scenario: graph_jump resets target and upstream
+
+- **WHEN** `graph_jump({ runId, targetPhaseId: "loop-entry" })` and loop-entry is an entry node
+- **THEN** the target and its downstream terminal nodes are reset to `pending` (upstream preserved)
+
+#### Scenario: graph_jump to mid-graph keeps entry
+
+- **WHEN** `graph_jump` targets a non-entry node (re-running the review node)
+- **THEN** the entry node is not reset — only the target and its downstream are reset
+
+#### Scenario: graph_jump fails on non-existent phase
+
+- **WHEN** `graph_jump` references a `targetPhaseId` not in the graph
+- **THEN** an MCP error SHALL be returned

@@ -32,8 +32,8 @@ function makeFixture(): Fixture {
   const graphJson = JSON.stringify(
     {
       name: 'test-graph',
-      version: 1,
-      phases: [{ id: 'a1', type: 'main', skill: 'entry-agent-skill', task: 'do thing' }],
+
+      phases: [{ id: 'a1', type: 'main', skill: 'entry-agent-skill', task: 'do thing', operations: [] }],
     },
     null,
     2,
@@ -81,24 +81,19 @@ describe('FileSystem absolute path handling (P1 fix)', () => {
       }),
     );
 
-    const result = await rt.graphStart('test-graph');
+    const result = await rt.graphStart('test-graph', { mode: 'auto' });
     expect(result).toBeDefined();
     expect(result.runId).toBeTruthy();
-    // Activation prefix dispatches first (no approvals → load node)
+    // Runs start directly at the first author node (no activation prefix)
     expect(result.node).toBeDefined();
-    expect(result.node?.nodeId).toBe('$load-constraints');
-
-    // Prefix done → author node dispatches
-    const next = await rt.graphAdvance(result.runId, '$load-constraints', 10);
-    expect(next.node?.nodeId).toBe('a1');
+    expect(result.node?.nodeId).toBe('a1');
   });
 
-  it('accepts version as string (lenient validation)', async () => {
-    // Write a graph with version as string (old format) — our validator allows it
+  it('rejects a graph declaring the version field — dead field, loud rejection', async () => {
     const badJson = JSON.stringify({
       name: 'bad-graph',
       version: '1.0',
-      phases: [{ id: 'b1', type: 'main', skill: 'entry-agent-skill', task: 'bad' }],
+      phases: [{ id: 'b1', type: 'main', skill: 'entry-agent-skill', task: 'bad', operations: [] }],
     });
     writeFileSync(join(fix.taskflowDir, 'bad-graph.taskflow.yaml'), badJson);
 
@@ -109,9 +104,8 @@ describe('FileSystem absolute path handling (P1 fix)', () => {
       }),
     );
 
-    // Own validator does not enforce version type — graph starts
-    const result = await rt.graphStart('bad-graph');
-    expect(result.runId).toBeTruthy();
+    // version is a removed dead field — the graph fails to load
+    await expect(rt.graphStart('bad-graph', { mode: 'auto' })).rejects.toThrow();
   });
 
   it('resolves built-in registry entry paths relative to registry dir, not taskflowDir (P2 fix)', async () => {
@@ -126,7 +120,7 @@ describe('FileSystem absolute path handling (P1 fix)', () => {
     // Write graph file in built-in dir
     const graphJson = JSON.stringify({
       name: 'builtin-graph',
-      phases: [{ id: 'b1', type: 'main', skill: 'entry-agent-skill', task: 'echo builtin' }],
+      phases: [{ id: 'b1', type: 'main', skill: 'entry-agent-skill', task: 'echo builtin', operations: [] }],
     });
     writeFileSync(join(builtinGraphsDir, 'builtin-graph.taskflow.yaml'), graphJson);
 
@@ -147,7 +141,7 @@ describe('FileSystem absolute path handling (P1 fix)', () => {
 
     // Should resolve 'builtin-graph' from built-in registry
     // Graph file path must resolve relative to builtinGraphsDir, NOT projectTaskflowDir
-    const result = await rt.graphStart('builtin-graph');
+    const result = await rt.graphStart('builtin-graph', { mode: 'auto' });
     expect(result).toBeDefined();
     expect(result.runId).toBeTruthy();
     expect(result.node).toBeDefined();

@@ -6,7 +6,6 @@ import { PhaseSchema } from './phase.js';
  *
  * Top-level structure:
  * - name (optional): graph name for display and reference
- * - version (optional): schema version number
  * - phases: array of phase/node definitions
  *
  * .passthrough() allows future extension fields without breaking validation.
@@ -21,8 +20,6 @@ export const TaskflowSchema = z
      * no enum, no behavior branching.
      */
     description: z.string().optional(),
-    /** schema version */
-    version: z.union([z.string(), z.number()]).optional(),
     /**
      * Graph-level ambient context — the global channel. Merged once at load
      * with the config default layer (config first, dedup) and injected into
@@ -48,6 +45,13 @@ export const TaskflowSchema = z
         code: 'custom',
         path: ['channels'],
         message: `top-level 'channels' is renamed to 'context' (two-scope context model) — rename the key in this graph definition`,
+      });
+    }
+    if ((data as Record<string, unknown>).version !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['version'],
+        message: `'version' is removed (schema has no versions — dead field); delete it from this graph definition`,
       });
     }
   })

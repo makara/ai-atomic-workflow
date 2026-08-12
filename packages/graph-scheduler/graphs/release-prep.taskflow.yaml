@@ -6,6 +6,7 @@ phases:
     type: main
     dependsOn: []
     skill: release-prep-analyze
+    operations: [read, run]
     task: |
       Execute pre-release analysis per release-prep-analyze.
 
@@ -15,14 +16,20 @@ phases:
       Output contract: last_tag, diff_summary, bump, proposed_version,
       tag_proposal, changelog_inventory, basis, idempotent.
 
-  # Confirmation — grilling interview (never auto-gated): every planned
+  # Confirmation — grilling exploration (encapsulation contract — upstream
+  # skill untouched; never auto-gated, never zero-question): every planned
   # operation confirmed before any write.
   - id: plan-grill
     type: main
     dependsOn: [propose]
     skill: grilling
+    operations: []
     task: |
-      Execute grilling conversation per grilling skill.
+      Execute grilling per grilling skill. Graph dispatch encapsulation
+      contract: MANDATORY question rounds — at least one round, whole
+      frontier per round, never zero-question, never auto-gated (cards in
+      any mode); output shape { decisions: [{ decision, rationale }],
+      shared_understanding: boolean } — never 'consensus'.
 
       Confirm EVERY planned operation before any write: version value (from
       propose output — adjustable), version bump surfaces (release-line: root
@@ -30,13 +37,14 @@ phases:
       changelog fold scope, README targets, release boundary (working tree
       only — tag/commit user-executed).
 
-      Output contract: confirmed_plan, decisions.
+      Output contract: confirmed_plan, decisions, shared_understanding.
 
   # Writes — confirmed plan in, verified release-ready working tree out.
   - id: apply
     type: main
     dependsOn: [plan-grill]
     skill: release-prep-apply
+    operations: [read, write, verify]
     task: |
       Execute pre-release writes per release-prep-apply.
 

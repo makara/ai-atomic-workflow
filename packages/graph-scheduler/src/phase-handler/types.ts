@@ -29,7 +29,8 @@ export interface IPhaseHandler {
 
   /**
    * Extend the base NodeDetail with type-specific fields.
-   * Base fields (nodeId, type, handlerSkill, skill, retryCount) set by core.
+   * Base fields (nodeId, type, skill, retryCount) set by core; the dispatch
+   * handler skill is the constant atom-phase-handler (agent-side knowledge).
    * Handler adds type-specific fields (task, topic, routingActions,
    * channels, jumps, route, etc.).
    */
@@ -42,8 +43,6 @@ export interface IBaseNodeDetail {
   readonly type: string;
   /** upstream phase ids this phase depends on — from phase.dependsOn, present for all phase types (implicit upstream coverage verifiable at runtime) */
   readonly dependsOn?: readonly string[];
-  /** handler skill — constant 'atom-phase-handler' */
-  readonly handlerSkill: string;
   /** execution skill — phase.skill, the skill that executes this phase's work (main type; optional) */
   readonly skill?: string;
   /** operation classes — phase operations declaration (HLT closed set); handler injects registry entries + verifies per declared class */
@@ -56,15 +55,14 @@ export interface IBaseNodeDetail {
  *
  * All phase-type-specific fields are optional — handler fills what it needs.
  * type is the closed enum (main/approval/gate/flow — schema-enforced);
- * handlerSkill is the constant 'atom-phase-handler'.
+ * the dispatch handler skill is the constant 'atom-phase-handler' (agent-side
+ * knowledge — not carried in the payload).
  */
 export interface INodeDetail {
   readonly nodeId: string;
   readonly type: string;
   /** upstream phase ids this phase depends on — from phase.dependsOn, present for all phase types */
   readonly dependsOn?: readonly string[];
-  /** handler skill — constant 'atom-phase-handler' */
-  readonly handlerSkill: string;
   /** execution skill — from phase.skill; the skill that executes this phase's work */
   readonly skill?: string;
   /** Agent hints — priority-ordered sub-agent type preferences for main phases; advisory, consumed by skills when dispatching */
@@ -77,7 +75,7 @@ export interface INodeDetail {
   readonly topic?: string;
   /** Approval phase — decision routing actions (replaces deprecated routes) */
   readonly routingActions?: ReadonlyArray<IApprovalAction>;
-  /** All types — effective channel patterns (scheduler-side scope merge: project → graph → flow → phase; main: skill names/file globs/node:<id> against the skill contract; gate/approval: all entry kinds — full-type inheritance) */
+  /** All types — effective channel patterns (scheduler-side scope merge: project → graph → flow → phase) */
   readonly channels?: string[];
   /** Gate phase — rework jumps (route-first): agent evaluates when against judgment context; hit → backward jump target */
   readonly jumps?: ReadonlyArray<IJumpCondition>;
@@ -148,5 +146,4 @@ export interface IFsmNodeState {
   readonly retryCount: number;
   readonly startedAt?: string;
   readonly completedAt?: string;
-  readonly durationMs?: number;
 }

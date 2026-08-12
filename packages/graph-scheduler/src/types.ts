@@ -59,6 +59,13 @@ export interface PersistenceError {
   readonly cause?: unknown;
 }
 
+/** run mode missing/invalid at graph_start — activation requires args.mode (manual | auto) */
+export interface ModeRequiredError {
+  readonly _tag: 'ModeRequiredError';
+  readonly graphName: string;
+  readonly message: string;
+}
+
 /** Union of all scheduler operation errors */
 export type SchedulerError =
   | NotFoundError
@@ -68,7 +75,8 @@ export type SchedulerError =
   | PersistenceError
   | FileSystemError
   | RegistryLoadError
-  | DispatchConfigError;
+  | DispatchConfigError
+  | ModeRequiredError;
 
 /** graph/registry contract violation at dispatch time — missing entry skill, unregistered phase type.
  *  Replaces the silent three-layer fallback: agent phases SHALL declare explicit entry skill. */

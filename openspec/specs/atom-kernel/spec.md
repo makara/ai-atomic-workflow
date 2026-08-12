@@ -107,19 +107,22 @@ System SHALL provide `judge()` as a one-shot LLM judgment primitive: a single li
 
 ### Requirement: interview() — multi-turn consensus
 
-System SHALL define `interview()` as a behavior contract for multi-round consensus conversations with two modes (consensus mode and solve mode) sharing one rule set. The contract SHALL stay decoupled from platform spellings — all questions SHALL go through the `approval()` contract WITHOUT recommendation (a card appears in any run mode — interviews are never auto-gated). Eight behavior rules govern the interview process. `interview()` is NOT a callable function — it is implemented by the agent using `approval()` one turn at a time.
+System SHALL define `interview()` as a behavior contract for multi-round confirmation conversations with an explicit participation strategy. The contract SHALL stay decoupled from platform spellings — all questions SHALL go through the `approval()` contract WITHOUT recommendation (a card appears in any run mode — interviews are never auto-gated). Six behavior rules govern the confirmation process. `interview()` is NOT a callable function — it is implemented by the agent using `approval()` one turn at a time.
 
-Consensus mode: confirm goal → decision rounds → `{ decisions }`. Solve mode: confirm goal → research? (default true) → think → decision rounds → reject → re-think → repeat until accepted → `{ goal, findings?, design, consensus }`. Solve mode SHALL apply when `research: true` or the goal produces a design/solution; the mode SHALL be selected by the caller, not inferred.
+Confirmation flow: confirm goal → decision rounds → `{ decisions }`. The former solve mode is retired as a contract mode: when the goal produces a design/solution, the caller composes research as a flow step and calls interview() for confirmation rounds only; `research`/`design` SHALL NOT be contract parameters.
 
-Solve-mode additions SHALL apply on top of rules 1-8: research before think (when research: true — load `research`, look up reference specs, patterns, constraints); think exhaustively (complete design covering structure, naming, edges, guards, edge cases); re-think on reject (revise design, re-interview affected decisions only — confirmed decisions SHALL NOT be re-asked).
+`participation` SHALL be an explicit caller-declared strategy on every call: `'as-needed'` (context fully covers the goal → return consensus directly; the former zero-question degradation, now an explicit strategy, never inferred) or `'mandatory'` (at least one question round regardless of context coverage). Default SHALL be stated in the contract; absence never auto-infers from context.
+
+Six rules: (1) comprehensive coverage — every aspect of the goal topic covered; (2) fact lookup — discoverable facts looked up, never asked; (3) recommendation first — recommended answer first option, derived from context analysis; (4) dependency resolution — prerequisite before dependent; (5) single question per turn via approval() without recommendation; (6) shared understanding gate — no action until the user confirms shared understanding.
 
 #### Scenario: interview conducts multi-turn consensus
 
-- **WHEN** agent implements `interview({ goal: "Choose database strategy", context: "..." })`
+- **WHEN** agent implements `interview({ goal: "Confirm database strategy", context: "...", participation: "mandatory" })`
 - **THEN** every aspect of the goal topic SHALL be covered — comprehensive coverage, no skipped dimensions
 - **THEN** each branch of the decision tree SHALL be exhausted before stopping
 - **THEN** dependencies between decisions SHALL be resolved in order — prerequisite before dependent
 - **THEN** exactly one question SHALL be asked per turn via `approval()` (no recommendation)
+- **THEN** at least one question round SHALL occur (mandatory participation)
 
 #### Scenario: Interview turn cards in auto mode
 
@@ -145,49 +148,58 @@ Solve-mode additions SHALL apply on top of rules 1-8: research before think (whe
 
 #### Scenario: Zero-question degradation
 
-- **WHEN** context already covers all aspects of the goal and no clarification is needed
+- **WHEN** interview() is called with `participation: "as-needed"` and context already covers all aspects of the goal and no clarification is needed
 - **THEN** `interview()` SHALL return consensus directly without asking questions
-- **THEN** this is a natural consequence of rules 1-8 — not an independent rule
+- **THEN** this SHALL be the explicit as-needed strategy — never an inference from context
 
 #### Scenario: Returns structured consensus
 
-- **WHEN** interview completes in consensus mode
+- **WHEN** interview completes
 - **THEN** the return value SHALL be `{ decisions: [{ decision, rationale }] }` — structured summary of agreed points
 
-#### Scenario: Solve mode runs complete loop
+#### Scenario: Design flows compose research outside interview
 
-- **WHEN** agent implements `interview({ goal: "Design auth module", research: true, context: "..." })` in solve mode
-- **THEN** the flow SHALL be: confirm(goal) → research → think → interview(details) → repeat until accepted
+- **WHEN** the caller composes a design flow (research → think → interview confirmation rounds) for a design goal
+- **THEN** the flow SHALL be: confirm(goal) → research → think → interview(confirmation) → repeat until accepted
 - **THEN** goal consensus SHALL be confirmed before any work begins
-- **THEN** when `research: true` — agent SHALL load `research` and look up reference specs, patterns, constraints
-- **THEN** think step SHALL design a complete solution covering structure, naming, edges, guards, edge cases
+- **THEN** research/think run outside interview() — interview() confirms decisions only (solve mode retired, ADR 0154)
 
-#### Scenario: Solve mode handles rejection
+#### Scenario: Rejection re-thinks affected decisions
 
-- **WHEN** user rejects a design decision during interview
-- **THEN** agent SHALL return to think step, revise design, and re-interview affected decisions only
+- **WHEN** user rejects a design decision during interview rounds
+- **THEN** the caller SHALL return to think, revise design, and re-interview affected decisions only
 - **THEN** confirmed decisions SHALL NOT be re-asked
 
-#### Scenario: Solve mode returns structured solution
+#### Scenario: Caller assembles the design output
 
 - **WHEN** all design decisions are confirmed
-- **THEN** return value SHALL be `{ goal, findings?, design, consensus }`
-- **THEN** `findings` SHALL be present only when `research: true`
-- **THEN** `consensus` SHALL record every confirmed decision with rationale
+- **THEN** the caller SHALL assemble the design output (goal/design/decisions) — interview() returns `{ decisions: [{ decision, rationale }] }` only
+
+#### Scenario: Mandatory participation never zeroes out
+
+- **WHEN** interview() is called with `participation: "mandatory"`
+- **THEN** at least one question round SHALL be presented regardless of context coverage
+- **THEN** no zero-question degradation SHALL apply
 
 ### Requirement: Primitives triangle — layered composition
 
-The primitives SHALL form a layered dependency where each level builds on the one below. `approval()` is the atomic unit; `interview()` composes multiple `approval()` calls and carries both consensus and solve modes. There SHALL be exactly one conversation contract (`interview()`) — no standalone `solve()` contract, and no `solve()` references in skill documents or graph task texts (grep-verifiable zero residue).
+The primitives SHALL form a layered dependency where each level builds on the one below. `approval()` is the atomic unit; `interview()` composes multiple `approval()` calls as the confirmation contract. There SHALL be exactly one conversation contract (`interview()`) in the kernel — grilling is an upstream exploration skill, referenced but never described with interview vocabulary, and never receiving interview-only semantics (participation flags, zero-question). No `solve()` contract exists — no `solve()` references in skill documents or graph task texts (grep-verifiable zero residue).
 
 #### Scenario: Each level composes the level below
 
-- **WHEN** `interview()` runs — it SHALL use `approval()` per turn
-- **THEN** `task()` is orthogonal — it dispatches sub-agents that may themselves use any primitive
+- **WHEN** a confirmation conversation runs
+- **THEN** each turn SHALL go through `approval()` — interview composes approval, never bypasses it
+- **THEN** grilling (upstream exploration skill) SHALL be referenced with its own vocabulary — frontier/rounds/decisions — and SHALL NOT inherit interview-only semantics
 
 #### Scenario: No solve() residue in consumers
 
-- **WHEN** an agent greps `packages/graph-workflow/skills/**/SKILL.md` and `packages/graph-scheduler/graphs/*.taskflow.yaml` for `solve()`
-- **THEN** the only matches SHALL be historical references (reports/ADRs) — zero matches in live skill documents and graph task texts
+- **WHEN** skill documents and graph task texts are scanned for `solve()`
+- **THEN** zero references SHALL remain — the solve mode is retired as a contract mode
+
+#### Scenario: Kernel body contains no upstream skill mentions in interview contract
+
+- **WHEN** the interview contract references exploration conversations
+- **THEN** the kernel SHALL NOT describe grilling with interview vocabulary or interview-only semantics — grilling is an upstream skill outside the kernel contract surface
 
 ### Requirement: atom-kernel SHALL NOT declare loading writing-great-skills
 
@@ -201,12 +213,12 @@ atom-kernel is a runtime-primitives reference skill (platform spellings, graph-s
 
 ### Requirement: atom-kernel SHALL keep conditional research loading
 
-`interview()` solve mode with `research: true` SHALL load skill `research` before the think step. This conditional loading declaration SHALL remain in atom-kernel.
+A design flow composing research before interview() confirmation rounds SHALL load skill `research` before the think step. This conditional loading declaration SHALL remain in atom-kernel (solve mode retired as a contract mode — research is caller flow composition, ADR 0154).
 
-#### Scenario: Solve mode research loads research skill
+#### Scenario: Design flow research loads research skill
 
-- **WHEN** an agent runs `interview()` solve mode with `research: true`
-- **THEN** the agent SHALL load skill `research` before reasoning about the solution
+- **WHEN** a caller composes a design flow (research → think → interview confirmation rounds)
+- **THEN** the caller SHALL load skill `research` before reasoning about the solution
 
 ### Requirement: interview() section SHALL NOT carry upstream descriptive references
 
@@ -299,7 +311,7 @@ atom-kernel §Platform Spellings SHALL include a `todo()` primitive row defining
 
 ### Requirement: High-Level Tool Registry section in atom-kernel
 
-`atom-kernel` is the sole home of the High-Level Tool Registry and the tool schema tables (merged from the retired atom-mcp-contract skill): the execution contract for main-phase work. The section defines the step as a registered tool call `{ intent, tool, args, bound }` (unknown tool names fail at analyze; legacy step fields rejected), the bounded evidence loop (default 3, evidence-gap failure), fault tolerance (retry-once → serena FS tier within core classes; visibility checks; intra-serena tier preconditions; serena unavailable → loud failure), the two-tier structure (core classes serena single-tool no fallback / utility classes optional), and the write-verify obligation per the registry `Entry: verify` (serena diagnostics + re-read; register_edit conditional on jcodemunch use). No Atomic Step Protocol chapter exists.
+MODIFIED: `atom-kernel` is the sole home of the High-Level Tool Registry and the tool schema tables: the execution contract for main-phase work. The section defines the step as a registered tool call `{ intent, tool, args, bound }`, the bounded evidence loop (default 3, evidence-gap failure), fault tolerance, the two-tier structure, the write-verify obligation, and the operation-class closed set. The operation-class vocabulary SHALL be single-sourced: the engine constant `HLT_OPERATION_CLASSES` is the machine source for phase `operations:` validation, the kernel prose class table SHALL agree with the constant in both directions (a test pins prose ∩ constant = constant), and the plugin tool map SHALL agree (usage-constraint pin test). The Registry SHALL record vocabulary correspondence: the HLT registered tool call IS the execution semantics of the project-name term `Atom` (historical "graph phase" meaning retired).
 
 #### Scenario: Step shape declared once
 
@@ -321,6 +333,26 @@ atom-kernel §Platform Spellings SHALL include a `todo()` primitive row defining
 - **WHEN** a step applies writes
 - **THEN** the step verifies per the registry `Entry: verify` (serena diagnostics + re-read) and records verification evidence before reporting success
 - **AND** register_edit is recorded while jcodemunch is in use, else `n/a: jcodemunch not in use`
+
+#### Scenario: Kernel points to the registry home
+
+- **WHEN** atom-kernel's registry section is read
+- **THEN** it contains the static scenario table and pointers to HLT-REGISTRY.md for the full registry — no duplicated rows
+
+#### Scenario: Discipline described as signal distribution
+
+- **WHEN** a main dispatch assembles the registry injection context
+- **THEN** discipline mechanics reference signal distribution (zero denial) — no enforcement-by-denial language appears
+
+#### Scenario: Operation class closed set pinned
+
+- **WHEN** an operation class is added to or removed from `HLT_OPERATION_CLASSES`
+- **THEN** the prose class table SHALL list exactly the same set (pin test fails on drift) and the plugin tool map SHALL stay within the set (mirror pin test fails on drift)
+
+#### Scenario: Glossary correspondence resolves
+
+- **WHEN** a reader looks up `Atom`
+- **THEN** the term SHALL resolve to the HLT registered tool call (execution semantics), with the historical graph-phase meaning marked retired
 
 ### Requirement: Atomic Step Protocol chapter removed
 
@@ -447,9 +479,9 @@ The High-Level Tool Registry section SHALL stay under ~120 lines (measured post-
 
 Given the atom-kernel skill file When searching for the plane-down semantics (plane unavailable → fail loudly naming the dependency) Then it appears exactly once, in the Two-plane structure block, and Fault Tolerance contains no duplicate
 
-#### Scenario: no enforcement-marker repetition
+#### Scenario: no discipline-marker repetition
 
-Given the atom-kernel skill file When searching for "enforcement:" lines in registry entries Then there is at most one table-intro line stating deferred/n/a status, not per-entry marker lines
+Given the atom-kernel skill file When searching for "discipline" / "signal distribution" lines in registry entries Then there is at most one table-intro line stating the signal-distribution pointer, not per-entry marker lines
 
 #### Scenario: registry validation single-sited
 
@@ -470,14 +502,6 @@ Given the atom-kernel skill file When searching for the graph-scheduler tool tab
 #### Scenario: low-use serena tools compressed
 
 Given the atom-kernel skill file When searching for find_declaration / find_implementations / find_file / list_dir / rename_symbol / insert_before_symbol / insert_after_symbol / safe_delete_symbol / create_text_file Then each carries a one-line signature and no param table (inline example permitted)
-
-### Requirement: Solve-mode flow single-sourced
-
-The interview() solve-mode chain SHALL be defined once — the Internal Flow diagram; other sections reference it.
-
-#### Scenario: single solve-mode chain
-
-Given packages/graph-workflow/skills/atom-kernel/SKILL.md When searching for the solve-mode chain (confirm → research → think → interview loop) Then it is fully stated only in the Internal Flow diagram; Mode Selection + Mode Comparison reference it
 
 ### Requirement: Hot rules stay in SKILL.md
 
@@ -560,17 +584,17 @@ atom-kernel §graph-scheduler SHALL state the output-sink rule with the main-nod
 
 ### Requirement: Platform-Primitive Band Compliance
 
-atom-kernel SKILL.md body SHALL stay within the platform-primitive band <=1,400 words (fence-inclusive, frontmatter-stripped). Cold branches reachable only by some activations SHALL live in siblings: interview() solve-mode additions + internal flow SHALL move to sibling INTERVIEW-DETAIL.md; the Legacy 8-field rejection clause SHALL live at HLT-REGISTRY §Protocol. The hot surface (approval()/task()/interview() rules 1-8 + Mode Selection/judge()/todo() contracts, HLT core scenario rows) SHALL remain in SKILL.md (non-transferable per Hot-content Non-Transferability).
+atom-kernel SKILL.md body SHALL stay within the platform-primitive band <=1,400 words (fence-inclusive, frontmatter-stripped). Cold branches reachable only by some activations SHALL live in siblings: the Legacy 8-field rejection clause SHALL live at HLT-REGISTRY §Protocol. (interview() semantics live in SKILL.md §interview() — the former INTERVIEW-DETAIL.md sibling was folded and deleted, ADR 0154.) The hot surface (approval()/task()/interview() rules 1-8 + Mode Selection/judge()/todo() contracts, HLT core scenario rows) SHALL remain in SKILL.md (non-transferable per Hot-content Non-Transferability).
 
 #### Scenario: Body in band
 
 - **WHEN** measuring atom-kernel SKILL.md body (fence-inclusive, frontmatter-stripped)
 - **THEN** <=1,400 words
 
-#### Scenario: Solve-mode cold in sibling
+#### Scenario: Interview semantics in the kernel body
 
-- **WHEN** locating interview() solve-mode mechanics (rules 9-11, internal flow)
-- **THEN** they live in INTERVIEW-DETAIL.md — SKILL.md carries rules 1-8 + §Mode Selection + a pointer
+- **WHEN** locating interview() mechanics (rules, participation, turn mechanics)
+- **THEN** they live in SKILL.md §interview() — no sibling file exists (INTERVIEW-DETAIL.md folded, ADR 0154)
 
 #### Scenario: Description trimmed
 
@@ -590,3 +614,17 @@ The headroom compress contract SHALL be stated once (HLT-REGISTRY §headroom); t
 
 - **WHEN** scanning SKILL.md / HLT-REGISTRY / JCODEMUNCH-SCHEMAS for the register_edit obligation
 - **THEN** one full statement (JCODEMUNCH-SCHEMAS) — other sites carry pointers
+
+### Requirement: Run mode consumption boundary
+
+The kernel SHALL define run mode as controlling single-decision presentation only: `approval()` calls (approval nodes and main-node approval() checkpoints) SHALL be mode-aware (manual/absent → card; auto + recommendation → execute; auto without recommendation → card, never guess). Mode SHALL NOT be consumed by gate conditions (machine judgment — judge() only) and SHALL NOT auto-execute consensus conversations (interview turns and grilling rounds are never auto-gated). The kernel is the single semantic authority; graph task texts and gate conditions SHALL NOT extend mode consumption beyond this boundary.
+
+#### Scenario: Gate conditions ignore run mode
+
+- **WHEN** a gate node evaluates jump conditions
+- **THEN** mode SHALL play no part in the evaluation — only declared jump conditions (e.g. output fields, retryCount bounds) SHALL be judged
+
+#### Scenario: Consensus conversations never auto-gate
+
+- **WHEN** an interview turn or a grilling round presents in auto mode
+- **THEN** a card SHALL appear — mode never gates confirmation or exploration conversations

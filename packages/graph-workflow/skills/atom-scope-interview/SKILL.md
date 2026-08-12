@@ -29,7 +29,7 @@ Caller-declared contract, shipped via task text:
 
 `Behavior:` flags (one per line, all optional):
 
-- **confirm** - `confirm: mandatory` (default: at least one question per activation; scope_complete only after user participation) \| `confirm: as-needed` (per atom-kernel §Zero-question degradation)
+- **confirm** - `confirm: mandatory` (default: at least one question per activation; scope_complete only after user participation) \| `confirm: as-needed` (per atom-kernel §interview() participation: 'as-needed')
 - **output path** - `output path: user_owned` (confirm the deliverable path, recommendation first) \| `output path: derived` (default: never ask)
 - **dual-name check** - `<field>` (produced name != executed graph name; equal -> warning + re-ask) \| `none` (default)
 - **context** - `context: convention` (default: CONTEXT.md lookup via convention layer; absence degrades gracefully - skip domain lookup, not a failure) \| `context: optional` (same degrade)
@@ -56,7 +56,7 @@ Caller-declared contract, shipped via task text:
 
 1. **Collect** - search conversation for user answers on each topic. Facts discoverable from environment (files, upstream outputs, CONTEXT.md via convention layer when present - absence degrades to direct scoping, never a failure) - look up, never ask.
 2. **Propose** - topic without user input -> propose with rationale from context analysis.
-3. **Interview** - interview() consensus mode per atom-kernel over Topics. Behavior flags per §Input (confirm=mandatory -> at least one question per activation; as-needed -> per atom-kernel §Zero-question degradation; empty Topics -> classification-only).
+3. **Interview** - interview() per atom-kernel over Topics (confirmation contract). Behavior flags per §Input (confirm=mandatory -> participation: mandatory, at least one question per activation; as-needed -> participation: as-needed; empty Topics -> classification-only).
 4. **Derive** - output path per behavior: user_owned -> confirm the deliverable path (recommendation first); derived -> never ask.
 5. **Check** - dual-name check per behavior: produced name in declared field != executed graph name; equal -> warning + re-ask, never accept silently.
 6. **Emit** - write the declared Output contract fields. No implicit fields.

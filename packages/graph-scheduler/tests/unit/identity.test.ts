@@ -52,15 +52,15 @@ function describedGraph(): string {
   return JSON.stringify({
     name: 'described',
     description: 'Test graph — produces artifacts for end users',
-    version: 1,
-    phases: [{ id: 'step-a', type: 'main', skill: 'test-agent-skill', task: 'do a' }],
+
+    phases: [{ id: 'step-a', type: 'main', skill: 'test-agent-skill', task: 'do a', operations: [] }],
   });
 }
 
 const PLAIN_GRAPH = JSON.stringify({
   name: 'plain',
-  version: 1,
-  phases: [{ id: 'step-a', type: 'main', skill: 'test-agent-skill', task: 'do a' }],
+
+  phases: [{ id: 'step-a', type: 'main', skill: 'test-agent-skill', task: 'do a', operations: [] }],
 });
 
 describe('graph_start identity fields', () => {
@@ -75,18 +75,18 @@ describe('graph_start identity fields', () => {
   });
 
   it('graph_start returns resolvedFrom + resolvedPath for a fallback-resolved graph', async () => {
-    const result = await fix.rt.graphStart('described');
+    const result = await fix.rt.graphStart('described', { mode: 'auto' });
     expect(result.resolvedFrom).toBe('fallback');
     expect(result.resolvedPath).toMatch(/described\.taskflow\.yaml$/);
   });
 
   it('graph_start carries the graph description when declared', async () => {
-    const result = await fix.rt.graphStart('described');
+    const result = await fix.rt.graphStart('described', { mode: 'auto' });
     expect(result.description).toBe('Test graph — produces artifacts for end users');
   });
 
   it('graph_start omits description when the graph declares none', async () => {
-    const result = await fix.rt.graphStart('plain');
+    const result = await fix.rt.graphStart('plain', { mode: 'auto' });
     expect(result.description).toBeUndefined();
   });
 });
@@ -112,7 +112,7 @@ describe('registry project-first precedence', () => {
   });
 
   it('project registry entry shadows the builtin same-named entry', async () => {
-    const result = await fix.rt.graphStart('e2e-minimal');
+    const result = await fix.rt.graphStart('e2e-minimal', { mode: 'auto' });
     expect(result.resolvedFrom).toBe('project');
     expect(result.resolvedPath).toMatch(/identity-test-/);
   });

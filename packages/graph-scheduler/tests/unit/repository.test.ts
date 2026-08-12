@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { migrate } from '../../src/lib/db/migration.js';
 import { buildService, type GraphRepository } from '../../src/lib/db/repository.js';
-import { SCHEMA_VERSION, VERSIONED_DDL } from '../../src/lib/db/schema.js';
+import { SCHEMA_VERSION } from '../../src/lib/db/schema.js';
 import type { NotFoundError } from '../../src/types.js';
 
 // ---------------------------------------------------------------------------
@@ -241,65 +241,43 @@ describe('initialize', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Schema migration — v1-era → current (v2) in-place upgrade (routes + cleanup;
-// mode/constraints never shipped — interim-V2 dev DBs are repaired in place)
+// Schema migration — single final shape (SCHEMA_VERSION = 1)
+// No versioned ladder, no interim repairs: FINAL_DDL applies idempotently;
+// a fresh database records version 1; an existing final-shape database is
+// left untouched. mode/constraints never shipped in any version.
 // ---------------------------------------------------------------------------
 
-describe('schema migration v1-era → current', () => {
-  it('upgrades a v1 database in place: adds routes column, keeps rows', () => {
-    const db = new Database(':memory:');
-    // Simulate a v1 database: original DDL + version marker, no routes column.
-    db.exec(`
-      CREATE TABLE graph_runs (
-        run_id           TEXT PRIMARY KEY,
-        graph_name       TEXT NOT NULL,
-        fsm_state        TEXT NOT NULL DEFAULT 'idle',
-        args             TEXT,
-        created_at       TEXT NOT NULL,
-        updated_at       TEXT NOT NULL
-      );
-      CREATE TABLE node_states (
-        run_id        TEXT NOT NULL,
-        node_id       TEXT NOT NULL,
-        status        TEXT NOT NULL DEFAULT 'pending',
-        retry_count   INTEGER NOT NULL DEFAULT 0,
-        topo_order    INTEGER NOT NULL DEFAULT 0,
-        started_at    TEXT,
-        completed_at  TEXT,
-        PRIMARY KEY (run_id, node_id),
-        FOREIGN KEY (run_id) REFERENCES graph_runs(run_id)
-      );
-      CREATE INDEX idx_node_states_topo ON node_states(run_id, topo_order);
-      CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
-      INSERT INTO schema_version (version, applied_at) VALUES (1, '2026-08-01T00:00:00.000Z');
-      INSERT INTO graph_runs (run_id, graph_name, fsm_state, args, created_at, updated_at)
-      VALUES ('old-run', 'legacy-graph', 'completed', NULL, '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z');
-    `);
+describe('schema migration — single final shape', () => {
+  function finalShapeColumns(db: ReturnType<typeof Database>): {
+    runCols: string[];
+    nodeCols: string[];
+    versionCols: string[];
+  } {
+    return {
+      runCols: (db.prepare('PRAGMA table_info(graph_runs)').all() as Array<{ name: string }>).map((c) => c.name),
+      nodeCols: (db.prepare('PRAGMA table_info(node_states)').all() as Array<{ name: string }>).map((c) => c.name),
+      versionCols: (db.prepare('PRAGMA table_info(schema_version)').all() as Array<{ name: string }>).map(
+        (c) => c.name,
+      ),
+    };
+  }
 
-    // Upgrade to current version.
+  it('migrate on a fresh database creates the final tables and records version 1', () => {
+    const db = new Database(':memory:');
+
     Effect.runSync(migrate(db));
 
-    // Version marker reaches the current schema version.
+    // Version marker records the single final version.
     const ver = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
     expect(ver.v).toBe(SCHEMA_VERSION);
 
-    // Pre-existing row preserved, routes defaults to '{}'.
-    const rowRoutes = db.prepare('SELECT routes FROM graph_runs WHERE run_id = ?').get('old-run') as
-      { routes: string } | undefined;
-    expect(rowRoutes?.routes).toBe('{}');
-
-    // mode/constraints columns NEVER exist in any shipped version.
-    const runCols = (db.prepare('PRAGMA table_info(graph_runs)').all() as Array<{ name: string }>).map((c) => c.name);
+    // Final shape — routes inline on graph_runs; no legacy artifacts.
+    const { runCols, nodeCols, versionCols } = finalShapeColumns(db);
+    expect(runCols).toContain('routes');
     expect(runCols).not.toContain('mode');
     expect(runCols).not.toContain('constraints');
-
-    // v2 cleanup applied — topo_order / idx / applied_at dropped.
-    const nodeCols = (db.prepare('PRAGMA table_info(node_states)').all() as Array<{ name: string }>).map((c) => c.name);
     expect(nodeCols).not.toContain('topo_order');
-    const versionCols = (db.prepare('PRAGMA table_info(schema_version)').all() as Array<{ name: string }>).map(
-      (c) => c.name,
-    );
-    expect(versionCols).not.toContain('applied_at');
+    expect(versionCols).toEqual(['version']);
     const indexes = db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_node_states_topo'")
       .all() as Array<{ name: string }>;
@@ -312,23 +290,22 @@ describe('schema migration v1-era → current', () => {
     expect(run.args).toEqual({ changeName: 'x' });
     expect(run.routes).toEqual({});
 
-    // Idempotent — second migrate is a no-op.
+    // Idempotent — second migrate is a no-op (version row not duplicated).
     Effect.runSync(migrate(db));
+    const verAfter = db.prepare('SELECT COUNT(*) AS n FROM schema_version').get() as { n: number };
+    expect(verAfter.n).toBe(1);
   });
 
-  it('repairs an interim-V2 dev database in place: drops mode/constraints columns, keeps routes', () => {
+  it('migrate on an existing final-shape database is idempotent — rows preserved, version untouched', () => {
     const db = new Database(':memory:');
-    // Simulate a dev DB that ran the interim V2 (mode + constraints shipped,
-    // v2 recorded) before the activation-prologue redesign stripped them.
+    // Simulate an already-migrated database with data.
     db.exec(`
       CREATE TABLE graph_runs (
         run_id           TEXT PRIMARY KEY,
         graph_name       TEXT NOT NULL,
         fsm_state        TEXT NOT NULL DEFAULT 'idle',
         args             TEXT,
-        mode             TEXT NOT NULL DEFAULT 'manual',
         routes           TEXT NOT NULL DEFAULT '{}',
-        constraints      TEXT NOT NULL DEFAULT '[]',
         created_at       TEXT NOT NULL,
         updated_at       TEXT NOT NULL
       );
@@ -343,41 +320,27 @@ describe('schema migration v1-era → current', () => {
         FOREIGN KEY (run_id) REFERENCES graph_runs(run_id)
       );
       CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
-      INSERT INTO schema_version (version) VALUES (1), (2);
-      INSERT INTO graph_runs (run_id, graph_name, fsm_state, args, mode, routes, constraints, created_at, updated_at)
-      VALUES ('dev-run', 'g', 'running', NULL, 'auto', '{}', '[]', '2026-08-03T00:00:00.000Z', '2026-08-03T00:00:00.000Z');
+      INSERT INTO schema_version (version) VALUES (1);
+      INSERT INTO graph_runs (run_id, graph_name, fsm_state, args, routes, created_at, updated_at)
+      VALUES ('old-run', 'legacy-graph', 'completed', NULL, '{}', '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z');
     `);
 
     Effect.runSync(migrate(db));
 
-    // Columns dropped, routes preserved, version marker unchanged (v2 still valid).
-    const cols = (db.prepare('PRAGMA table_info(graph_runs)').all() as Array<{ name: string }>).map((c) => c.name);
-    expect(cols).not.toContain('mode');
-    expect(cols).not.toContain('constraints');
-    expect(cols).toContain('routes');
+    // Rows preserved, version unchanged, shape untouched.
     const ver = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
     expect(ver.v).toBe(SCHEMA_VERSION);
-    const row = db.prepare('SELECT graph_name, routes FROM graph_runs WHERE run_id = ?').get('dev-run') as {
+    const verCount = db.prepare('SELECT COUNT(*) AS n FROM schema_version').get() as { n: number };
+    expect(verCount.n).toBe(1);
+    const row = db.prepare('SELECT graph_name, routes FROM graph_runs WHERE run_id = ?').get('old-run') as {
       graph_name: string;
       routes: string;
     };
-    expect(row.graph_name).toBe('g');
+    expect(row.graph_name).toBe('legacy-graph');
     expect(row.routes).toBe('{}');
-  });
-
-  it('V2_DDL covers every v1-created obsolete field — ghost-DDL tripwire', () => {
-    // The ladder contract: v2 delivers the final shape by dropping the three
-    // v1-created obsolete artifacts and adding the routes column. mode/
-    // constraints are deliberately ABSENT — they never shipped in any
-    // version. A statement-set edit after the version is recorded without a
-    // version bump (ghost DDL) leaves DBs behind — this test pins the
-    // coverage so the next drift is a test failure, not a silent residue.
-    const v2 = VERSIONED_DDL[1];
-    expect(v2.some((s) => s.includes('DROP INDEX IF EXISTS idx_node_states_topo'))).toBe(true);
-    expect(v2.some((s) => s.includes('ALTER TABLE node_states DROP COLUMN topo_order'))).toBe(true);
-    expect(v2.some((s) => s.includes('ALTER TABLE schema_version DROP COLUMN applied_at'))).toBe(true);
-    expect(v2.some((s) => s.includes('ALTER TABLE graph_runs ADD COLUMN routes'))).toBe(true);
-    expect(v2.some((s) => s.includes('ADD COLUMN mode'))).toBe(false);
-    expect(v2.some((s) => s.includes('ADD COLUMN constraints'))).toBe(false);
+    const { runCols, nodeCols, versionCols } = finalShapeColumns(db);
+    expect(runCols).toContain('routes');
+    expect(nodeCols).not.toContain('topo_order');
+    expect(versionCols).toEqual(['version']);
   });
 });

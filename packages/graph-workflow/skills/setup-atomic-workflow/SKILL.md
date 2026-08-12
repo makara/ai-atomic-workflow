@@ -22,7 +22,7 @@ Scaffold `.graph-scheduler/` project layout. Five-step flow: Explore -> Present 
 
 Detect current state. Read `.graph-scheduler/` existence:
 
-- `config.json` - exists? parses? matches ConfigFileSchema shape (dbPath/taskflowDir/registryPaths/skillsDir - no agentRegistry)?
+- `config.json` - exists? parses? matches ConfigFileSchema shape (dbPath/taskflowDir/registryPaths - no agentRegistry)?
 - `graphs/` - exists? `registry.json` present?
 - `docs/` - exists? (attached-doc home for the maker journey - graph-generate writes `.graph-scheduler/docs/<name>.md`)
 - `constraints.md` - exists? `## Rules` section present?

@@ -8,7 +8,7 @@ Pure-function state machine core (START/COMPLETE/JUMP/FORCE_END). Asset: `packag
 
 ### Requirement: Finite state machine lifecycle
 
-Completion determination SHALL be one of two mechanisms: **natural drain** (no active and no eligible — route-aware determination, O(1)) or **approval end action** (explicit end; the run completes directly).
+MODIFIED: Completion determination SHALL be one of two mechanisms: **natural drain** (no active and no eligible — route-aware determination, O(1)) or **approval end action** (explicit end; the run completes directly). The COMPLETE event SHALL NOT carry `durationMs` — node completion reports `phaseId` plus optional routing fields only; duration SHALL be derived by snapshot assembly from `startedAt`/`completedAt`. FsmNodeState SHALL NOT contain a durationMs field.
 
 #### Scenario: Same-source when guard cascades through all-join chain
 
@@ -28,63 +28,69 @@ Completion determination SHALL be one of two mechanisms: **natural drain** (no a
 #### Scenario: JUMP event resets target and upstream
 
 - **WHEN** a JUMP event targets a node
-- **THEN** the target + downstream terminal nodes reset (upstream kept — inputs already produced); retryCount++ never zeroed
+- **THEN** the target and its downstream terminal nodes reset to pending, upstream kept, retryCount incremented
 
 #### Scenario: Unreachable metrics branch removed
 
-- **WHEN** a run completes
-- **THEN** no unreachable-metrics accounting exists (route-first: unselected routes are declared, not inferred)
+- **WHEN** snapshot metrics are aggregated
+- **THEN** no unreachable branch exists in the aggregation path
 
 #### Scenario: Natural drain
 
-- **WHEN** the last active node completes and no pending node is eligible (route inactive or deps unsatisfied)
-- **THEN** the run transitions to completed; unselected-route nodes stay pending and never block completion
+- **WHEN** no node is active and no node is eligible
+- **THEN** the run completes via natural drain — unselected-route members stay pending forever and never block completion
 
 #### Scenario: Approval end action
 
-- **WHEN** an approval (human choice or auto-executed AI recommendation) selects the `end` action
-- **THEN** the run completes immediately regardless of pending nodes; no end node exists
+- **WHEN** an approval decision chooses end
+- **THEN** `graph_advance(endRun: true)` completes the run immediately
 
 #### Scenario: START event initializes graph execution
 
-- **WHEN** a run starts
-- **THEN** entry nodes (no deps, active routes) activate
+- **WHEN** `graph_start` dispatches START
+- **THEN** all phases initialize `pending`, the run becomes `running`, first ready batch activates
 
 #### Scenario: COMPLETE event advances graph
 
-- **WHEN** a node completes
-- **THEN** ready nodes activate; routing decisions apply mechanically
+- **WHEN** a node completion is reported
+- **THEN** the node becomes `done` with `completedAt` set — the event carries no durationMs
+- **AND** next ready nodes activate per topology/route rules
 
 #### Scenario: COMPLETE on last phase finishes graph
 
-- **WHEN** the last active node completes and nothing is eligible
-- **THEN** the run transitions to completed (natural drain)
+- **WHEN** the final phase completes (natural drain)
+- **THEN** the run becomes `completed` and no further node dispatches
 
 #### Scenario: JUMP event resets target and downstream
 
-- **WHEN** a JUMP targets a node
-- **THEN** the target + downstream terminal nodes reset to pending (retryCount++); upstream kept
+- **WHEN** a JUMP targets a phase
+- **THEN** the target and downstream terminal nodes reset to `pending`, target retryCount increments, upstream kept
 
 #### Scenario: FORCE_END terminates run
 
-- **WHEN** FORCE_END dispatches
-- **THEN** pending/active nodes abort and the run terminates
+- **WHEN** FORCE_END is dispatched
+- **THEN** unfinished nodes become `aborted`, the run becomes `terminated`
 
 #### Scenario: Invalid state transitions rejected
 
-- **WHEN** an illegal event dispatches
-- **THEN** InvalidStateTransitionError raises
+- **WHEN** an event arrives for a run in a state that cannot accept it
+- **THEN** the transition fails with InvalidStateTransitionError — never silently ignored
 
 #### Scenario: Run states enumerated consistently
 
-- **WHEN** a run is queried
-- **THEN** fsmState is one of idle/running/completed/terminated
+- **WHEN** any component reads run status
+- **THEN** it SHALL read the single `fsmState` field (no status alias exists)
+
+#### Scenario: Duration derived at snapshot time
+
+- **WHEN** a snapshot is assembled for a node with both timestamps
+- **THEN** `durationMs` equals `Date.parse(completedAt) - Date.parse(startedAt)`
 
 ### Requirement: No skip state or marker SHALL exist
 
-No node SHALL be skippable — only 5 cases exist: an unselected route ignored as a whole (route-routing), a gate backward jump, approval auto-selecting the recommendation, approval selecting end, and a node finding no tasks by itself.
+MODIFIED: No skip state, no skipped marker, and no skip parameter on advance SHALL exist — unchosen branch-route nodes stay `pending` forever and never block completion.
 
 #### Scenario: Status set
 
-- **WHEN** a run's nodes are enumerated
-- **THEN** the only statuses are pending/active/done/aborted; no skipped status exists; unselected route members remain pending with an unactivated annotation
+- **WHEN** a node status is read
+- **THEN** it SHALL be one of `pending`, `active`, `done`, `aborted` — no `skipped` value exists

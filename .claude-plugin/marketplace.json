@@ -40,6 +40,11 @@
         "./skills/release-prep-analyze",
         "./skills/release-prep-apply"
       ]
+    },
+    {
+      "name": "graph-fidelity",
+      "source": "./packages/graph-fidelity",
+      "description": "Platform-seam signal discipline — per-call discipline echo, context fidelity reduction, and observability, delivered as one module for OMP (ExtensionAPI) and opencode (Plugin)."
     }
   ],
   "skills": []

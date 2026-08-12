@@ -1,28 +1,25 @@
 /**
  * Graph contract checks — dispatch, approval routing, guard hygiene,
- * entry-skill bidirectional alignment.
+ * user-supplement layer existence validation.
  *
- * Extracted from the retired CLI validate command so the checks can run in
- * the runtime graph-loading path — no bin coupling. Pure functions
- * (validateGraphContracts) plus fs-backed entry-skill alignment
- * (validateEntrySkillContracts) shared by load-time mounting and tests.
+ * Pure functions (validateGraphContracts) plus config-layer existence
+ * validation (validateProjectContext) shared by load-time mounting and
+ * tests. The engine validates only machine-owned facts: graph YAML
+ * declarations, channel shape, run scope. Skill `## Context Requirements`
+ * contracts are agent-side knowledge — entry-skill alignment and orphan
+ * detection run in estate-maintain's consistency gate, never here.
  *
  * @module
  */
 
 import { existsSync, readdirSync } from 'node:fs';
-import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
-  DEFAULT_CONVENTIONS,
-  fileChannelCoveredBy,
   isConventionFile,
   isGlobShape,
   isWorkflowArtifactGlob,
   mergeChannelScopes,
   normFile,
-  parseContextContract,
-  resolveChannels,
   stripPrefix,
 } from './resolve-channels.js';
 
@@ -76,29 +73,6 @@ function upstreamClosure(id: string, byId: Map<string, Record<string, unknown>>)
 
 /** sibling-output-existence guard pattern: e.g. "no <node> output present" */
 const SIBLING_OUTPUT_EXISTENCE_RE = /no\s+[\w-]+\s+output\s+present/i;
-/** injection claim patterns in task text — 'injected via <id>' / 'injected via node:<id>' */
-const INJECTION_CLAIM_RE = /injected\s+via\s+(?:node:)?([\w-]+)/gi;
-/** read-output claim pattern in task text — 'Read <id> output' */
-const READ_OUTPUT_CLAIM_RE = /Read\s+([\w-]+)\s+output/gi;
-/** 'injected via dependsOn …' wording refers to the implicit DAG mechanism, not a node claim */
-const IMPLICIT_MECHANISM_WORDS = new Set(['dependsOn', 'implicit', 'upstream']);
-
-/** Task Content Spec: forbidden output-contract alternate spellings — error */
-const FORBIDDEN_OUTPUT_SPELLINGS: Record<string, string> = {
-  'Output (main agent collects):': 'Output (main agent collects):',
-  'Write output (main agent collects):': 'Write output (main agent collects):',
-  'Emit:': 'Emit:',
-};
-/** Task Content Spec: canonical output-contract block prefix — required on main tasks */
-const OUTPUT_CONTRACT_RE = /Output\s+contract:/;
-/** Task Content Spec: legacy bare 'Output:' field list spelling — error */
-const LEGACY_OUTPUT_RE = /^\s*Output:/m;
-/** Task Content Spec: skill-protocol restatement patterns — heuristic warning */
-const PROTOCOL_RESTATEMENT_RE =
-  /interview\(\{ goal:|confirm\(goal\):|research:\s*Read the injected|approval\(\) WITHOUT recommendation|walk every decision-tree branch/;
-/** Task Content Spec: injection-mechanics wording — heuristic warning */
-const INJECTION_MECHANICS_RE =
-  /(?:read\s+[\w/-]+\s+output|output)\s+\(injected|via dependsOn implicit context|via node:\w+ channel/i;
 
 /** contract checks beyond TaskflowSchema — dispatch, routing, guard hygiene */
 export function validateGraphContracts(
@@ -134,10 +108,18 @@ export function validateGraphContracts(
       }
       continue;
     }
+    if (isConventionFile(c)) {
+      // Convention files are platform-shipped implicit coverage — a graph-level
+      // declaration is redundant (deduped by the layer merge), never an error.
+      warnings.push(
+        `${filePath}: graph-level context entry "${c}" — convention-layer file (implicit coverage); declaration is redundant and skipped at dispatch`,
+      );
+      continue;
+    }
     if (isGlobShape(c)) {
       if (!isWorkflowArtifactGlob(c)) {
         errors.push(
-          `${filePath}: graph-level context entry "${c}" is a file glob outside workflow runtime artifacts (.graph-scheduler/, .taskflow/) — three-tier channel model: project file globs belong in config.json context, conventions are platform-shipped`,
+          `${filePath}: graph-level context entry "${c}" is a file glob outside workflow runtime artifacts (.graph-scheduler/, .taskflow/) — four-layer channel model: project file globs belong in the user-supplement layer (config context:), conventions are platform-shipped`,
         );
       }
       continue;
@@ -175,61 +157,8 @@ export function validateGraphContracts(
     // Field-type contract enforced by PhaseSchema superRefine only
     // (single enforcement point — schema rejects before this layer runs).
 
-    // declared-inputs contract: task text input references must be covered
-    // by dependsOn (implicit) or node: channels (explicit). Runtime output
-    // paths no longer exist (content flows via the agent session);
-    // undeclared injection claims warn.
-    const taskText = str(phase.task, '');
-    const effectiveInputs = nodeScope(deps, graphContext, phase.channels as readonly string[] | undefined);
-    if (taskText) {
-      const claimed: string[] = [];
-      for (const m of taskText.matchAll(INJECTION_CLAIM_RE)) claimed.push(m[1]);
-      for (const m of taskText.matchAll(READ_OUTPUT_CLAIM_RE)) claimed.push(m[1]);
-      for (const nodeId of claimed) {
-        if (IMPLICIT_MECHANISM_WORDS.has(nodeId) || effectiveInputs.has(nodeId)) continue;
-        // merge-at-load prefixes child node ids ('<parent>/<child>') while task text
-        // keeps the bare child id — a claim is covered when it suffixes a declared input.
-        const suffixCovered = [...effectiveInputs].some((id) => id.endsWith(`/${nodeId}`));
-        if (suffixCovered) continue;
-        warnings.push(
-          `${prefix} — task text claims injection of '${nodeId}' not declared in dependsOn or node: channels; declare the channel or remove the claim (declared inputs)`,
-        );
-      }
-    }
-
-    // Task Content Spec: deterministic spelling rules — error.
-    // Canonical `Output contract:` required on every main task; alternate
-    // spellings and legacy bare `Output:` forbidden everywhere.
-    if (taskText) {
-      for (const spelling of Object.keys(FORBIDDEN_OUTPUT_SPELLINGS)) {
-        if (taskText.includes(spelling)) {
-          errors.push(
-            `${prefix} — task text uses non-canonical output-contract spelling '${spelling}'; use the canonical 'Output contract:' block (Task Content Spec)`,
-          );
-        }
-      }
-      if (LEGACY_OUTPUT_RE.test(taskText)) {
-        errors.push(
-          `${prefix} — task text uses legacy 'Output:' spelling; use the canonical 'Output contract:' block (Task Content Spec)`,
-        );
-      }
-    }
-    if (type === 'main' && taskText && taskText.trim().length >= 30 && !OUTPUT_CONTRACT_RE.test(taskText)) {
-      warnings.push(
-        `${prefix} — main task text lacks the canonical 'Output contract:' block; production main phases emit a machine-parseable output contract (Task Content Spec)`,
-      );
-    }
-    // Task Content Spec: heuristic content rules — warning.
-    if (taskText && PROTOCOL_RESTATEMENT_RE.test(taskText)) {
-      warnings.push(
-        `${prefix} — task text restates dispatched-skill protocol (interview()/openspec CLI steps); the skill is the protocol home — delete the restatement (Task Content Spec dedup rule)`,
-      );
-    }
-    if (taskText && INJECTION_MECHANICS_RE.test(taskText)) {
-      warnings.push(
-        `${prefix} — task text spells injection mechanics; name consumed fields, not files/mechanisms — upstream availability is handler-injected (Task Content Spec)`,
-      );
-    }
+    // Task-text content checks moved agent-side (estate-maintain consistency
+    // gate) — the engine validates shapes only.
 
     // 2.2 — approval: declared branch-route/retry targets resolvable; retry/jump
     // targets may be absent (AI dynamic options — no written actions needed)
@@ -402,326 +331,15 @@ export function validateGraphContracts(
     }
   }
 
-  // Run Mode — decided per activation by the built-in $run-mode-confirm
-  // prologue node (args.mode or a question); graphs declare nothing. The
-  // entry-topic heuristic was removed with the topic blocks themselves.
+  // Run Mode — decided per activation at graph_start (args.mode); graphs
+  // declare nothing. The entry-topic heuristic was removed with the topic
+  // blocks themselves.
 
   return { errors, warnings };
 }
 
 // ---------------------------------------------------------------------------
-// Entry skill contract alignment (bidirectional channel validation)
-// ---------------------------------------------------------------------------
-
-/** parsed entry skill contract — frontmatter name + Context Requirements three subsections */
-export interface IEntrySkillContract {
-  readonly name: string;
-  readonly upstream: string[];
-  readonly references: string[];
-  readonly files: string[];
-  readonly contractErrors: string[];
-  readonly path: string;
-}
-
-/** extract frontmatter `name:` field from SKILL.md content */
-function parseFrontmatterName(content: string): string | null {
-  const m = /^---\n([\s\S]*?)\n---/.exec(content);
-  if (!m) return null;
-  const nameMatch = /^name:\s*(.+)$/m.exec(m[1]);
-  return nameMatch ? nameMatch[1].trim() : null;
-}
-
-/**
- * Entry skill contract alignment — bidirectional:
- * 1. Contract machine-parseability: placeholder entries → error; contract errors reported.
- * 2. Orphan detection: entry skill declaring graph-callable requirements but dispatched by zero graph phases → error.
- *    Single-graph loads MUST pass checkOrphans: false — orphanhood is a repo-wide property.
- * 3. Forward coverage: every contract Reference skill / Files entry must appear in a dispatching phase's channels → error.
- * 4. Reverse checks per phase: unresolvable channel → error (phantom bare name → warning); `node:` target must exist in graph → error;
- *    dependsOn-duplicate channel → warning (redundant declaration — repeal of silent-ignore rule); bare cross-level name → warning suggesting `node:` prefix.
- */
-export async function validateEntrySkillContracts(
-  graphs: ReadonlyArray<{ filePath: string; graph: Record<string, unknown> }>,
-  skillsDir: string,
-  opts?: { checkOrphans?: boolean; projectContext?: readonly string[] },
-): Promise<{ errors: string[]; warnings: string[] }> {
-  const checkOrphans = opts?.checkOrphans ?? true;
-  const projectContext = opts?.projectContext;
-  const errors: string[] = [];
-  const warnings: string[] = [];
-
-  const dispatched = new Set<string>();
-  for (const { graph } of graphs) {
-    for (const phase of (graph.phases ?? []) as Array<Record<string, unknown>>) {
-      if (typeof phase.skill === 'string') dispatched.add(phase.skill);
-    }
-  }
-
-  let skillDirs: string[];
-  try {
-    skillDirs = (await readdir(skillsDir, { withFileTypes: true })).filter((e) => e.isDirectory()).map((e) => e.name);
-  } catch {
-    warnings.push(
-      `${skillsDir}: skills directory unreadable — entry-skill contract checks skipped silently (permissions?)`,
-    );
-    return { errors, warnings };
-  }
-
-  const skills: IEntrySkillContract[] = [];
-  for (const dir of skillDirs) {
-    const path = join(skillsDir, dir, 'SKILL.md');
-    let content: string;
-    try {
-      content = await readFile(path, 'utf-8');
-    } catch {
-      continue;
-    }
-    const contract = parseContextContract(content);
-    if (contract.upstream.length === 0 && contract.references.length === 0 && contract.files.length === 0) {
-      continue; // not graph-callable per contract — skip
-    }
-    skills.push({
-      name: parseFrontmatterName(content) ?? dir,
-      upstream: contract.upstream,
-      references: contract.references,
-      files: contract.files,
-      contractErrors: contract.errors,
-      path,
-    });
-  }
-
-  checkContractErrors(skills, errors);
-  if (checkOrphans) detectOrphans(skills, dispatched, errors);
-
-  for (const { filePath, graph } of graphs) {
-    const phases = (graph.phases ?? []) as Array<Record<string, unknown>>;
-    checkUpstreamCoverage(phases, skills, filePath, errors);
-    checkPhaseChannels(phases, skills, filePath, errors, warnings, (graph.context ?? []) as string[], projectContext);
-  }
-
-  return { errors, warnings };
-}
-
-/** 1 — contract parse errors (placeholders) for all graph-callable skills.
- *  Fence-aware parsing keeps doc examples inert — a surviving placeholder is a real
- *  contract defect, reported regardless of dispatch — no escape hatch. */
-function checkContractErrors(skills: readonly IEntrySkillContract[], errors: string[]): void {
-  for (const skill of skills) {
-    for (const e of skill.contractErrors) {
-      errors.push(`${skill.path}: ${e}`);
-    }
-  }
-}
-
-/** 2 — orphan detection (graph-callable but never dispatched).
- *  Fence-aware parsing keeps doc examples inert — every non-empty contract is
- *  judgeable; no contractErrors skip — no escape hatch. */
-function detectOrphans(
-  skills: readonly IEntrySkillContract[],
-  dispatched: ReadonlySet<string>,
-  errors: string[],
-): void {
-  for (const skill of skills) {
-    if (!dispatched.has(skill.name)) {
-      errors.push(
-        `${skill.path}: orphan entry skill '${skill.name}' — declares graph-callable Context Requirements (upstream: ${skill.upstream.join(', ') || '(none)'}, references: ${skill.references.join(', ') || '(none)'}, files: ${skill.files.join(', ') || '(none)'}) but no graph phase dispatches it`,
-      );
-    }
-  }
-}
-
-/**
- * 3a — upstream coverage at GRAPH level (union across dispatching phases).
- * Create/edit split paths share one contract — per-phase injection would
- * false-fail (e.g. atom-skill-writer declares scope-confirm + skill-select;
- * create path injects scope-confirm only). Declared upstreams are required
- * only when the node EXISTS in the graph.
- */
-function checkUpstreamCoverage(
-  phases: ReadonlyArray<Record<string, unknown>>,
-  skills: readonly IEntrySkillContract[],
-  filePath: string,
-  errors: string[],
-): void {
-  const nodeIds = new Set(phases.map((p) => str(p.id, '')));
-  const injectedBySkill = new Map<string, Set<string>>();
-  for (const phase of phases) {
-    // Agent AND main phases inject upstream context — conversion to main must
-    // not empty the effective coverage set (spec: Validation covers main channels).
-    const type = str(phase.type, '');
-    if (type !== 'main' || typeof phase.skill !== 'string') continue;
-    const effective = injectedBySkill.get(phase.skill) ?? new Set<string>();
-    for (const dep of (phase.dependsOn ?? []) as string[]) effective.add(dep);
-    for (const c of (phase.channels ?? []) as string[]) {
-      if (typeof c === 'string') effective.add(c.replace(/^node:/, ''));
-    }
-    injectedBySkill.set(phase.skill, effective);
-  }
-  for (const skill of skills) {
-    const effective = injectedBySkill.get(skill.name);
-    if (!effective) continue; // orphan already reported
-    const missing = skill.upstream.filter((u) => nodeIds.has(u) && !effective.has(u));
-    for (const u of missing) {
-      errors.push(
-        `${filePath}: entry skill '${skill.name}' declares upstream '${u}' not injected by any dispatching phase (dependsOn or node: channel); contract mismatch`,
-      );
-    }
-  }
-}
-
-/** 3b — per-phase forward (references/files ⊆ channels) + reverse (channel resolution) */
-function checkPhaseChannels(
-  phases: ReadonlyArray<Record<string, unknown>>,
-  skills: readonly IEntrySkillContract[],
-  filePath: string,
-  errors: string[],
-  warnings: string[],
-  graphContext?: readonly string[],
-  projectContext?: readonly string[],
-): void {
-  const nodeIds = new Set(phases.map((p) => str(p.id, '')));
-  for (const phase of phases) {
-    const type = str(phase.type, '');
-    const skillName = str(phase.skill, '');
-    const prefix = `${filePath}: phases.${str(phase.id, '?')}`;
-    const channels = (phase.channels ?? []) as string[];
-    const dependsOn = (phase.dependsOn ?? []) as string[];
-    // Three-tier channel model: phase file globs carry workflow runtime
-    // artifacts only — project file globs belong in config.json context
-    // (project layer), conventions are platform-shipped. `node:`/`skill:`
-    // prefixed entries are stream/reference channels, never file globs —
-    // excluded regardless of '/' in the target id.
-    for (const c of channels) {
-      if (stripPrefix(c)) continue;
-      if (isGlobShape(c) && !isWorkflowArtifactGlob(c)) {
-        errors.push(
-          `${prefix} — channel "${c}" is a file glob outside workflow runtime artifacts (.graph-scheduler/, .taskflow/) — three-tier channel model: project file globs belong in config.json context`,
-        );
-      }
-    }
-    // Effective channels — convention layer (platform-shipped, default-loaded)
-    // merged first, then the project default layer (config.json `context`),
-    // then the global channel (graph top-level `context:`), then the phase's
-    // own channels. Forward coverage evaluates the effective list: a contract
-    // entry satisfied by any layer is not reported missing on the phase.
-    const effective = [...(mergeChannelScopes(DEFAULT_CONVENTIONS, projectContext, graphContext, channels) ?? [])];
-
-    // Graph-level node: target existence — graph-scope entries are validated
-    // against the flattened set at graph level (validateGraphContracts);
-    // phase-declared node: entries keep run-scope semantics (out-of-run refs
-    // warn + strip at dispatch — legal cross-run composition references).
-    // Child graph-level entries merged into phases by flatten follow the
-    // phase-entry path (dispatch-strip) — composition is their run scope.
-
-    // Per-skill contract checks apply to main phases (the only type with an
-    // execution skill contract); approval/gate judgment context is node
-    // outputs + inherited entries — no skill contract to resolve against.
-    if (type !== 'main') continue;
-
-    if (!skillName) {
-      // Contract-less phase — dual-track rule: every phase-declared channel
-      // entry must be an explicit skill:/node: prefix or a file glob; bare
-      // name → error (graph-level entries are validated at graph scope).
-      for (const c of channels) {
-        if (c.startsWith('skill:') || c.startsWith('node:') || isGlobShape(c)) continue;
-        errors.push(
-          `${prefix} — channel "${c}" is a bare name; phase declares no entry skill contract — contract-less channels require an explicit skill:/node: prefix or a file glob`,
-        );
-      }
-      continue;
-    }
-
-    const skill = skills.find((s) => s.name === skillName);
-    if (!skill) {
-      // Skill not in package, or contract-less (review-type — contract graph-decided):
-      // every phase-declared channel entry must be an explicit skill:/node: prefix or a file glob; bare name → error.
-      for (const c of channels) {
-        if (c.startsWith('skill:') || c.startsWith('node:') || isGlobShape(c)) continue;
-        errors.push(
-          `${prefix} — channel "${c}" is a bare name; entry skill '${skillName}' has no machine-parseable contract (review-type — contract graph-decided); channels require an explicit skill:/node: prefix or a file glob`,
-        );
-      }
-      continue;
-    }
-
-    checkForwardCoverage(skill, effective, prefix, errors);
-    // Reverse resolution observes the same effective list as forward coverage
-    // (convention + project + graph + phase) — one effective context per phase.
-    checkReverseResolution(skill, effective, dependsOn, nodeIds, prefix, errors, warnings);
-  }
-}
-
-/** forward — contract references/files ⊆ channels (per-phase: deletion is never silent) */
-function checkForwardCoverage(
-  skill: IEntrySkillContract,
-  channels: readonly string[],
-  prefix: string,
-  errors: string[],
-): void {
-  for (const ref of skill.references) {
-    const covered = channels.some((c) => c === `skill:${ref}` || c === ref);
-    if (!covered) {
-      errors.push(
-        `${prefix} — entry skill '${skill.name}' declares reference '${ref}' not declared in channels (missing → channel deletion is never silent; add "skill:${ref}")`,
-      );
-    }
-  }
-  for (const f of skill.files) {
-    // Convention-layer files are platform-shipped, default-loaded into every
-    // phase, absence-tolerant - coverage guaranteed by construction, never an
-    // obligation. Skills may declare them, omit them, or annotate them; none
-    // of these forms affects loading. Non-convention entries keep full
-    // obligation semantics (deletion is never silent).
-    if (isConventionFile(f)) continue;
-    // Coverage matching delegates to resolve-channels' shared primitive —
-    // forward and reverse observe identical path/glob semantics.
-    const covered = channels.some((c) => fileChannelCoveredBy(c, f));
-    if (!covered) {
-      errors.push(
-        `${prefix} — entry skill '${skill.name}' declares file '${f}' not covered by channels (missing → channel deletion is never silent; add a matching file glob)`,
-      );
-    }
-  }
-}
-
-/** reverse — channel-level resolution via shared resolver + node: target existence */
-function checkReverseResolution(
-  skill: IEntrySkillContract,
-  channels: readonly string[],
-  dependsOn: readonly string[],
-  nodeIds: ReadonlySet<string>,
-  prefix: string,
-  errors: string[],
-  warnings: string[],
-): void {
-  const resolved = resolveChannels({
-    channels,
-    dependsOn,
-    contract: { upstream: skill.upstream, references: skill.references, files: skill.files, errors: [] },
-    runNodeIds: nodeIds,
-  });
-  for (const e of resolved.errors) {
-    // phantom bare name that IS a graph node → warning suggesting node: prefix; else hard error
-    const bare = e.match(/unresolvable channel "([^"]+)"/)?.[1];
-    if (bare && nodeIds.has(bare)) {
-      warnings.push(
-        `${prefix} — channel "${bare}" is a graph node outside dependsOn; use "node:${bare}" for explicit cross-level reference`,
-      );
-    } else {
-      errors.push(`${prefix} — ${e}`);
-    }
-  }
-  for (const w of resolved.warnings) {
-    warnings.push(`${prefix} — ${w}`);
-  }
-  // Phase-declared node: targets are NOT membership-checked at load — run-scope
-  // semantics: an out-of-run target warns + strips at dispatch (legal
-  // cross-run composition references). Graph-level node: targets ARE
-  // membership-checked at load (validateGraphContracts, flattened set).
-}
-
-// ---------------------------------------------------------------------------
-// Project layer existence validation (three-tier channel model)
+// User-supplement layer existence validation (four-layer channel model)
 // ---------------------------------------------------------------------------
 
 const GLOB_RE_CACHE = new Map<string, RegExp>();
@@ -730,19 +348,22 @@ const GLOB_RE_CACHE = new Map<string, RegExp>();
 function globToRegex(glob: string): RegExp {
   const cached = GLOB_RE_CACHE.get(glob);
   if (cached) return cached;
-  const re = new RegExp(
-    `^${normFile(glob)
-      .split('/')
-      .map((s) =>
-        s
-          .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-          .replace(/\*\*/g, '\u0000')
-          .replace(/\*/g, '[^/]*')
-          .replace(/\?/g, '[^/]')
-          .replace(/\u0000/g, '.*'),
-      )
-      .join('/')}$`,
-  );
+  // `**` matches zero or more directory levels: a `**/` pair becomes an
+  // optional directory run, a trailing `**` matches the remainder. The
+  // placeholder keeps the segment join literal; substitution happens after.
+  const pattern = normFile(glob)
+    .split('/')
+    .map((s) =>
+      s
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*\*/g, '\u0000')
+        .replace(/\*/g, '[^/]*')
+        .replace(/\?/g, '[^/]'),
+    )
+    .join('/')
+    .replace(/\u0000\//g, '(?:.*\\/)?')
+    .replace(/\u0000/g, '.*');
+  const re = new RegExp(`^${pattern}$`);
   GLOB_RE_CACHE.set(glob, re);
   return re;
 }
@@ -790,8 +411,9 @@ export function globMatchesAny(glob: string, cwd: string): boolean {
 }
 
 /**
- * Project layer (config.json `context:`) existence validation — three-tier
- * channel model: exact-file entry missing -> error; glob zero-match -> warning
+ * User-supplement layer (config.json `context:`) existence validation —
+ * four-layer channel model: exact-file entry missing -> error (user promise);
+ * glob zero-match -> warning
  * (empty set legal — lazy document creation). Conventions and graph channels
  * are NOT existence-checked (absence-tolerance + workflow artifacts).
  */

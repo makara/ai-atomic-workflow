@@ -21,5 +21,7 @@ export class ConfigService extends Context.Tag('ConfigService')<
   {
     /** Project-level ambient context entries — default layer of the global channel. */
     readonly context: readonly string[];
+    /** Resolved db path — active-run mirror path derivation source. */
+    readonly dbPath: string;
   }
 >() {}

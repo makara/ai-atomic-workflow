@@ -1,0 +1,13 @@
+{
+  "name": "@ai-atomic-workflow/prompt-assembly-probe",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Unit-test suite instrumenting the OMP prompt-assembly process and platform seams — documents platform facts against the signal-distribution seam map with input/output extraction per run. npm-only dependencies, zero reference-tree usage.",
+  "type": "module",
+  "scripts": {
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@oh-my-pi/pi-coding-agent": "17.2.12"
+  }
+}

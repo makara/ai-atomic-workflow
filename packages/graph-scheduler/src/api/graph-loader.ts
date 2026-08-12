@@ -5,14 +5,15 @@
  * Loads graph definitions (registry-aware), caches per-run, and adapts
  * taskflow-core Taskflow to FSM TaskflowGraph.
  *
+ * Machine validation only: graph YAML contracts, channel shape, user-
+ * supplement layer existence. Skill prose is never parsed here — entry-skill
+ * alignment runs agent-side in estate-maintain's consistency gate.
+ *
  * @module
  */
 
 import { Effect } from 'effect';
-import { existsSync } from 'node:fs';
-import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { validateEntrySkillContracts, validateGraphContracts, validateProjectContext } from '../context/contracts.js';
+import { validateGraphContracts, validateProjectContext } from '../context/contracts.js';
 import { debugLog } from '../debug.js';
 import { FileSystem, FileSystemError } from '../filesystem.js';
 import { flattenFlowPhases, MAX_FLOW_DEPTH } from '../flow-flatten.js';
@@ -20,7 +21,6 @@ import type { TaskflowGraph } from '../fsm/transition.js';
 import type { Taskflow } from '../graph-definition.js';
 import { loadGraph, loadGraphFromPath } from '../graph-definition.js';
 import { validatePhase } from '../phase-handler/index.js';
-import { synthesizePrologue } from '../prologue.js';
 import { RegistryLoader } from '../registry-loader.js';
 import type { GraphDefinitionError, RegistryLoadError, SchedulerError } from '../types.js';
 import { FlowPhaseError } from '../types.js';
@@ -28,77 +28,11 @@ import { FlowPhaseError } from '../types.js';
 import { graphLoadCache } from './run-caches.js';
 
 /**
- * Contract warnings per graph — captured by the load-time pass, surfaced
- * via graph_start response. Same graph → same warnings.
- * Entries truncated: 20 max, 200 chars each.
- */
-const contractWarningsByGraph = new Map<string, string[]>();
-export function getContractWarnings(graphName: string): string[] {
-  return contractWarningsByGraph.get(graphName) ?? [];
-}
-function recordContractWarnings(graphName: string, warnings: readonly string[]): void {
-  contractWarningsByGraph.set(
-    graphName,
-    warnings.slice(0, 20).map((w) => (w.length > 200 ? `${w.slice(0, 200)}…` : w)),
-  );
-}
-
-// graph-workflow skills package — sibling of graph-scheduler in the monorepo.
-// Resolved relative to this source file (same convention as scheduler-runtime PKG_ROOT).
-const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const SIBLING_SKILLS_DIR = path.resolve(PKG_ROOT, '..', 'graph-workflow', 'skills');
-
-/**
- * Configured skillsDir (config.json `skillsDir`) — set by
- * createRuntime at startup. undefined = fall back to probing.
- */
-let configuredSkillsDir: string | undefined;
-export function setConfiguredSkillsDir(dir: string | undefined): void {
-  configuredSkillsDir = dir;
-}
-
-/** Degradation warning emitted once per process — not once per load. */
-let skillsDirWarned = false;
-
-/**
- * Resolve the graph-workflow skills package directory (entry-skill contracts
- * for bidirectional channel validation). Priority: config `skillsDir` →
- * repo-root layout (matches the retired CLI validate convention) →
- * package-sibling. Missing → null (alignment skipped with a single warning —
- * never blocks loading).
- */
-export function resolveSkillsDir(): string | null {
-  const candidates = [
-    ...(configuredSkillsDir ? [configuredSkillsDir] : []),
-    path.resolve(process.cwd(), 'packages', 'graph-workflow', 'skills'),
-    SIBLING_SKILLS_DIR,
-  ];
-  for (const dir of candidates) {
-    try {
-      if (existsSync(dir)) return dir;
-    } catch {
-      // unreadable — try next
-    }
-  }
-  if (!skillsDirWarned) {
-    skillsDirWarned = true;
-    debugLog('load', {
-      event: 'skills_dir_missing',
-      candidates,
-      message: 'graph-workflow skills package not found — entry-skill alignment skipped',
-    });
-  }
-  return null;
-}
-
-/**
  * Load-time contract pass — runs on the flattened graph after
- * schema validation, before any dispatch. Contract violations fail the load
- * with GraphDefinitionError (fail-fast — never deferred to dispatch);
- * warnings are surfaced via debugLog and never block.
- *
- * Entry-skill alignment runs per-graph with checkOrphans: false — orphanhood
- * is a repo-wide property, not judgeable from a single graph load.
+ * schema validation, before any dispatch. Machine-owned checks only:
+ * graph YAML contract violations fail the load with GraphDefinitionError
+ * (fail-fast — never deferred to dispatch); warnings are surfaced via
+ * debugLog and never block.
  */
 function runContractsPass(
   tf: Taskflow,
@@ -111,32 +45,13 @@ function runContractsPass(
     const errors = [...contracts.errors];
     const warnings = [...contracts.warnings];
 
-    // Project layer existence validation — three-tier channel model: exact
+    // User-supplement layer existence validation — four-layer channel model: exact
     // file missing -> load error, glob zero-match -> warning. Runs against
     // the resolved config.json `context:` when the caller supplies it.
     if (projectContext) {
       const pc = validateProjectContext(projectContext, process.cwd());
       errors.push(...pc.errors);
       warnings.push(...pc.warnings);
-    }
-
-    const skillsDir = resolveSkillsDir();
-    if (skillsDir) {
-      const alignment = yield* Effect.either(
-        Effect.tryPromise(() =>
-          validateEntrySkillContracts([{ filePath, graph: tf }], skillsDir, {
-            checkOrphans: false,
-            projectContext,
-          }),
-        ),
-      );
-      if (alignment._tag === 'Right') {
-        errors.push(...alignment.right.errors);
-        warnings.push(...alignment.right.warnings);
-      } else {
-        // Unexpected alignment failure (e.g. interrupted skills scan) — warn, never block.
-        warnings.push(`${filePath}: entry-skill alignment aborted — ${String(alignment.left)}`);
-      }
     }
 
     for (const w of warnings) {
@@ -268,7 +183,6 @@ export function loadGraphWithRegistry(
     const flat = flattenFlowPhases(loaded.tf, loadChild, 1, MAX_FLOW_DEPTH);
     // Contract checks run at load: errors fail fast, warnings surface.
     const result = yield* runContractsPass(flat, loaded.filePath, graphName, projectContext);
-    recordContractWarnings(graphName, result.warnings);
     return {
       ...result.tf,
       resolvedFrom: loaded.resolvedFrom,
@@ -301,9 +215,6 @@ export function loadGraphForRun(
  * Adapt taskflow-core Taskflow to the FSM's TaskflowGraph shape.
  * Also runs each phase through its handler's validate() — after schema.parse().
  * Flow phases are already flattened at this point; type is main/approval.
- * Activation prologue synthesized from the flattened author phases
- * (graph-aware: confirm only when approvals exist; author `$` declarations
- * replace built-ins).
  */
 export function toTaskflowGraph(tf: Taskflow): Effect.Effect<TaskflowGraph, GraphDefinitionError> {
   return Effect.try({
@@ -314,13 +225,11 @@ export function toTaskflowGraph(tf: Taskflow): Effect.Effect<TaskflowGraph, Grap
         // Error names the type + registered list (from UnknownPhaseTypeError message).
         validatedPhases.push(validatePhase(p));
       }
-      const prologue = synthesizePrologue(validatedPhases).map((p) => validatePhase(p));
       return {
         name: tf.name ?? 'unnamed',
         description: tf.description,
         context: tf.context ?? [],
         phases: validatedPhases,
-        prologue,
       };
     },
     catch: (err: unknown): GraphDefinitionError => ({

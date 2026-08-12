@@ -42,7 +42,6 @@ describe('NodeStateSchema — happy path', () => {
       status: 'done',
       retryCount: 0,
       completedAt: '2026-07-26T00:05:00.000Z',
-      durationMs: 5000,
     };
     const result = NodeStateSchema.safeParse(raw);
     expect(result.success).toBe(true);
@@ -137,7 +136,6 @@ describe('NodeStateSchema — boundary', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.completedAt).toBeUndefined();
-      expect(result.data.durationMs).toBeUndefined();
       expect(result.data.startedAt).toBeUndefined();
     }
   });
@@ -156,19 +154,5 @@ describe('NodeStateSchema — boundary', () => {
     const result = NodeStateSchema.safeParse(raw);
     // z.number() allows negative values by default
     expect(result.success).toBe(true);
-  });
-
-  it('allows durationMs as zero', () => {
-    const raw = {
-      runId: 'run-1',
-      status: 'done',
-      retryCount: 0,
-      durationMs: 0,
-    };
-    const result = NodeStateSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.durationMs).toBe(0);
-    }
   });
 });

@@ -145,7 +145,14 @@ describe('resolveReady — join mode', () => {
     const phases: Phase[] = [
       main('a', []),
       main('b', []),
-      { id: 'c', type: 'main', dependsOn: ['a', 'b'], join: 'any' as const, mode: 'exclusive' as const },
+      {
+        id: 'c',
+        type: 'main',
+        dependsOn: ['a', 'b'],
+        join: 'any' as const,
+        mode: 'exclusive' as const,
+        operations: [],
+      },
     ];
     // only a done — c is ready with join:'any'
     const phaseMap = { a: { status: 'done' as const }, b: { status: 'active' as const } };
@@ -156,7 +163,7 @@ describe('resolveReady — join mode', () => {
   it('join: "any" — no deps completed, phase not ready', () => {
     const phases: Phase[] = [
       main('a', []),
-      { id: 'c', type: 'main', dependsOn: ['a'], join: 'any' as const, mode: 'exclusive' as const },
+      { id: 'c', type: 'main', dependsOn: ['a'], join: 'any' as const, mode: 'exclusive' as const, operations: [] },
     ];
     // nothing completed
     expect(resolveReady(phases, new Set()).map((p) => p.id)).toEqual(['a']);
@@ -165,8 +172,15 @@ describe('resolveReady — join mode', () => {
     const phases: Phase[] = [
       main('root', []),
       // child-all: join absent = default all (explicit 'all' rejected by schema)
-      { id: 'child-all', type: 'main', dependsOn: ['root'], mode: 'exclusive' as const },
-      { id: 'child-any', type: 'main', dependsOn: ['root'], join: 'any' as const, mode: 'exclusive' as const },
+      { id: 'child-all', type: 'main', dependsOn: ['root'], mode: 'exclusive' as const, operations: [] },
+      {
+        id: 'child-any',
+        type: 'main',
+        dependsOn: ['root'],
+        join: 'any' as const,
+        mode: 'exclusive' as const,
+        operations: [],
+      },
     ];
     const phaseMap = { root: { status: 'done' as const } };
     const ready = resolveReady(phases, new Set(['root']), phaseMap);

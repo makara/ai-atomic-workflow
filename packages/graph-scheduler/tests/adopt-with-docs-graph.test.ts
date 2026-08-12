@@ -98,7 +98,14 @@ describe('adopt-with-docs.taskflow.yaml — topology', () => {
     expect(adopting?.skill).toBe('grilling');
     expect(adopting?.dependsOn).toEqual(['adopt-scope']);
     const task = String(adopting?.task);
-    expect(task).toMatch(/grilling graph mode/);
+    expect(task).toMatch(/grilling per grilling skill/);
+    // encapsulation contract: mandatory rounds, never zero-question, never auto-gated
+    expect(task).toMatch(/MANDATORY question rounds/);
+    expect(task).toMatch(/never zero-question/);
+    expect(task).toMatch(/never auto-gated/);
+    // output shape — decisions, never consensus
+    expect(task).toMatch(/decisions: \[\{ decision, rationale \}\]/);
+    expect(task).toMatch(/never 'consensus'/);
     // composed: record appends to the input document
     expect(task).toMatch(/appends to it/);
     // standalone: record path grilling-derived — never a user question

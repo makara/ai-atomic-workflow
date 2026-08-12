@@ -393,20 +393,6 @@ The JUMP reset scope SHALL be the target + downstream terminal nodes (upstream k
 - **WHEN** a target names a flow
 - **THEN** flatten remaps retry/jump targets to the flow's entry node
 
-### Requirement: Phase schema input flag
-
-The phase schema SHALL accept an optional `input: true` boolean on main phases. The validator SHALL enforce: input nodes are in-degree 0 at author level (no dependsOn); at least one input node exists per graph after injection. The `$`-prefix superRefine reservation SHALL be removed from the schema.
-
-#### Scenario: Input node validation
-
-- **WHEN** a phase declares `input: true` with a dependsOn edge
-- **THEN** validation SHALL fail (input nodes must be in-degree 0)
-
-#### Scenario: Dollar prefix is a normal id
-
-- **WHEN** a graph declares any node id
-- **THEN** no prefix is reserved — validation accepts it like any node id
-
 ### Requirement: Maturity-declared scope entries
 
 A journey's scope entry SHALL declare its maturity by construction: raw journeys wire an interview entry (skill: atom-scope-interview — unconditional interview); sharpened/decided journeys wire an extract entry (task: read upstream artifact channel → scope fields; ADR judgment = existence check on docs/adr/index.md; adr_created echoes the upstream artifact's decision). In-degree-0 prefix entries (never composed with dependencies) SHALL carry `input: true` (input-stage membership); composed stage entries (inheriting composer dependsOn) SHALL NOT carry the flag — their reset semantics follow the stage. No node SHALL detect input source, branch on input state, or degrade its interview.
@@ -521,3 +507,59 @@ A flow with only one active path SHALL use `dependsOn` for ordering (+ endRun to
 
 - **WHEN** a flow is entered only after a single approval decision (implement mode), and the end path is expressed by the approval's `end` action
 - **THEN** the flow declares no route — the default route is always active, dispatch is mechanical after the approval completes, with zero branchTo dependency
+
+### Requirement: Mandatory operation declarations on main phases
+
+Every main phase declares its operation classes from the closed hlt-classes set; undeclared main phases fail graph load.
+
+#### Scenario: Undeclared main phase rejected
+
+- **WHEN** a graph defines a main phase without `operations:`
+- **THEN** graph load fails with a validation error naming the phase
+
+#### Scenario: Conversation-only nodes declare empty
+
+- **WHEN** a main phase performs only conversation work (scope interviews, grilling)
+- **THEN** it declares `operations: []` and validation accepts it
+
+#### Scenario: Closed set membership
+
+- **WHEN** a main phase declares an operation not in the closed hlt-classes set
+- **THEN** graph load fails with a validation error listing the valid classes
+
+### Requirement: No version field
+
+The graph definition schema has no `version` field; `version: 1` declarations are rejected at load.
+
+#### Scenario: Legacy version declaration
+
+- **WHEN** a taskflow YAML declares `version`
+- **THEN** graph load fails with a loud rejection
+
+### Requirement: Engine validates shapes, not content
+
+The engine's load-time contract checks are limited to machine facts: target resolvability (dependsOn, routing targets, jump targets, route members), closed-set membership (types, operation classes, channel prefixes), and graph-level context entry shape. Task-text content checks (canonical Output contract spelling, legacy spellings, protocol restatement, declared-input claims) are no longer performed by the engine; they move to the agent-side consistency gate (estate-maintain).
+
+#### Scenario: Malformed task text
+
+- **WHEN** a main-phase task uses a legacy output spelling
+- **THEN** the engine loads the graph without error; the consistency gate flags the spelling
+
+#### Scenario: Unresolvable jump target
+
+- **WHEN** a gate jump targets a non-existent node
+- **THEN** graph load fails with a loud rejection
+
+### Requirement: Reserved `$` prefix rejected
+
+The phase schema SHALL reject any phase id starting with `$` — the activation prologue was removed (activation facts live at `graph_start` / pilot startup); any `$` id is rejected with a validation error naming the removed prefix. The `input: true` flag of the reverted input-node mechanism SHALL NOT exist in the schema.
+
+#### Scenario: $-prefixed id rejected
+
+- **WHEN** a graph declares a phase id starting with `$`
+- **THEN** schema validation SHALL fail with an error naming the `$` prefix (activation prologue removed)
+
+#### Scenario: Plain ids accepted
+
+- **WHEN** a graph declares any non-`$` node id
+- **THEN** validation accepts it like any node id

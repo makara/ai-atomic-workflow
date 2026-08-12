@@ -196,7 +196,7 @@ Natural language - skill body, code comments, sibling files - MUST:
 
 ## Resolution Rule
 
-`<name>` -> `<skillsDir>/<name>/SKILL.md`. skillsDir candidates, order: config `skillsDir` -> `packages/graph-workflow/skills` -> `~/.agents/skills`. Sibling files resolve `<name>/<path>` relative to SKILL.md.
+`<name>` -> `<skillsDir>/<name>/SKILL.md`. skillsDir candidates, order: `packages/graph-workflow/skills` -> `~/.agents/skills`. Sibling files resolve `<name>/<path>` relative to SKILL.md. Skill resolution is agent-side — the engine never probes the skills package.
 
 ## Context Declaration
 

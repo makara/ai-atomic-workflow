@@ -1,7 +1,7 @@
 /**
  * Integration tests for the gate jump transport seam (route-first redesign).
  *
- * Exercises graph_advance(runId, nodeId, durationMs, branchTo) through the
+ * Exercises graph_advance(runId, nodeId, branchTo, endRun) through the
  * SchedulerRuntime facade. Verifies:
  *  - gate pass-through (absent branchTo) → downstream dispatched next
  *  - gate branchTo targeting a terminal upstream node → JUMP reset (retryCount increment)
@@ -34,16 +34,23 @@ function makeFixture(): Fixture {
   // Gate pass-through graph — seed → gate (backward jump to seed) → alpha; no end node
   const passGraph = {
     name: 'pass-test',
-    version: 1,
+
     phases: [
-      { id: 'seed', type: 'main', skill: 'scenario-agent-skill', task: 'decide source', dependsOn: [] },
+      { id: 'seed', type: 'main', skill: 'scenario-agent-skill', task: 'decide source', dependsOn: [], operations: [] },
       {
         id: 'gate',
         type: 'gate',
         dependsOn: ['seed'],
         jumps: [{ when: 'seed output shows source: bad AND seed retryCount < 2', to: 'seed' }],
       },
-      { id: 'alpha', type: 'main', skill: 'scenario-agent-skill', task: 'alpha track', dependsOn: ['gate'] },
+      {
+        id: 'alpha',
+        type: 'main',
+        skill: 'scenario-agent-skill',
+        task: 'alpha track',
+        dependsOn: ['gate'],
+        operations: [],
+      },
     ],
   };
   writeFileSync(join(taskflowDir, 'pass-test.taskflow.yaml'), JSON.stringify(passGraph, null, 2));
@@ -52,17 +59,31 @@ function makeFixture(): Fixture {
   // (JUMP reset path): writer → review → gate (jump to writer) → accept; no end node
   const reworkGraph = {
     name: 'rework-test',
-    version: 1,
+
     phases: [
-      { id: 'writer', type: 'main', skill: 'scenario-agent-skill', task: 'write', dependsOn: [] },
-      { id: 'review', type: 'main', skill: 'scenario-agent-skill', task: 'review', dependsOn: ['writer'] },
+      { id: 'writer', type: 'main', skill: 'scenario-agent-skill', task: 'write', dependsOn: [], operations: [] },
+      {
+        id: 'review',
+        type: 'main',
+        skill: 'scenario-agent-skill',
+        task: 'review',
+        dependsOn: ['writer'],
+        operations: [],
+      },
       {
         id: 'gate',
         type: 'gate',
         dependsOn: ['review'],
         jumps: [{ when: 'review output shows overall: fail AND writer retryCount < 2', to: 'writer' }],
       },
-      { id: 'accept', type: 'main', skill: 'scenario-agent-skill', task: 'accept', dependsOn: ['gate'] },
+      {
+        id: 'accept',
+        type: 'main',
+        skill: 'scenario-agent-skill',
+        task: 'accept',
+        dependsOn: ['gate'],
+        operations: [],
+      },
     ],
   };
   writeFileSync(join(taskflowDir, 'rework-test.taskflow.yaml'), JSON.stringify(reworkGraph, null, 2));
@@ -97,22 +118,19 @@ function nodeStatus(snapshot: { nodes: ReadonlyArray<{ nodeId: string; status: s
   return n?.status ?? 'missing';
 }
 
-/** Start a run and advance through the activation prologue prefix (P nodes) until the first author node dispatches. */
+/** Start a run (mode auto) — runs start directly at author nodes. */
 async function startSkippingPrologue(
   rt: SchedulerRuntime,
   graphName: string,
 ): Promise<{ runId: string; node: { nodeId: string; retryCount: number } | null }> {
-  const start = await rt.graphStart(graphName);
-  let node = start.node;
-  while (node?.nodeId.startsWith('$')) {
-    const next = await rt.graphAdvance(start.runId, node.nodeId, 0);
-    node = next.node;
-  }
-  return { runId: start.runId, node };
+  const start = await rt.graphStart(graphName, { mode: 'auto' });
+  return { runId: start.runId, node: start.node };
 }
 
 // ---------------------------------------------------------------------------
 // Tests
+// ---------------------------------------------------------------------------
+
 // ---------------------------------------------------------------------------
 
 describe('gate jump transport seam', () => {
@@ -132,7 +150,7 @@ describe('gate jump transport seam', () => {
     expect(n1!.nodeId).toBe('seed');
 
     // seed → gate
-    const r1 = await rt.graphAdvance(runId, 'seed', 0);
+    const r1 = await rt.graphAdvance(runId, 'seed');
     expect(r1.node!.nodeId).toBe('gate');
     expect(r1.node!.type).toBe('gate');
     expect(r1.node!.jumps).toHaveLength(1);
@@ -151,10 +169,10 @@ describe('gate jump transport seam', () => {
   it('absent branchTo passes through the gate — downstream dispatched next', async () => {
     const rt = await createTestRuntime(fix);
     const { runId } = await startSkippingPrologue(rt, 'pass-test');
-    await rt.graphAdvance(runId, 'seed', 0);
+    await rt.graphAdvance(runId, 'seed');
 
     // No branchTo — no jump hit, gate passes through to downstream
-    const r = await rt.graphAdvance(runId, 'gate', 10);
+    const r = await rt.graphAdvance(runId, 'gate');
     expect(r.node!.nodeId).toBe('alpha');
     expect(nodeStatus(r.snapshot, 'alpha')).toBe('active');
 
@@ -167,28 +185,21 @@ describe('gate jump transport seam', () => {
     expect(n1!.nodeId).toBe('writer');
 
     // writer → review → gate
-    const r1 = await rt.graphAdvance(runId, 'writer', 10);
+    const r1 = await rt.graphAdvance(runId, 'writer');
     expect(r1.node!.nodeId).toBe('review');
-    const r2 = await rt.graphAdvance(runId, 'review', 10);
+    const r2 = await rt.graphAdvance(runId, 'review');
     expect(r2.node!.nodeId).toBe('gate');
 
     // Gate rework decision → branchTo 'writer' (done, ENTRY node) → JUMP reset:
-    // writer re-activated with retryCount 1, review + gate reset, and the
-    // activation prefix re-runs (round restart) — the next dispatch is P.
-    const r3 = await rt.graphAdvance(runId, 'gate', 10, 'writer');
-    expect(nodeStatus(r3.snapshot, 'writer')).toBe('pending');
+    // writer re-activated with retryCount 1, review + gate reset — the entry
+    // re-dispatches directly (no prologue prefix).
+    const r3 = await rt.graphAdvance(runId, 'gate', 'writer');
+    expect(r3.node!.nodeId).toBe('writer');
+    expect(r3.node!.retryCount).toBe(1);
+    expect(nodeStatus(r3.snapshot, 'writer')).toBe('active');
     expect(r3.snapshot.nodes.find((n) => n.nodeId === 'writer')?.retryCount).toBe(1);
     expect(nodeStatus(r3.snapshot, 'review')).toBe('pending');
     expect(nodeStatus(r3.snapshot, 'gate')).toBe('pending');
-    // Gate-only graph: no approval → no $run-mode-confirm (approval-only synthesis)
-    expect(r3.node!.nodeId).toBe('$load-constraints');
-    expect(r3.node!.retryCount).toBe(1);
-
-    // After the prefix, the reset target re-dispatches with its retry visible
-    const r4 = await rt.graphAdvance(runId, '$load-constraints', 0);
-    expect(r4.node!.nodeId).toBe('writer');
-    expect(r4.node!.retryCount).toBe(1);
-    expect(nodeStatus(r4.snapshot, 'writer')).toBe('active');
 
     await rt.dispose();
   });
@@ -198,9 +209,9 @@ describe('gate jump transport seam', () => {
     const { runId } = await startSkippingPrologue(rt, 'pass-test');
 
     // seed → gate → alpha — alpha is the last node; its completion drains the run
-    await rt.graphAdvance(runId, 'seed', 0);
-    await rt.graphAdvance(runId, 'gate', 0);
-    const r1 = await rt.graphAdvance(runId, 'alpha', 0);
+    await rt.graphAdvance(runId, 'seed');
+    await rt.graphAdvance(runId, 'gate');
+    const r1 = await rt.graphAdvance(runId, 'alpha');
     expect(r1.snapshot.fsmState).toBe('completed');
     expect(r1.node).toBeNull();
     // no skip state exists — statuses are only pending/done/active/aborted
@@ -215,20 +226,20 @@ describe('gate jump transport seam', () => {
     const rt = await createTestRuntime(fix);
     const { runId } = await startSkippingPrologue(rt, 'rework-test');
 
-    // Round 1 with one rework loop — the gate jump to the ENTRY re-runs P
-    await rt.graphAdvance(runId, 'writer', 10);
-    await rt.graphAdvance(runId, 'review', 10);
-    await rt.graphAdvance(runId, 'gate', 10, 'writer'); // JUMP reset — retryCount 1
-    await rt.graphAdvance(runId, '$load-constraints', 0); // P prefix re-run (gate-only: no confirm)
-    expect(nodeStatus(await rt.graphStatus(runId), 'writer')).toBe('active');
+    // Round 1 with one rework loop — the gate jump to the ENTRY re-runs it
+    await rt.graphAdvance(runId, 'writer');
+    await rt.graphAdvance(runId, 'review');
+    const jump = await rt.graphAdvance(runId, 'gate', 'writer'); // JUMP reset — retryCount 1
+    expect(jump.node!.nodeId).toBe('writer');
+    expect(nodeStatus(jump.snapshot, 'writer')).toBe('active');
 
     // Round 2 — gate no-match (pass-through) → accept → drain complete
-    await rt.graphAdvance(runId, 'writer', 10);
-    await rt.graphAdvance(runId, 'review', 10);
-    const r2 = await rt.graphAdvance(runId, 'gate', 10); // no branchTo → pass-through
+    await rt.graphAdvance(runId, 'writer');
+    await rt.graphAdvance(runId, 'review');
+    const r2 = await rt.graphAdvance(runId, 'gate'); // no branchTo → pass-through
     expect(r2.node!.nodeId).toBe('accept');
 
-    const r3 = await rt.graphAdvance(runId, 'accept', 10);
+    const r3 = await rt.graphAdvance(runId, 'accept');
     expect(r3.snapshot.fsmState).toBe('completed');
     expect(r3.node).toBeNull();
 

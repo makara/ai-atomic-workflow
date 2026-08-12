@@ -153,20 +153,6 @@ Automated assertions of constraint injection rules (2 KB cap, lang/git deduplica
 - **WHEN** the `## Constraints Block Format` section in the handler SKILL.md contains only a pointer (rule details have been moved to graph-spec)
 - **THEN** the tests do not fail because of missing inline rule text — the assertion semantics do not depend on the handler SKILL.md restating the rules
 
-### Requirement: Constraint source — load node output
-
-Constraint content SHALL come from the output file of the built-in `$load-constraints` node (re-reading the `## Rules` section of `.graph-scheduler/constraints.md` on each activation) — SHALL NOT come from run records or process cache. The consuming side reads the P output and injects it in the unified block format; when the P output is missing, SHALL inject empty constraints plus a warning (no failure, no blocking).
-
-#### Scenario: Block content comes from load output
-
-- **WHEN** any node is dispatched and this round's load output is non-empty
-- **THEN** the injected constraint block content matches the load output's constraints array
-
-#### Scenario: Load output missing degradation
-
-- **WHEN** the load output file is missing or corrupted
-- **THEN** no constraint block is injected (or an empty block) plus a warning — node execution is not blocked
-
 ### Requirement: Compliance declaration forced output
 
 A sub-agent that receives project constraints MUST output a `Constraint check:` section before returning, with one declaration line per constraint — either `satisfied` or `unsatisfied`; an `unsatisfied` declaration MUST include an explanation of the violation evidence.
@@ -253,12 +239,12 @@ The constraint parsing logic MUST be a pure function — it takes markdown text 
 
 ### Requirement: Termination path clears cache
 
-When a run is force-terminated (force-end), the system MUST delete that run's `graphLoadCache` graph definition cache entry. Constraints have no process cache and no run record column — they are carried by the `$load-constraints` node output per activation, following the output file lifecycle, so there is no entry to clean.
+When a run is force-terminated (force-end), the system MUST delete that run's `graphLoadCache` graph definition cache entry. Constraints have no process cache and no run record column — the pilot loads them once per activation into the session, so there is no entry to clean.
 
 #### Scenario: Cache deleted after force-end
 
 - **WHEN** an active run performs force-end
-- **THEN** the run's graph definition cache entry is deleted and subsequent queries leave no residue of that run's data; constraints are not in the run record (the load output file is retained by the run's output system)
+- **THEN** the run's graph definition cache entry is deleted and subsequent queries leave no residue of that run's data; constraints are not in the run record (loaded per activation into the session)
 
 ### Requirement: Cleanup commands delete corresponding cache
 
@@ -282,25 +268,6 @@ Non-terminating operations (jump redirection, normal advance) MUST NOT delete gr
 
 - **WHEN** an active run performs a graph_jump redirection
 - **THEN** the run's graph definition cache entry is retained and node dispatch works normally after the redirection; dispatched nodes consume this round's load output (the load has re-run when the target is the entry)
-
-### Requirement: Constraint snapshot not persisted in run record; no process cache
-
-At run creation, the system SHALL NOT write project constraints into the run record (the `graph_runs.constraints` column does not exist). Project constraints SHALL be read by the built-in `$load-constraints` node on each activation from `.graph-scheduler/constraints.md` (line-by-line copy of the `## Rules` section) and written to disk as JSON output; dispatch in the current round SHALL consume that output (round-level freeze). The `runConstraints` process cache and the file fallback re-read SHALL NOT exist.
-
-#### Scenario: Snapshot at creation
-
-- **WHEN** a run starts and activates the load node
-- **THEN** project constraints are read from the file and written to disk as output (round-level snapshot); all dispatches in this round carry the same constraints value
-
-#### Scenario: Round-internal freeze
-
-- **WHEN** `.graph-scheduler/constraints.md` is edited during a round
-- **THEN** subsequent dispatches in this round still consume this round's load output snapshot — file edits do not affect in-progress rounds (round-level freeze contract)
-
-#### Scenario: Snapshot value still used after restart
-
-- **WHEN** the MCP server restarts mid-run and the project constraint file has been edited
-- **THEN** current-round dispatch still consumes this round's load output snapshot — the run record has no stale snapshot to read, and the next round's activation refreshes from the new file
 
 ### Requirement: Warning when file exists but parses empty
 
@@ -329,3 +296,68 @@ Both the missing-file case and the successful-parse case MUST NOT output a warni
 
 - **WHEN** the constraint file contains N rules and the loading function is invoked
 - **THEN** no warning is output and N rules are returned
+
+### Requirement: Constraint source — compiled artifact loaded at activation
+
+Constraint content SHALL come from the pilot-side activation load: the pilot reads `.graph-scheduler/constraints.json` (compiled-artifact protocol — existence = validity, `compiled_at` audit only), compiling `.graph-scheduler/constraints.md` `## Rules` into the artifact when the cache is missing (JSON parse failure = missing → recompile). Load happens once per activation into the agent session — SHALL NOT come from run records or process cache. The consuming side injects the session copy in the unified block format; when both files are absent, SHALL inject empty constraints plus a warning (no failure, no blocking).
+
+#### Scenario: Block content comes from the session copy
+
+- **WHEN** any node is dispatched after activation
+- **THEN** the injected constraint block content matches the pilot-loaded session copy
+
+#### Scenario: Missing artifact compiles from source
+
+- **WHEN** `.graph-scheduler/constraints.json` is absent but `.graph-scheduler/constraints.md` has a `## Rules` section
+- **THEN** the pilot compiles the artifact (caveman-organized rules) and loads the resulting array
+
+#### Scenario: Absent everywhere degrades
+
+- **WHEN** neither `.graph-scheduler/constraints.json` nor `.graph-scheduler/constraints.md` exists
+- **THEN** no constraint block is injected (or an empty block) plus a warning — node execution is not blocked
+
+### Requirement: Constraint artifact reset and activation-level load
+
+At run creation, the system SHALL NOT write project constraints into the run record (the `graph_runs.constraints` column does not exist). The pilot SHALL load constraints once per activation from `.graph-scheduler/constraints.json` (compiled artifact) into the agent session; deleting the artifact resets the cache — the next activation recompiles from `.graph-scheduler/constraints.md` `## Rules`. The `runConstraints` process cache and the file fallback re-read SHALL NOT exist. No prologue nodes exist in runs — `$`-prefixed phase ids are schema-rejected.
+
+#### Scenario: Snapshot at activation
+
+- **WHEN** a run activates
+- **THEN** the pilot loads the constraints once into the session; every dispatch in the run consumes that same copy
+
+#### Scenario: Deletion resets the cache
+
+- **WHEN** the user deletes `.graph-scheduler/constraints.json`
+- **THEN** the next activation recompiles the artifact from `.graph-scheduler/constraints.md` and loads the new copy
+
+#### Scenario: Edits apply on next activation
+
+- **WHEN** `.graph-scheduler/constraints.md` is edited after activation
+- **THEN** in-progress dispatches keep the loaded copy — file edits do not affect the active activation (the next activation reloads)
+
+### Requirement: Compiled artifact format
+
+`.graph-scheduler/constraints.json` SHALL be a JSON object `{ "constraints": [string, ...], "compiled_at": "<ISO8601>" }` — `constraints` is the ordered array of compiled rules; `compiled_at` records the compilation timestamp (audit-only, never used for invalidation).
+
+#### Scenario: Artifact written on compile path
+
+- **WHEN** the pilot executes the compile path at activation
+- **THEN** `.graph-scheduler/constraints.json` is written as an object containing the `constraints` array and `compiled_at`
+
+### Requirement: Caveman compilation semantics
+
+Compilation SHALL be performed by the LLM organizing the `## Rules` source text at caveman full level — condensing wording, merging duplicate rules, correcting expressions, unifying order; technical substance (commands, paths, parameters, references) SHALL be preserved verbatim. The artifact SHALL be user-auditable and hand-editable (JSON edits take effect at the next activation).
+
+#### Scenario: Compiled rules are condensed
+
+- **WHEN** the compile path executes and the source rules contain duplicates/loose wording
+- **THEN** the artifact array contains the organized, refined rules with the technical substance fully preserved
+
+### Requirement: Fast path emits artifact verbatim
+
+When `.graph-scheduler/constraints.json` exists, the pilot SHALL emit the verbatim content of its `constraints` array — without reading constraints.md, recompiling, or rewriting the artifact.
+
+#### Scenario: Fast path zero md I/O
+
+- **WHEN** constraints.json exists and a run activates
+- **THEN** the loaded array is verbatim identical to the JSON content, and constraints.md was not read

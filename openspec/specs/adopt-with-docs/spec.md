@@ -47,12 +47,13 @@ After the adoption approval (`adopt-accept` Continue), `spec-propose` SHALL gene
 
 ### Requirement: Record output contract
 
-The graph output SHALL carry `input_document` (path | none), `appended_to` (path | none — the input document when the appendix was appended), `record_path` (path — where the record lives, grilling-derived), alongside consensus fields.
+The graph output SHALL carry `input_document` (path | none), `appended_to` (path | none — the input document when the appendix was appended), `record_path` (path — where the record lives, grilling-derived), alongside `decisions` (the grilling decision list — `consensus` wording retired) and `shared_understanding` (boolean — user confirmed the frontier is empty and nothing is missing).
 
 #### Scenario: Observable attachment
 
 - **WHEN** the adopt stage completes
 - **THEN** downstream stages read `appended_to` / `record_path` to locate the confirmation trace
+- **AND** the record carries `decisions` (list of confirmed choices) + `shared_understanding` (true only after the user confirms the frontier is empty)
 
 ### Requirement: ADR decision always user-confirmed
 
@@ -71,13 +72,18 @@ The `adopting` phase SHALL always put the ADR decision to the user as a question
 
 ### Requirement: Adoption interview ends with explicit close
 
-The `adopting` phase interview SHALL end with a mandatory closing question — "Anything to add?" — after the decision-tree walk. Shared understanding SHALL be declared only after the user confirms nothing is missing. The closing question SHALL NOT be skipped in auto mode (interviews are never auto-decided).
+The `adopting` phase grilling session SHALL end with a mandatory closing question — "Anything to add?" — after the frontier is exhausted. Shared understanding SHALL be declared only after the user confirms nothing is missing. The closing question SHALL NOT be skipped in auto mode (exploration conversations are never auto-gated) and SHALL NOT be zero-questioned: at least one question round is mandatory per graph dispatch (encapsulation contract — upstream grilling skill body untouched).
 
 #### Scenario: Closing question always asked
 
-- **WHEN** the grilling decision-tree walk exhausts its branches
+- **WHEN** the grilling frontier exhausts its branches
 - **THEN** the agent SHALL ask "Anything to add?" (recommended: no/complete)
 - **AND** only after the user confirms SHALL shared understanding be declared and the adoption record written
+
+#### Scenario: Grilling round never skipped
+
+- **WHEN** the adopting node dispatches with full context coverage
+- **THEN** at least one question round SHALL still be presented — zero-question degradation never applies to grilling (encapsulation contract)
 
 ### Requirement: No-content adoption defense layer
 

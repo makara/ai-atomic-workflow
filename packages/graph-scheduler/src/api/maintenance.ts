@@ -14,7 +14,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 
-import { validateEntrySkillContracts, validateProjectContext } from '../context/contracts.js';
+import { validateProjectContext } from '../context/contracts.js';
 import { GraphRepository } from '../lib/db/repository.js';
 import { SERVER_STARTED_AT } from '../runtime-start.js';
 import { ConfigFileSchema } from '../schemas/index.js';
@@ -32,9 +32,7 @@ export interface IGraphInitScan {
   readonly projectTaskflowDir: string | null;
   /** built-in graphs package dir */
   readonly builtinGraphsDir: string;
-  /** graph-workflow skills package dir — null = alignment skipped */
-  readonly skillsDir: string | null;
-  /** project layer context (config.json `context:`) — three-tier channel model */
+  /** user-supplement layer context (config.json `context:`) — four-layer channel model */
   readonly projectContext?: readonly string[];
 }
 
@@ -128,9 +126,10 @@ function checkConfigHealth(cwd: string): IConfigHealth {
  * Initialise the database schema AND run a full-registry health check.
  * Idempotent — repeated runs report the same state.
  *
- * Validation scans project + builtin graphs, runs entry-skill contract
- * alignment WITH orphan detection (checkOrphans: true — the repo-wide layer
- * the retired CLI validate owned), and reports config health. Errors are
+ * Validation scans project + builtin graphs (YAML parse + machine contract
+ * checks), runs user-supplement layer existence validation, and reports
+ * config health. Entry-skill alignment + orphan detection are agent-side
+ * (estate-maintain consistency gate) — not engine health. Errors are
  * returned in the report — they do NOT fail the effect (report-only).
  */
 export function graphInit(scan: IGraphInitScan): Effect.Effect<IGraphInitReport, PersistenceError, GraphRepository> {
@@ -156,34 +155,14 @@ export function graphInit(scan: IGraphInitScan): Effect.Effect<IGraphInitReport,
       }
     }
 
-    const skillsDir = scan.skillsDir;
-    if (skillsDir && graphs.length > 0) {
-      // Three-tier channel model: graph_init health validates with the
-      // project layer (config.json context) — coverage via convention/project
-      // layers and project-layer existence both surface in the health report.
-      const projectContext = scan.projectContext;
-      // Project layer existence validation — same implementation as the load
-      // path (three-tier channel model): exact-file missing -> error, glob
-      // zero-match -> warning.
-      if (projectContext) {
-        const pc = validateProjectContext(projectContext, scan.cwd);
-        errors.push(...pc.errors);
-        warnings.push(...pc.warnings);
-      }
-      const alignment = yield* Effect.either(
-        Effect.tryPromise(() => validateEntrySkillContracts(graphs, skillsDir, { checkOrphans: true, projectContext })),
-      );
-      if (alignment._tag === 'Right') {
-        errors.push(...alignment.right.errors);
-        warnings.push(...alignment.right.warnings);
-      } else {
-        // Unexpected alignment failure — report, never throw.
-        errors.push(`${scan.cwd}: entry-skill alignment aborted — ${String(alignment.left)}`);
-      }
-    } else if (!scan.skillsDir) {
-      warnings.push(
-        `${scan.cwd}: skills package not configured — entry-skill alignment skipped (set skillsDir in config.json)`,
-      );
+    // User-supplement layer existence validation — same implementation as
+    // the load path (four-layer channel model): exact-file missing -> error,
+    // glob zero-match -> warning.
+    const projectContext = scan.projectContext;
+    if (projectContext) {
+      const pc = validateProjectContext(projectContext, scan.cwd);
+      errors.push(...pc.errors);
+      warnings.push(...pc.warnings);
     }
 
     return {

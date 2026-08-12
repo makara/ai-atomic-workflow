@@ -23,8 +23,6 @@ export const NodeStateSchema = z.object({
   startedAt: z.string().optional(),
   /** execution end time (ISO 8601) */
   completedAt: z.string().optional(),
-  /** execution duration in milliseconds */
-  durationMs: z.number().optional(),
 });
 
 /** Inferred TypeScript type for a per-node execution state snapshot. */

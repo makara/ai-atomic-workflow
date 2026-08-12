@@ -158,7 +158,6 @@ describe('approval routingActions', () => {
       {
         nodeId: 'p1',
         type: 'approval',
-        handlerSkill: 'atom-phase-handler',
         retryCount: 0,
       },
       phase,
@@ -196,7 +195,6 @@ describe('approval routingActions', () => {
       {
         nodeId: 'p1',
         type: 'approval',
-        handlerSkill: 'atom-phase-handler',
         retryCount: 0,
       },
       phase,
@@ -216,10 +214,7 @@ describe('approvalPhaseHandler.extendNodeDetail', () => {
   const base = {
     nodeId: 'approval-node',
     type: 'approval',
-    handlerSkill: 'atom-phase-handler',
     skill: 'atom-phase-handler',
-    constraints: [],
-    runMode: 'manual' as const,
     retryCount: 0,
   };
   const nodeState = {
@@ -227,7 +222,6 @@ describe('approvalPhaseHandler.extendNodeDetail', () => {
     retryCount: 0,
     startedAt: undefined,
     completedAt: undefined,
-    durationMs: undefined,
   };
 
   it('derives topic from the task first line', async () => {
@@ -285,7 +279,7 @@ describe('field-type contract — mis-typed fields rejected at parse time', () =
   });
 
   it('rejects any phase declaring preText — removed field (schema field convergence)', () => {
-    const phase = { id: 'a', type: 'main', task: 'do it', preText: 'custom pre-call text' };
+    const phase = { id: 'a', type: 'main', task: 'do it', preText: 'custom pre-call text', operations: [] };
     const result = PhaseSchema.safeParse(phase);
     expect(result.success).toBe(false);
     const messages = result.error!.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('\n');
@@ -297,7 +291,13 @@ describe('field-type contract — mis-typed fields rejected at parse time', () =
       true,
     );
     expect(
-      PhaseSchema.safeParse({ id: 'a', type: 'main', task: 'do it', channels: ['skill:atom-graph-spec'] }).success,
+      PhaseSchema.safeParse({
+        id: 'a',
+        type: 'main',
+        task: 'do it',
+        channels: ['skill:atom-graph-spec'],
+        operations: [],
+      }).success,
     ).toBe(true);
   });
 

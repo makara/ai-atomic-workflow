@@ -22,6 +22,7 @@ Human decision card (approval() manual/absent branch) - field mapping:
   - **AI-generated contextual options** - retry/jump/end/branch-route options judged at execution from the judgment context + `snapshot.nodes` (eligible re-run targets: `status === 'done'` AND `nodeId != currentNodeId`) + run mode. One option per candidate, e.g. `"Retry <nodeId>"`, `"Jump to <nodeId>"`, `"End run"`.
   - **custom:true always present** - free-text text box for user input.
 - `node.task` full text -> pre-call text - display before the card; append the generic sentence `Free input overrides.` (author text carries the card body; the boilerplate is handler-owned).
+- Run Frame: prepend the `## Run Frame` block (SKILL.md §Run Frame Block) to the pre-call text - frame first, before `## Run Mode` + constraints blocks. Every card carries the run-position declaration (T1: approval/gate dispatch included).
 - Collect the approval() decision (choice + custom text) -> output as `IApprovalDecision` JSON - shapes: see atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape (single home).
 
 # Gate Jump Evaluation
@@ -30,7 +31,7 @@ Human decision card (approval() manual/absent branch) - field mapping:
    - Direct dependsOn reports: assemble `## Upstream: <dependsOnId>` blocks from the agent session (the executing agent produced them; platform history recovery after compaction) (main parity).
    - `channels` `node:` targets: assemble `## Upstream: <nodeTarget>` blocks from the agent session; missing -> note `<nodeTarget> has no output` in the context (node pending/unactivated; a condition referencing it evaluates false).
    - Snapshot: per-node states incl. `retryCount` - jump bounds reference the TARGET node's `retryCount` (single counter, JUMP-maintained, never zeroed; every node in the jump closure - target + downstream terminals - increments, so a gate downstream of a rework target carries a non-zero retryCount after rework rounds).
-   - Prepend `## Run Mode: <mode>` (from `$run-mode-confirm` session fact) + constraints blocks (from `$load-constraints` session fact; same layer as main/approval).
+   - Prepend `## Run Frame` (SKILL.md §Run Frame Block) + `## Run Mode: <mode>` (activation session fact — graph_start args.mode) + constraints blocks (activation session copy — pilot-loaded; same layer as main/approval).
 2. Evaluate jumps in declaration order:
    - judge each condition; the first `"true"` selects its jump; stop. No hit -> pass through.
    - judge() per atom-kernel §judge() - constrained true/false answer; judgment failure -> no hit -> pass through (conservative).

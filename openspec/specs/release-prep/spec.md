@@ -24,13 +24,18 @@ The release-prep graph SHALL propose the next version from git tag history (the 
 
 ### Requirement: Confirmation covers all operations
 
-Before any write, release-prep SHALL confirm every planned operation with the user via grilling (interview — never auto-gated): version value, version bump surfaces, changelog scope, README targets, and the release boundary.
+Before any write, release-prep SHALL confirm every planned operation with the user via grilling (exploration conversation — never auto-gated, never zero-question; graph dispatch encapsulation contract: mandatory question rounds, whole frontier per round, output `decisions` + `shared_understanding`): version value, version bump surfaces, changelog scope, README targets, and the release boundary.
 
 #### Scenario: Grill before writes
 
 - **WHEN** release-prep reaches the confirmation phase
 - **THEN** no file SHALL be modified before the user confirms all planned operations
-- **AND** the confirmation SHALL appear as an interview card in any run mode
+- **AND** the confirmation SHALL appear as cards in any run mode (never auto-gated)
+
+#### Scenario: Grilling round never skipped
+
+- **WHEN** plan-grill dispatches with full context coverage
+- **THEN** at least one question round SHALL be presented — zero-question degradation never applies to grilling
 
 ### Requirement: Version bump overwrites release-line surfaces
 

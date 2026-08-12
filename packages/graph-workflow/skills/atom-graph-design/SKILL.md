@@ -7,7 +7,7 @@ version: 1.5.0
 last_updated: '2026-08-08'
 ---
 
-> **Runtime constraints** - load `atom-kernel` for interview() behavior contract (solve mode). Graph dispatch: atom-graph-spec content arrives at dispatch; standalone use loads it directly.
+> **Runtime constraints** - load `atom-kernel` for interview() behavior contract. Graph dispatch: atom-graph-spec content arrives at dispatch; standalone use loads it directly.
 
 ## Context Requirements
 
@@ -28,25 +28,25 @@ last_updated: '2026-08-08'
 
 # Atom-Graph-Design
 
-Entry skill for graph topology design. Uses atom-kernel interview() solve mode - confirm goal -> research specs -> think topology -> interview decisions -> repeat until confirmed. Loads atom-graph-spec as reference. Outputs structured design document for atom-graph-writer consumption.
+Entry skill for graph topology design. Design flow composition: confirm goal -> research specs -> think topology -> interview() confirmation rounds (participation: mandatory) -> repeat until confirmed. Loads atom-graph-spec as reference. Outputs structured design document for atom-graph-writer consumption.
 
 ## Entry
 
-**MUST INTERVIEW** - when dispatched by atom-phase-handler for the spec phase node in the graph-generate maker journey. Execute interview() solve mode per atom-kernel §interview() behavior contract.
+**MUST INTERVIEW** - when dispatched by atom-phase-handler for the spec phase node in the graph-generate maker journey. Execute the design flow per this skill — interview() confirms decisions only.
 
 ## Flow
 
-### interview() solve mode
+### Design flow
 
-Execute atom-kernel interview() solve mode. Goal: "design graph topology for confirmed scope".
+Execute the design flow: research specs -> think topology -> interview() confirmation rounds (participation: mandatory). Goal: "design graph topology for confirmed scope".
 
 ```
-interview({ goal: "design graph topology for <scope>", research: true, context })
+interview({ goal: "design graph topology for <scope>", context, participation: 'mandatory' })
 ```
 
 #### confirm(goal)
 
-Confirm design goal with user via interview(). Read the entry output for scope. Confirm:
+Confirm design goal with user via interview() (first turn). Read the entry output for scope. Confirm:
 
 - Graph name and purpose - what workflow it orchestrates
 - Phase count estimate - start-to-end phases needed
@@ -82,9 +82,9 @@ For each phase (design-relevant fields; full tables: see PHASESCHEMA.md §Phase 
 
 Validate per atom-graph-spec §Topology Constraints + ROUTING.md §Gate Jump Conditions (single home - consult, do not restate). Design-specific mappings: gate jump targets = writer nodes (not reviewers), upstream of the gate; flow phases declare `use` (required - def removed).
 
-#### interview(details)
+#### interview(decisions)
 
-Present design decisions one at a time via approval() (with recommendation - auto mode executes it). Recommendation first.
+Present design decisions one at a time via interview() confirmation rounds (approval() without recommendation - card in any mode; participation: mandatory). Recommendation first.
 
 Confirm:
 
@@ -120,4 +120,4 @@ validation:
   jump_bounds: passed | failed
 ```
 
-Return `solution` per interview() solve mode contract.
+Return `consensus` per interview() confirmation contract (design flow output assembled by this skill).

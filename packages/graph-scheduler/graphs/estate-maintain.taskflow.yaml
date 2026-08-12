@@ -25,6 +25,7 @@ phases:
     type: main
     dependsOn: []
     skill: atom-scope-interview
+    operations: []
     task: |
       Execute scope interview per atom-scope-interview.
 
@@ -46,12 +47,19 @@ phases:
     type: main
     dependsOn: [entry]
     skill: grilling
+    operations: []
     task: |
-      Execute grilling graph mode per grilling skill to analyze and confirm
-      the user-proposed domain-design requirements.
+      Execute grilling per grilling skill to analyze and confirm the
+      user-proposed domain-design requirements. Graph dispatch encapsulation
+      contract: MANDATORY question rounds — at least one round, whole
+      frontier per round, never zero-question, never auto-gated (cards in
+      any mode); output shape { decisions: [{ decision, rationale }],
+      shared_understanding: boolean } — never 'consensus'. End with the
+      mandatory closing question "Anything to add?" — shared_understanding
+      only after the user confirms the frontier is empty.
 
       Scope from entry output: trigger — never re-detected. Non-user-request
-      triggers SHALL report a no-op scope (zero requirements, zero consensus)
+      triggers SHALL report a no-op scope (zero requirements, zero decisions)
       — never fabricated work. User-request requirements come from the
       invocation event — {args.requirements} when provided, else the session
       message.
@@ -64,8 +72,8 @@ phases:
          requirements are emitted as node output; domains-index writes them
          into docs/domains.md Design Requirements.
 
-      Output contract: requirements [{statement}], consensus,
-      trigger.
+      Output contract: requirements [{statement}], decisions,
+      shared_understanding, trigger.
 
   # Workstreams — dispatched in parallel from requirement; each runs its estate skill.
   - id: domains-index
@@ -74,6 +82,7 @@ phases:
     channels:
       - node:entry
     skill: atom-doc-maintain
+    operations: [read, write, verify]
     task: |
       Execute the domains-index workstream per atom-doc-maintain (index class)
       consulting atom-domain-spec as format reference — split principles,
@@ -104,6 +113,7 @@ phases:
     channels:
       - node:entry
     skill: atom-spec-maintain
+    operations: [read, run, write, verify]
     task: |
       Execute the specs-sync workstream per atom-spec-maintain — reverse-analyze
       (triple diff: disk capabilities ↔ docs/domains.md ↔ openspec/specs) →
@@ -127,6 +137,7 @@ phases:
     channels:
       - node:entry
     skill: atom-adr-maintain
+    operations: [read, write, verify]
     task: |
       Execute the adr-align workstream per atom-adr-maintain — status
       verification vs decision reality, stale chains folded via
@@ -150,24 +161,34 @@ phases:
     channels:
       - node:entry
       - node:requirement
+    operations: [locate, read, review]
     task: |
       Review the maintenance pass per the estate-maintain spec:
       Upstream fields: domains-index — changes / validation / updated /
       requirements_recorded (alignment standard for reverse-validation);
-      requirement — requirements / consensus (grill confirmation records);
+      requirement — requirements / decisions + shared_understanding (grill
+      confirmation records);
       specs-sync / adr-align outputs feed the mapping and counts checks.
       1. Consistency gate — mapping (assets ↔ domains bidirectional; spec dirs
          ↔ domain IDs 1:1), links (no dangling targets), counts (claims match
          disk facts), derived (views match source state), requirements (Design
          Requirements block sits at the file head with bullet-list format;
-         workstream changes comply with each requirement; consensus evidence
-         from the requirement node output — node:requirement channel, never
+         workstream changes comply with each requirement; decisions +
+         shared_understanding evidence from the requirement node output —
+         node:requirement channel, never
          in-file confirmation records; format valid per atom-domain-spec).
          Evidence per check; failures surfaced — never silently patched.
       2. Reverse-validation — every change traces to a real estate fact;
          registrations have decision evidence (ADR); retirements remove
          capabilities with REMOVED deltas.
-      3. Deployment-mirror check (read-only) — diff packages/ skill set against
+      3. Graph↔skill contract alignment — every graph channel declaration is
+         checked against the dispatched skill's `## Context Requirements`
+         contract (reference skills / Files entries covered by declared
+         channels); entry skills declaring graph-callable requirements with
+         zero dispatching graph phase are flagged as orphans (agent-side
+         home of the removed engine load-time pass — the engine holds no
+         contract machinery).
+      4. Deployment-mirror check (read-only) — diff packages/ skill set against
          the user deployment (~/.agents/skills); report residue as drift; NEVER
          edit deployment.
 
