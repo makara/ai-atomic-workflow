@@ -78,7 +78,7 @@ Verify either route:
 
 ```bash
 npm list -g @ai-atomic-workflow/graph-scheduler
-# @ai-atomic-workflow/graph-scheduler@0.4.0
+# @ai-atomic-workflow/graph-scheduler@0.5.0
 ```
 
 This installs the `atom-graph-scheduler` bin alongside the package.
@@ -133,7 +133,7 @@ Use setup-atomic-workflow to initialize this project
 
 The skill runs a four-step flow (explore → present → confirm → write) and scaffolds `.graph-scheduler/`:
 
-- `config.json` — dbPath, taskflowDir, registryPaths, optional skillsDir (graph-workflow skills package dir, used for entry-skill alignment checks)
+- `config.json` — dbPath, taskflowDir, registryPaths; optional `context:` = USER-supplement layer (user-owned ambient files, existence-validated — never required; platform estate is organically discovered, no declaration needed)
 - `graphs/` — where your custom `.taskflow.yaml` files live
 - `docs/` — attached-doc home for the maker journey (`.graph-scheduler/docs/<name>.md`)
 - `constraints.md` — rules enforced on every graph run
@@ -173,7 +173,7 @@ phases:
 |`task`|Main: the work order — exact prompt for the agent, `{args.key}` templates interpolated at run time. Approval: decision-card prompt — first line = card header (≤30 chars), rest = card body|
 |`skill`|Execution skill for this phase (e.g. `atom-scope-interview`) — how the phase's work gets done|
 |`agent`|Priority hints — `string[]` of agent types (e.g. `[reviewer, task]`); advisory, consumed by skills when they dispatch sub-agents (main type only)|
-|`channels`|Context patterns — two scopes: graph-level global `context:` (project `config.json` as the default layer, merged once config-first) plus per-phase `channels:` additions. Entries are `skill:<name>` (skill content), file globs, or `node:<id>` (read edge to a non-`dependsOn` node's output stream; `context: [node:<id>]` promotes a stream into the global channel), resolved against the execution skill's Context Requirements contract; approval/gate carry `node:` entries only (judgment context)|
+|`channels`|Context patterns — graph-level global `context:` (config `context:` = the USER-supplement layer, merged once config-first) plus per-phase `channels:` additions. Entries are `skill:<name>` (skill content), file globs (workflow runtime artifacts only), or `node:<id>` (read edge to a non-`dependsOn` node's output stream; `context: [node:<id>]` promotes a stream into the global channel), resolved against the execution skill's Context Requirements contract; approval/gate carry `node:` entries only (judgment context). The platform estate (`docs/adr/**`, `openspec/**`, CHANGELOG, README) is read organically by the agent when present — never declared in config|
 |`jumps`|Gate-only rework conditions — `[{when, to}]`, agent-evaluated in declaration order; first hit → backward jump to `to` (target + downstream reset, retry count incremented); no hit → pass through|
 |`route`|Branch-route membership — declared route id; flows propagate their id to children; absent = implicit default route (always active). Approval branch options activate a route via `graph_advance` `branchTo`; unselected routes never activate|
 |`routing`|Approval-only branch-route actions — `{ actions: [{ action, target?, value, label, description }] }`, declared only in branch-route scenarios; drives the decision-card options. Rejected on other types|
@@ -187,12 +187,12 @@ phases:
 |Tool|Parameters|What it does|
 |-|-|-|
 |`graph_start`|`graphName: string`, `args?: object`|Create a run, return the first ready node (NextNode)|
-|`graph_advance`|`runId`, `nodeId`, `durationMs`, `branchTo?`, `endRun?`|Report a node complete — notify + ask next in one step. `branchTo` passes a routing target (gate rework target / approval branch-route target); `endRun: true` completes the run immediately (approval end action). Output is not passed in — it lives in the agent session or on disk|
+|`graph_advance`|`runId`, `nodeId`, `branchTo?`, `endRun?`|Report a node complete — notify + ask next in one step. `branchTo` passes a routing target (gate rework target / approval branch-route target); `endRun: true` completes the run immediately (approval end action). Output and duration are not passed in — content lives in the agent session, duration is derived from timestamps|
 |`graph_jump`|`runId`, `targetPhaseId`|Jump to a specific phase — re-run it after an approval REWORK decision|
 |`graph_force_end`|`runId`|Force-terminate a run — unfinished nodes marked aborted, run marked terminated. **Irreversible**|
 |`graph_status`|`runId`|Full run snapshot — per-phase status, retry counts, timestamps|
-|`graph_list`|—|All run summaries (runId, graphName, status, startedAt), newest first|
-|`graph_init`|—|Initialize the database (create tables + run migration) plus a full health check — entry-skill contract alignment with orphan detection + config health report. Idempotent|
+|`graph_list`|—|All run summaries (runId, graphName, fsmState, createdAt, updatedAt), newest first|
+|`graph_init`|—|Initialize the database (create tables + run migration) plus a machine health check (graph YAML parse + config health report). Idempotent|
 |`graph_clean_completed`|`before?: string`|Delete completed run records, optionally before an ISO 8601 date|
 |`graph_clean_all`|—|Delete ALL run records — running/blocked/terminated. **Dangerous**|
 
@@ -214,7 +214,7 @@ phases:
 graph_start({ graphName: "e2e-minimal" })
   → { runId, node: { nodeId: "agent-echo", type: "main", task: "say hello in a random language.", ... } }
   → agent executes the task
-  → graph_advance({ runId, nodeId: "agent-echo", durationMs: 1234 })
+  → graph_advance({ runId, nodeId: "agent-echo" })
   → { snapshot, node: { nodeId: "approval-review", type: "approval", routingActions: [...], ... } }
   → ... loop until node is null (graph complete)
 ```
@@ -284,7 +284,7 @@ Phases (after composition):
 |`requirement/review-accept`|approval|Requirement-ready card — Continue (requirement ready) / Loop again (retry scope-entry) / End. Recommendation follows the report state|
 |`round-continue`|approval|Content gate — explicit branch-route: Continue → `proceed` route (activates adopt + implement) / End. Empty rounds short-circuit structurally: no Top Rec → end recommended, unselected route members never activate|
 |`adopt/adopting`|main|Adoption conversation (`grilling` skill) — challenges and confirms the produced requirements, appends the adoption record as a dated appendix to the report, may offer an ADR|
-|`adopt/spec-propose`|main|Openspec-propose (headless) — the adopted requirements materialize as the OpenSpec change|
+|`adopt/spec-propose`|main|Openspec-propose (upstream) — the adopted requirements materialize as the OpenSpec change|
 |`implement/spec-extract`|main|Extracts the implementation scope from the produced change (no interview, no generation)|
 |`implement/pipeline-accept`|approval|Track gate — minimal (apply directly) / detailed (engineer); recommendation follows the echoed ADR judgment|
 |`loop-gate`|gate|THE loop — backward jump to `requirement/scope-entry` when: run mode is auto AND `requirement/arch-review` output shows `top_rec_remaining: true` AND `requirement/scope-entry` retryCount < 8. No match → pass through|

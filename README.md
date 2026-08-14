@@ -137,14 +137,14 @@ Ten workflows ship in `packages/graph-scheduler/graphs/` and run out of the box.
 
 How this project's documentation is managed — **only the documents the current built-in graphs actually consume are listed**; everything else in `docs/` is legacy, kept for reference, not consumed by any graph.
 
-The graph runtime delivers context through channels: the convention layer (platform-default-loaded), project-layer config globs, constraints, and run state. What the 10 built-in graphs actually consume:
+The graph runtime delivers context through channels: ambient context (convention files, user-supplement config, platform estate) plus graph-declared channels, constraints, and run state. What the 10 built-in graphs actually consume:
 
 |Class|Documents|Consumed by|
 |-|-|-|
 |Convention layer (default-loaded into every phase)|`CONTEXT.md` (glossary), `docs/domains.md` (domain index)|all graph phases|
-|Project layer (config-declared globs)|`docs/adr/` + `index.md` + `archive/` (ADRs), `openspec/specs/**`, `openspec/changes/**` (spec assets)|estate-maintain (adr-align), openspec graphs, arch-review-loop adoption chain|
-|Constraints|`.graph-scheduler/constraints.md` → `constraints.json`|every run's `$load-constraints`|
-|Runtime|node run state (`node_states.output` via `graph_advance` output; `graph_status` returns outputs)|graph-scheduler DB (64 KB cap per node)|
+|Platform estate (organic — agent-read when present, never declared)|`docs/adr/` + `index.md` + `archive/` (ADRs), `openspec/specs/**`, `openspec/changes/**` (spec assets)|estate-maintain (adr-align), openspec graphs, arch-review-loop adoption chain|
+|Constraints|`.graph-scheduler/constraints.md` → `constraints.json`|activation (pilot loads once into the session; every node's Constraints block assembles from it)|
+|Runtime|node run state (progress only — status/retry/timing; node content lives in the agent session, ADR 0143)|graph-scheduler DB (delta snapshots — one-line rows + changed rows per dispatch)|
 |Assets|`packages/graph-scheduler/graphs/` + `registry.json` (10 graphs), `packages/graph-workflow/skills/` (16 skills)|all graph execution|
 |Artifacts|`docs/reports/` (arch-review reports), `docs/adopt/` (adoption records)|arch-review / adopt-with-docs|
 
@@ -168,7 +168,7 @@ AI agents skip steps silently, lose context between stages, can't express condit
 
 **Runtime work orders with graph.** Each phase is a self-contained work order. Your agent pulls the next ready order, executes it, reports back; the scheduler advances the graph. The graph only tracks progress and reminds what's next — it executes nothing. A DAG captures what linear chains can't: conditional branches, approval gates, parallel fan-outs.
 
-**Scoped context with channels.** Each work order carries the exact prompt, the right skill, and a context "channel" — a focused slice of relevant decisions and artifacts, nothing heavy. Channels compose in two scopes: a graph-wide channel for shared context, plus per-phase additions. No more "where are we?" or "what was decided earlier?" — your agent gets exactly what it needs for _this_ step.
+**Scoped context with channels.** Each work order carries the exact prompt, the right skill, and a context "channel" — a focused slice of relevant decisions and artifacts, nothing heavy. Effective context is one deterministic merge: ambient context (convention files, user-supplement config, platform estate — see `CONTEXT.md` glossary) plus graph-declared channels (skill references, upstream node outputs, file globs), identical for every phase. Activation facts (run mode, constraints) live at the invocation boundary — `graph_start` requires the mode, the pilot loads constraints once into the session. The engine reads no prose: skills carry the knowing; dispatch payloads are delta snapshots (one-line node rows + changed rows), so progress display and jump navigation never re-pay the full state.
 
 **Hints, not controls — the graph never dispatches.** A graph says _what_ each phase needs — skills, context, and, optionally, agent-type preferences in priority order. Dispatch itself stays in your agent's hands: when a skill fans out sub-agents, it follows the hints, not the graph's command. The graph is a work-order board, not a manager.
 
@@ -314,7 +314,7 @@ Atomic Workflow is in **alpha**.
 **Stable** (implemented, no planned breaking changes before v1.0):
 
 - graph-scheduler FSM engine and 9 MCP tools
-- `.taskflow.yaml` graph format and phase schema (main/approval/gate + flow composition, join modes, channels, agent hints, branch routes, activation prologue, run state)
+- `.taskflow.yaml` graph format and phase schema (main/approval/gate + flow composition, join modes, channels, agent hints, branch routes, run state)
 - CRUD execution loop (`graph_start` → `graph_advance` → `graph_jump`, plus `graph_status` / `graph_list`)
 - setup-atomic-workflow project initialization
 - 10 built-in graphs and 16 built-in skills

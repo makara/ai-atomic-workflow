@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "ai-atomic-workflow",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Graph-Engineering for Real Engineers: Graphs define workflows; workflows build graphs. Based on mattpocock/skills.",
   "owner": {
     "name": "makarawang",
@@ -44,7 +44,7 @@
     {
       "name": "graph-fidelity",
       "source": "./packages/graph-fidelity",
-      "description": "Platform-seam signal discipline — per-call discipline echo, context fidelity reduction, and observability, delivered as one module for OMP (ExtensionAPI) and opencode (Plugin)."
+      "description": "Platform-seam signal discipline — single-line per-call discipline echo (identity + progress only), system-resident prompts (PCL + HLT core requirement), PCL input marking; R2 cost economy (compression/metering/settlement) suspended pending redesign (ADR 0175) — delivered as one module for OMP (ExtensionAPI) and opencode (Plugin)."
     }
   ],
   "skills": []

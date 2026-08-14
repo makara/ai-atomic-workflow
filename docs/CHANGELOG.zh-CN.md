@@ -2,6 +2,28 @@
 
 > ai-atomic-workflow 发布历史 — monorepo，两个包共用一条发布线。内容依据代码状态（技能、图、schema 特性）推导，非 git 提交。Caveman 风格 — 每条一句话，最新状态为准。
 
+## [v0.5.0]
+
+"信号纪律模块"。
+
+### 新增
+
+- 包：graph-fidelity（信号纪律模块 — core chain/echo-line/runframe/pcl/resident + interfaces + OMP/opencode 适配器 + 测试套件）、prompt-assembly-probe（探针测试套件）、scripts/gen-manifests.mjs + marketplace graph-fidelity 条目。
+- spec：graph-fidelity 家族（12 个子 spec）、signal-distribution、token-lifecycle、display-minimalism、questioning-primitives。
+
+### 变更
+
+- 引擎：激活前置流程移除（graph_start args.mode 转必填）、fsm/transition、context 契约 + resolve-channels、snapshot + api 重构；10 图 + 测试更新。
+- 技能：atom-kernel、atom-pilot、atom-phase-handler、atom-graph-spec、atom-doc-maintain、atom-graph-design、atom-scope-interview、atom-skill-spec、setup-atomic-workflow 更新。
+- 文档：CONTEXT.md 术语表（seam 图、信号分发、token 生命周期、显示极简）、domains.md 域索引 67 域。
+- 配置：package.json、yarn.lock。
+
+### 移除
+
+- 引擎：prologue.ts、atom-kernel INTERVIEW-DETAIL.md。
+- spec：activation-prologue、atomic-step-flows、hlt-heat-layering、mutation-plane、query-plane、omp-adapter、opencode-hlt-policy。
+- 测试：constraints、defaults-single-source、init-repro（×3）。
+
 ## [v0.4.0]
 
 "High-level tools".

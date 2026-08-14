@@ -2,6 +2,28 @@
 
 > Release history for ai-atomic-workflow — monorepo, one release line for both packages. Content derived from code state (skills, graphs, schema features), not git commits. Caveman style — one line per change, latest state wins.
 
+## [v0.5.0]
+
+"Signal discipline module."
+
+### Added
+
+- Packages: graph-fidelity (signal-discipline module — core chain/echo-line/runframe/pcl/resident + interfaces + OMP/opencode adapters + test suite), prompt-assembly-probe (probe test suite), scripts/gen-manifests.mjs + marketplace graph-fidelity entry.
+- Specs: graph-fidelity family (12 sub-specs), signal-distribution, token-lifecycle, display-minimalism, questioning-primitives.
+
+### Changed
+
+- Engine: activation prologue removed (graph_start args.mode required), fsm/transition, context contracts + resolve-channels, snapshot + api reworked; 10 graphs + tests updated.
+- Skills: atom-kernel, atom-pilot, atom-phase-handler, atom-graph-spec, atom-doc-maintain, atom-graph-design, atom-scope-interview, atom-skill-spec, setup-atomic-workflow updated.
+- Docs: CONTEXT.md glossary (seam map, signal distribution, token lifecycle, display minimalism), domains.md index 67 domains.
+- Config: package.json, yarn.lock.
+
+### Removed
+
+- Engine: prologue.ts, atom-kernel INTERVIEW-DETAIL.md.
+- Specs: activation-prologue, atomic-step-flows, hlt-heat-layering, mutation-plane, query-plane, omp-adapter, opencode-hlt-policy.
+- Tests: constraints, defaults-single-source, init-repro (×3).
+
 ## [v0.4.0]
 
 "High-level tools".

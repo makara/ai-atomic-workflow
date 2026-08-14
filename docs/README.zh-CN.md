@@ -137,14 +137,14 @@ Use atom-pilot to run estate-maintain: sync the doc estate after the domains cha
 
 本项目文档的管理方式——**只列出当前内置图实际消费的文档**；`docs/` 下其余内容均为 legacy（遗留），保留作参考，不被任何图消费。
 
-图运行时通过通道交付上下文：约定层（平台默认加载）、项目层配置 glob、约束与运行状态。10 个内置图实际消费的内容：
+图运行时通过通道交付上下文：约定层（平台默认加载）、用户补充配置 context、约束与运行状态。10 个内置图实际消费的内容：
 
 |类|文档|消费方|
 |-|-|-|
 |约定层（默认加载进每个阶段）|`CONTEXT.md`（术语表）、`docs/domains.md`（域索引）|所有图阶段|
-|项目层（配置声明的 glob）|`docs/adr/` + `index.md` + `archive/`（ADR）、`openspec/specs/**`、`openspec/changes/**`（spec 资产）|estate-maintain（adr-align）、openspec 图、arch-review-loop 采纳链|
+|平台地产（有机 — 存在即由代理读取，从不声明）|`docs/adr/` + `index.md` + `archive/`（ADR）、`openspec/specs/**`、`openspec/changes/**`（spec 资产）|estate-maintain（adr-align）、openspec 图、arch-review-loop 采纳链|
 |约束|`.graph-scheduler/constraints.md` → `constraints.json`|每次运行的 `$load-constraints`|
-|运行时|节点运行状态（`graph_advance` output → `node_states.output`；`graph_status` 返回输出）|graph-scheduler DB（每节点 64 KB 上限）|
+|运行时|节点运行状态（仅进度 — status、retryCount、时间戳、routing；时长由时间戳推导，从不存储）|graph-scheduler DB（`graph_runs` + `node_states`）；节点内容驻留代理会话/持久产物 — 从不持久化，无输出上限|
 |资产|`packages/graph-scheduler/graphs/` + `registry.json`（10 个图）、`packages/graph-workflow/skills/`（16 个技能）|所有图执行|
 |产物|`docs/reports/`（arch-review 报告）、`docs/adopt/`（采纳记录）|arch-review / adopt-with-docs|
 

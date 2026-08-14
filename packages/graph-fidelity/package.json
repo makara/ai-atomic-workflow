@@ -1,6 +1,6 @@
 {
   "name": "@ai-atomic-workflow/graph-fidelity",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "description": "Platform-seam signal discipline — single-line per-call discipline echo (identity pointer + progress, R1), resident PCL + HLT prompt injection, and PCL mark observability — delivered as one module for OMP (ExtensionAPI) and opencode (Plugin). R2 cost economy (compression, metering, settlement) is SUSPENDED pending redesign (ADR 0175); its reference tree relocated to @ai-atomic-workflow/graph-fidelity-context (module split, ADR 0176). Exposes the SignalLifecycle/DisplayFeedback interface contracts type-only via ./interfaces.",
   "keywords": [
     "agent",
