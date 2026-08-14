@@ -12,7 +12,7 @@
  * section to the input document, else writes the record at
  * docs/adopt/<date>-<slug>.md (standalone — grilling-derived, never asked).
  * Spec production: spec-propose materializes the adopted
- * requirements as the OpenSpec change (openspec-propose, headless).
+ * requirements as the OpenSpec change (upstream openspec-propose).
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -123,14 +123,17 @@ describe('adopt-with-docs.taskflow.yaml — topology', () => {
     expect(String(accept?.task)).toMatch(/Adoption consensus accepted\?/);
   });
 
-  it('spec-propose carries openspec-propose headless contract — production after adoption', () => {
+  it('spec-propose carries the upstream openspec-propose contract — production after adoption', () => {
     const propose = graph.phases.find((p) => p.id === 'spec-propose');
     expect(propose?.type).toBe('main');
     expect(propose?.skill).toBe('openspec-propose');
     expect(propose?.dependsOn).toEqual(['adopt-accept']);
     const task = String(propose?.task);
-    expect(task).toMatch(/headless/);
-    expect(task).toMatch(/Headless Mode/);
+    expect(task).toMatch(/upstream openspec-propose/);
+    // no-name path → blocked + candidates; ambiguity records assumptions
+    expect(task).toMatch(/never guess a name/);
+    // delta-authoring discipline is graph-owned — MODIFIED references as-read names
+    expect(task).toMatch(/references an existing requirement name/);
     // re-rounds update the same change — no duplicates
     expect(task).toMatch(/update the existing change/);
     // echoes drive the track gate

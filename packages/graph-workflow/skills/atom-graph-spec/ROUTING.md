@@ -95,7 +95,7 @@ platform layer < node-level task/context < skill-level `## Rules`
 
 ## Channel File Consumption
 
-Channel file entries (globs / bare paths) consume per the HLT read chain (atom-kernel §High-Level Tool Registry Entry: read) - structural overviews first (serena `get_symbols_overview`), then sliced reads (serena `read_file` line selectors); unavoidable read results > 8KB -> `headroom_compress` before reasoning (compress entry trigger - single compression discipline). Entries aggregating < 8KB arrive verbatim agent-side as `## File:` blocks (unchanged small-file behavior).
+Channel file entries (globs / bare paths) consume per the HLT read chain (atom-kernel §High-Level Tool Registry Entry: read) - structural overviews first (serena `get_symbols_overview`), then sliced reads (serena `read_file` line selectors); unavoidable read results > 8KB (direct-read sub-clause of the class-driven compress contract — graph-fidelity spec) -> `headroom_compress` before reasoning (compress entry trigger - single compression discipline). Entries aggregating < 8KB arrive verbatim agent-side as `## File:` blocks (unchanged small-file behavior).
 
 **Structural verbatim invariant (never compressed):** `node:` streams, dependsOn direct outputs, constraints block, run-mode block, agent hints. Applies to main/approval/gate alike. No manifest, no budget, no CLI: the compress entry (§HLT Registry, atom-kernel) + Tool usage check provide the single compression discipline and its observability.
 

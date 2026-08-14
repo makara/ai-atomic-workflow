@@ -10,17 +10,32 @@ This domain currently has no registered behavioral-contract requirement; new con
 
 ### Requirement: arch-review — requirement generation graph
 
-arch-review SHALL be the independently executable requirement production graph: `scope-entry` (interview input node, skill: atom-scope-interview, in-degree 0, topics: domain/feature/problem + focus + output path + report_input fresh|existing) → `arch-review` (main, skill improve-codebase-architecture — the producer, dependsOn: [scope-entry]) → `review-accept` (approval terminal: Continue → requirement ready; Loop again → retry scope-entry; End → end action). The grill flow SHALL NOT be composed into arch-review — the graph SHALL NOT declare a flow phase referencing adopt-with-docs (requirement adoption is the loop's adopt stage, ADR 0099). The graph SHALL NOT reference review-machinery (inlined, ADR 0099). References to the loop's middle stage SHALL use the name `adopt` (never `refine`).
+`arch-review` SHALL be an independently executable requirement production graph: `scope-entry` (interview input node, skill: atom-scope-interview, in-degree 0, topics: domain/feature/problem + focus + output path + report_input fresh|existing) → producer stage → `review-accept` (approval terminal: Continue → requirement ready; Loop again → retry scope-entry; End → end action).
+
+The producer stage SHALL consist of THREE main phases (replacing the single `arch-review` producer node):
+
+1. `explore` — skill improve-codebase-architecture (Step 1: scope-before-scan, hot-spot walk, sub-agent codebase walk, friction notes), operations [locate, read], agent hints [explore, scout, task, general]; emits `explore_digest` (friction points / candidate areas).
+2. `first-principles` — skill first-principles (Steps 1–4: identify problem + current assumptions; break down to fundamental truths (law vs convention); find atomic components; reason up from fundamentals), operations [read]; consumes the explore output via `node:` stream; emits `principles_output` (assumption list / law-vs-convention table / atomic components / rebuilt solution design).
+3. `present-candidates` — skill improve-codebase-architecture (Step 2: Present candidates), operations [write, review]; consumes explore + first-principles outputs via `node:` streams; Problems and Solutions SHALL be built from the first-principles output (assumption–fact gap → problems; atomic-component recombination → solutions); writes the markdown (NOT HTML) report at the confirmed `report_path`; emits the output contract (report_path, round, implemented, new_findings, top_rec, top_rec_remaining, summary).
+
+Intermediate outputs (explore_digest, principles_output) SHALL travel as session streams via `node:` channels — never written to files (ADR 0143).
+
+Report-input behavior (unchanged semantics, now owned by the producer stage): fresh → write markdown report at `report_path`; existing (round ≥ 2) → read report at `report_path` (single source of truth), mark implementation progress per Top Rec item (evidence-backed), update report in place, increment round marker. Round ≥ 2 entry re-confirmation and verification-scope proposal rules (previous round scope never re-proposed verbatim) preserved.
 
 #### Scenario: Standalone requirement run
 
 - **WHEN** arch-review runs standalone (fresh review)
-- **THEN** scope-entry interviews (scope + output path explicit confirm), arch-review writes the report, review-accept decides: requirement ready → graph completes with the report artifact — no adoption stage runs
+- **THEN** scope-entry interviews (scope + output path explicit confirm), the producer stage runs explore → first-principles → present-candidates, report written at `report_path`, review-accept decides: requirement ready → graph completes report artifact — no adoption stage runs
 
 #### Scenario: Loop-again round
 
 - **WHEN** review-accept chooses Loop again
-- **THEN** the round re-enters at scope-entry — scope and report_input re-confirmed (ADR 0075 D1 semantics preserved); in the loop composition the adopt stage re-runs as the downstream adoption stage
+- **THEN** round re-enters at scope-entry — scope report_input re-confirmed (ADR 0075 D1 semantics preserved); in loop composition adopt stage re-runs downstream adoption stage
+
+#### Scenario: Composed loop promotion points at the producer terminal
+
+- **WHEN** arch-review composes into arch-review-loop (requirement stage)
+- **THEN** the loop's ambient report stream and gate conditions reference the producer terminal (`requirement/present-candidates`) — flow composition auto-follows the child terminal node; adopt stage activates after the producer completes
 
 ### Requirement: review-machinery SHALL NOT exist
 

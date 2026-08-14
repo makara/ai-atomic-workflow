@@ -101,3 +101,22 @@ When a repo owner improves built-in graphs or project-owned skills, the entry po
 
 - **WHEN** a repo owner improves a built-in graph or a project-owned skill
 - **THEN** arch-review-loop SHALL be the entry point, and the implementation stage SHALL load spec skills per the change's affected domains
+
+### Requirement: Open Recommendations carry-over
+
+arch-review-loop reports SHALL maintain an Open Recommendations state block at the report tail — a pending list of un-adopted Top Recommendations, each entry referencing its round, the recommendation summary, and its status (pending | adopted | declined | implemented). The present-candidates phase SHALL update the block on every round: adopted/declined entries leave the pending list, implemented entries are marked, and a new Top Recommendation that is not immediately adopted is added as pending. The scope-entry phase SHALL read the block and fold every pending entry into the new round's verification scope — un-adopted recommendations are never silently dropped across rounds.
+
+#### Scenario: Pending recommendation carried into the next round
+
+- **WHEN** a new round's scope-entry runs and the report tail carries pending Open Recommendations entries
+- **THEN** the round's scope covers verification of each pending entry (evidence-backed), and the report update marks each verified entry with its outcome
+
+#### Scenario: Pending recommendation dropped by adoption
+
+- **WHEN** a recommendation is adopted (adopt stage completes) or declined by the user
+- **THEN** the block entry is removed from the pending list (marked adopted/declined), and later rounds no longer carry it forward
+
+#### Scenario: Fresh report starts with an empty block
+
+- **WHEN** a fresh report is created (report_input fresh, no prior round)
+- **THEN** the report tail contains an empty Open Recommendations block (no pending entries), and scope-entry treats the absence of pending entries as an empty list

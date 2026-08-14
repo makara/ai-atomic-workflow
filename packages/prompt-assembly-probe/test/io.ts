@@ -5,6 +5,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export interface ProbeAssertion {
   name: string;
@@ -12,7 +13,8 @@ export interface ProbeAssertion {
   evidence: string;
 }
 
-const outputsDir = path.resolve(import.meta.dir, '../outputs');
+const here = fileURLToPath(new URL('.', import.meta.url));
+const outputsDir = path.resolve(here, '../outputs');
 
 /** Record and persist one group's I/O extract; returns the record. */
 export function recordIo(group: string, input: unknown, output: unknown, assertions: ProbeAssertion[]): void {

@@ -1147,11 +1147,12 @@ describe('2.13 arch-review-loop three-stage partition topology (requirement + ad
     expect(phaseOf('requirement').channels).toBeUndefined();
     // adopt = the adoption stage — adopt-with-docs receives the produced
     // report as input document via the global channel
-    // (two-scope model — node:requirement/arch-review promoted, all phases)
+    // (two-scope model — node:requirement/present-candidates promoted, all
+    // phases; the producer terminal carries the report stream)
     expect(phaseOf('adopt').use).toBe('adopt-with-docs');
     expect(phaseOf('adopt').dependsOn).toEqual(['requirement']);
     expect(phaseOf('adopt').channels).toBeUndefined();
-    expect(graph.context).toEqual(['node:requirement/arch-review']);
+    expect(graph.context).toEqual(['node:requirement/present-candidates']);
     // adopt sits on the proceed route — activated only by round-continue
     // continue (empty-round structural short-circuit: unselected route members
     // never activate)
@@ -1257,14 +1258,23 @@ describe('2.13 arch-review-loop three-stage partition topology (requirement + ad
     expect(accept.channels).toBeUndefined();
   });
 
-  it('arch-review = standalone requirement production: scope-entry → arch-review → review-accept; no grill flow', () => {
+  it('arch-review = standalone requirement production: scope-entry → explore → first-principles → present-candidates → review-accept; no grill flow', () => {
     const arch = loadGraph('arch-review.taskflow.yaml');
     const phases2 = arch.phases as Array<Record<string, unknown>>;
-    // three-phase requirement production graph — scope-entry entry node,
-    // arch-review main (improve-codebase-architecture — producer #1),
-    // review-accept approval terminal; adoption is NOT composed here (the
-    // loop's adopt stage owns adoption, keeping both graphs standalone)
-    expect(phases2.map((p) => p.id)).toEqual(['scope-entry', 'arch-review', 'review-accept']);
+    // five-phase requirement production graph — scope-entry entry node,
+    // three-phase producer stage (explore main — improve-codebase-architecture
+    // Step 1; first-principles main — first-principles Steps 1–4;
+    // present-candidates main — improve-codebase-architecture Step 2, emits
+    // the report + output contract), review-accept approval terminal;
+    // adoption is NOT composed here (the loop's adopt stage owns adoption,
+    // keeping both graphs standalone)
+    expect(phases2.map((p) => p.id)).toEqual([
+      'scope-entry',
+      'explore',
+      'first-principles',
+      'present-candidates',
+      'review-accept',
+    ]);
     expect(phases2.some((p) => p.type === 'end')).toBe(false);
     const entry = phases2.find((p) => p.id === 'scope-entry');
     expect(entry?.type).toBe('main');
@@ -1272,23 +1282,40 @@ describe('2.13 arch-review-loop three-stage partition topology (requirement + ad
     expect(entry?.skill).toBe('atom-scope-interview');
     // no flow phase references adopt-with-docs — adoption is external
     expect(phases2.some((p) => p.type === 'flow' && p.use === 'adopt-with-docs')).toBe(false);
-    const reviewNode = phases2.find((p) => p.id === 'arch-review');
-    expect(reviewNode?.type).toBe('main');
-    expect(reviewNode?.skill).toBe('improve-codebase-architecture');
-    expect(reviewNode?.dependsOn).toEqual(['scope-entry']);
+    // producer stage — three main phases, first-principles inserted between
+    // Explore and Present candidates
+    const exploreNode = phases2.find((p) => p.id === 'explore');
+    expect(exploreNode?.type).toBe('main');
+    expect(exploreNode?.skill).toBe('improve-codebase-architecture');
+    expect(exploreNode?.dependsOn).toEqual(['scope-entry']);
+    const principlesNode = phases2.find((p) => p.id === 'first-principles');
+    expect(principlesNode?.type).toBe('main');
+    expect(principlesNode?.skill).toBe('first-principles');
+    expect(principlesNode?.dependsOn).toEqual(['explore']);
+    // explore stream arrives via dependsOn — no redundant node: channel
+    expect(principlesNode?.channels).toBeUndefined();
+    const presentNode = phases2.find((p) => p.id === 'present-candidates');
+    expect(presentNode?.type).toBe('main');
+    expect(presentNode?.skill).toBe('improve-codebase-architecture');
+    expect(presentNode?.dependsOn).toEqual(['first-principles']);
+    // only the non-dependsOn stream (explore) is declared as a channel
+    expect(presentNode?.channels).toEqual(['node:explore']);
     const accept = phases2.find((p) => p.id === 'review-accept');
     expect(accept?.type).toBe('approval');
-    expect(accept?.dependsOn).toEqual(['arch-review']);
+    expect(accept?.dependsOn).toEqual(['present-candidates']);
     expect(accept?.channels).toEqual(['node:scope-entry']);
 
     // the machinery node lives INLINE in arch-review — no review-machinery
     // child graph exists
-    const task = String(reviewNode?.task);
+    const task = String(presentNode?.task);
     // dual mode — fresh writes new report, existing re-reviews in place
     expect(task).toMatch(/report_input fresh/);
     expect(task).toMatch(/re-review/);
     expect(task).toMatch(/single source of truth/);
     expect(task).toMatch(/NO path re-confirmation/);
+    // Problems/Solutions built from the first-principles output
+    expect(task).toMatch(/principles_output/);
+    expect(task).toMatch(/assumption/);
     // unified structured output contract (both modes) — gate jump source
     expect(task).toMatch(/top_rec_remaining/);
     expect(task).toMatch(/round/);
@@ -1297,6 +1324,11 @@ describe('2.13 arch-review-loop three-stage partition topology (requirement + ad
     // fresh-origin transition (D19) — fresh + existing report file (round ≥ 2)
     // switches to re-review semantics; the loop closure promise holds for both origins
     expect(task).toMatch(/round ≥ 2/);
+    // intermediate contracts — explore digest feeds first-principles
+    const exploreTask = String(exploreNode?.task);
+    expect(exploreTask).toMatch(/explore_digest/);
+    const principlesTask = String(principlesNode?.task);
+    expect(principlesTask).toMatch(/principles_output/);
   });
 });
 

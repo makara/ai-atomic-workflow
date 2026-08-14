@@ -47,6 +47,10 @@ phases:
       typecheck + single-file tests, full suite at the end. Re-run rounds:
       fix every implement-review finding FIRST, then continue.
 
+      Main-spec single writer: never edit openspec/specs/** main spec
+      files during implementation; openspec archive is the sole
+      spec-sync channel.
+
       Spec standards per affected domain — deterministic mapping rule:
       graph → atom-graph-spec, skill → atom-skill-spec, doc →
       atom-doc-maintain. Determine the change's affected files (delta

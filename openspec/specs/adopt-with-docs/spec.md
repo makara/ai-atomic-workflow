@@ -8,7 +8,13 @@ Requirement adoption graph — the adopt stage of the produce → adopt → impl
 
 ### Requirement: adopt-with-docs graph — four-phase adoption workflow
 
-The `adopt-with-docs` graph SHALL run as a four-phase workflow: scope confirmation (`adopt-scope` — idea/goal, doc-trace intent, input document; NO output-path question), adoption conversation (`adopting` — upstream `grilling` skill graph mode, one question per turn, mandatory interview with user participation), adoption approval (`adopt-accept` — continue / re-adopt / restart scope), and spec production (`spec-propose` — main, skill: openspec-propose, headless). The `adopting` phase SHALL run inline domain-modeling side effects (CONTEXT.md term updates, ADR decision — always asked, written only after explicit user confirmation).
+The `adopt-with-docs` graph SHALL run as a four-phase workflow: scope confirmation (`adopt-scope` — idea/goal, doc-trace intent, input document; NO output-path question), adoption conversation (`adopting` — upstream `grilling` skill graph mode, one question per turn, mandatory interview with user participation), adoption approval (`adopt-accept` — continue / re-adopt / restart scope), and spec production (`spec-propose` — main, skill: openspec-propose, upstream — change resolution per the graph-owned contract in the spec-production requirement). The `adopting` phase SHALL run inline domain-modeling side effects (CONTEXT.md term updates, ADR decision — always asked, written only after explicit user confirmation).
+
+#### Scenario: Spec production runs per the upstream skill
+
+- **WHEN** `spec-propose` executes
+- **THEN** the node SHALL execute the propose workflow per the upstream `openspec-propose` skill (no repo-owned copy exists)
+- **AND** the change name and scope SHALL arrive from the adoption conversation (`adopting` output), never from a clarifying question round
 
 #### Scenario: Scope interview asks only user-owned topics
 
@@ -32,7 +38,7 @@ The `adopt-with-docs` graph SHALL run as a four-phase workflow: scope confirmati
 
 ### Requirement: Spec production from adopted consensus
 
-After the adoption approval (`adopt-accept` Continue), `spec-propose` SHALL generate the delta spec change via openspec-propose (headless — never asks the user): change name from the adopted requirement (upstream `change_name` → `{args.changeName}` → single active openspec change → `spec_status: blocked` + candidates); re-rounds SHALL update the same change rather than create duplicates; the change SHALL be created only after adoption is confirmed (no orphan changes on rejection). Output: `change_name`, `domains`, `file_paths`, `validation_result`, `spec_status`, `adr_created` (echo), `decisions` (echo).
+After the adoption approval (`adopt-accept` Continue), `spec-propose` SHALL generate the delta spec change via the upstream `openspec-propose` skill: change name from the adopted requirement (upstream `change_name` → `{args.changeName}` → single active openspec change → `spec_status: blocked` + candidates); re-rounds SHALL update the same change rather than create duplicates; the change SHALL be created only after adoption is confirmed (no orphan changes on rejection). Material ambiguity not resolved by the adoption conversation SHALL be recorded as reasonable assumptions in the planning artifacts per the upstream skill guardrails — the node never guesses a change name. Delta authoring SHALL follow the graph-owned discipline: before authoring `specs/<capability-path>/spec.md`, read the target main spec's requirement names (`openspec/specs/<capability-path>/spec.md`); MODIFIED MUST reference an existing requirement name from the main spec as-read — never an invented name; ADDED/REMOVED SHALL describe genuine additions/removals relative to the main spec as-read. Output: `change_name`, `domains`, `file_paths`, `validation_result`, `spec_status`, `adr_created` (echo), `decisions` (echo).
 
 #### Scenario: Change materializes after adoption
 
@@ -40,10 +46,22 @@ After the adoption approval (`adopt-accept` Continue), `spec-propose` SHALL gene
 - **THEN** `spec-propose` SHALL create/update the OpenSpec change from the adopted consensus (proposal, delta specs, design, tasks)
 - **AND** the change's decisions echo the adoption record's `adr_created` and `decisions`
 
+#### Scenario: Ambiguity records assumptions
+
+- **WHEN** `spec-propose` faces material ambiguity not resolved by the adoption conversation (e.g. capability path organization)
+- **THEN** the node SHALL record the reasonable assumption in the planning artifacts per the upstream skill guardrails and continue — the flow is not interrupted for clarification the adoption conversation already settled
+
 #### Scenario: No change name available
 
 - **WHEN** no upstream change name and no `{args.changeName}` and no single active openspec change exists
 - **THEN** `spec-propose` SHALL output `spec_status: blocked` with the candidate list — never guess a name
+
+#### Scenario: Delta authoring references existing requirement names
+
+- **WHEN** `spec-propose` authors `specs/<capability-path>/spec.md`
+- **THEN** the node SHALL read the target main spec's requirement names before writing
+- **AND** MODIFIED SHALL reference an existing requirement name from the main spec as-read — never an invented name
+- **AND** ADDED/REMOVED SHALL describe genuine additions/removals relative to the main spec as-read
 
 ### Requirement: Record output contract
 

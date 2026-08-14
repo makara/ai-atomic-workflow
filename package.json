@@ -9,7 +9,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "yarn workspaces foreach --all run tsup",
+    "build": "yarn workspaces foreach --all --no-private run tsup",
     "check": "yarn manifests && yarn typecheck && yarn lint && yarn format:check",
     "check:ci": "yarn manifests && yarn typecheck && yarn lint && yarn format:check && yarn test",
     "format": "prettier --write .",

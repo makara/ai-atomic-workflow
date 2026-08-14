@@ -210,3 +210,27 @@ Every registered operation keeps its obligations after the fold: write → verif
 
 - **WHEN** a write call completes
 - **THEN** the executor verifies the result before reporting success
+
+### Requirement: HLT core requirement doctrine
+
+The HLT registry SHALL distinguish a distilled core requirement from operational detail by an explicit distillation judgment: load-bearing clauses are those whose violation cost × violation frequency exceed the rest (registered-call shape, in-project code → serena, verify-after-write, loud failure on code cells, zero deny). The core requirement text SHALL appear as a "Core Requirement" box at the top of the HLT hot surface (§High-Level Tool Registry in atom-kernel SKILL.md) and at the top of HLT-REGISTRY.md — the box is the single source; the resident block copy is a compressed copy with attribution + source hash (PCL double-copy pattern). All other registry content (adapter table, obligations, protocol, headroom, platform spellings) stays cold-read (P3).
+
+#### Scenario: Core Requirement box at top of hot surface
+
+- **WHEN** the atom-kernel SKILL.md HLT Registry section is read
+- **THEN** its first subsection is the Core Requirement box containing the six-line essence, byte-equal to the HLT-REGISTRY.md box
+
+#### Scenario: Box precedes cold detail in registry
+
+- **WHEN** HLT-REGISTRY.md is read
+- **THEN** the Core Requirement box precedes the Adapter Rule section, and the adapter table / obligations / protocol sections remain unchanged below it
+
+#### Scenario: Resident copy attributed
+
+- **WHEN** the graph-fidelity resident entry is inspected
+- **THEN** its source attribution names atom-kernel as the single source with a version reference, and a hash pin test fails on drift
+
+#### Scenario: Distillation judgment documented
+
+- **WHEN** the registry or the review report describes the core requirement
+- **THEN** the distillation judgment (violation cost × frequency) is stated, making the boundary auditable rather than subjective

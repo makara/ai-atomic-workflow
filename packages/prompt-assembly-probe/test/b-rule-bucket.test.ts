@@ -4,10 +4,21 @@
  * Keyed axis-2 pre-emission · axis-1 C4.
  */
 import type { Rule } from '@oh-my-pi/pi-coding-agent/capability/rule';
-import { bucketRules } from '@oh-my-pi/pi-coding-agent/capability/rule-buckets';
-import { TtsrManager } from '@oh-my-pi/pi-coding-agent/export/ttsr';
-import { afterAll, describe, expect, it } from 'bun:test';
+import { afterAll, describe, expect, it } from 'vitest';
 import { assertion, recordIo, verifyOutput, type ProbeAssertion } from './io';
+
+// Platform package is bun-runtime-bound (pi-utils `Bun.env` top-level; see
+// group A note). Runtime probes skip under node/vitest with a documented
+// reason; runner is yarn, platform runtime is bun.
+const isBunRuntime = typeof Bun !== 'undefined';
+
+async function loadBuckets() {
+  const [{ bucketRules }, { TtsrManager }] = await Promise.all([
+    import('@oh-my-pi/pi-coding-agent/capability/rule-buckets'),
+    import('@oh-my-pi/pi-coding-agent/export/ttsr'),
+  ]);
+  return { bucketRules, TtsrManager };
+}
 
 const assertions: ProbeAssertion[] = [];
 
@@ -41,24 +52,29 @@ afterAll(() => {
 });
 
 describe('PROBE B — axis-2 pre-emission: rule emission classification', () => {
-  it('axis-2 · condition rule → TTSR (in-flight channel), excluded from prompt buckets', () => {
-    const mgr = new TtsrManager();
-    const ttsr = makeRule({ name: 'probe-ttsr', condition: ['TOOL_WRITE'], description: 'write discipline' });
-    const { rulebookRules, alwaysApplyRules } = bucketRules([ttsr], mgr);
-    const pass = rulebookRules.length === 0 && alwaysApplyRules.length === 0 && mgr.hasRules();
-    assertions.push(
-      assertion(
-        'TTSR excluded from prompt buckets + registered',
-        pass,
-        `rulebook=${rulebookRules.length} always=${alwaysApplyRules.length} ttsrRegistered=${mgr.hasRules()}`,
-      ),
-    );
-    expect(rulebookRules).toHaveLength(0);
-    expect(alwaysApplyRules).toHaveLength(0);
-    expect(mgr.hasRules()).toBe(true);
-  });
+  it.skipIf(!isBunRuntime)(
+    'axis-2 · condition rule → TTSR (in-flight channel), excluded from prompt buckets',
+    async () => {
+      const { bucketRules, TtsrManager } = await loadBuckets();
+      const mgr = new TtsrManager();
+      const ttsr = makeRule({ name: 'probe-ttsr', condition: ['TOOL_WRITE'], description: 'write discipline' });
+      const { rulebookRules, alwaysApplyRules } = bucketRules([ttsr], mgr);
+      const pass = rulebookRules.length === 0 && alwaysApplyRules.length === 0 && mgr.hasRules();
+      assertions.push(
+        assertion(
+          'TTSR excluded from prompt buckets + registered',
+          pass,
+          `rulebook=${rulebookRules.length} always=${alwaysApplyRules.length} ttsrRegistered=${mgr.hasRules()}`,
+        ),
+      );
+      expect(rulebookRules).toHaveLength(0);
+      expect(alwaysApplyRules).toHaveLength(0);
+      expect(mgr.hasRules()).toBe(true);
+    },
+  );
 
-  it('axis-2 · alwaysApply → prompt bucket; description-only → rulebook bucket', () => {
+  it.skipIf(!isBunRuntime)('axis-2 · alwaysApply → prompt bucket; description-only → rulebook bucket', async () => {
+    const { bucketRules, TtsrManager } = await loadBuckets();
     const mgr = new TtsrManager();
     const sticky = makeRule({ name: 'probe-sticky', alwaysApply: true, description: 'sticky desc' });
     const book = makeRule({ name: 'probe-book', description: 'book desc' });

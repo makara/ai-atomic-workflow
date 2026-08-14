@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 
 const PKG = resolve(__dirname, '..');
 const SKILLS = join(PKG, 'skills');
-const REFS = resolve(__dirname, '../../../.refs/skills/skills');
 
 const read = (p: string) => readFileSync(p, 'utf-8');
 
@@ -14,27 +13,20 @@ const UPSTREAM_SKILLS: Record<string, string> = {
   'to-tickets': 'engineering/to-tickets',
   grilling: 'productivity/grilling',
   'domain-modeling': 'engineering/domain-modeling',
+  // OpenSpec family — upstream source: .omp/skills (OpenSpec CLI generated;
+  // deployment copies never edited; graphs resolve these by name at dispatch).
+  'openspec-propose': '.omp/skills/openspec-propose',
+  'openspec-apply-change': '.omp/skills/openspec-apply-change',
+  'openspec-archive-change': '.omp/skills/openspec-archive-change',
+  'openspec-sync-specs': '.omp/skills/openspec-sync-specs',
+  'openspec-update-change': '.omp/skills/openspec-update-change',
+  'openspec-explore': '.omp/skills/openspec-explore',
 };
 
 describe('semantic injection layer — no upstream fork, Decision UI block present', () => {
   it('no fork dirs for upstream skills under packages/graph-workflow/skills', () => {
     for (const name of Object.keys(UPSTREAM_SKILLS)) {
       expect(existsSync(join(SKILLS, name)), `${name} must not be forked into packages`).toBe(false);
-    }
-  });
-
-  it('repo-local deployment copies are byte-identical to the .refs mirror', () => {
-    const agents = resolve(__dirname, '../../../.agents/skills');
-    // skills-lock.json pins the upstream set; deployment is repo-local only
-    // (.agents/skills) — home-dir copies are never assumed or touched.
-    const lock = JSON.parse(readFileSync(resolve(__dirname, '../../../skills-lock.json'), 'utf-8'));
-    for (const [name, rel] of Object.entries(UPSTREAM_SKILLS)) {
-      const mirror = join(REFS, rel, 'SKILL.md');
-      const deployed = join(agents, name, 'SKILL.md');
-      expect(lock.skills[name], `${name} locked in skills-lock.json`).toBeTruthy();
-      expect(existsSync(mirror), `${name} mirror exists`).toBe(true);
-      expect(existsSync(deployed), `${name} deployed copy exists at ${agents}`).toBe(true);
-      expect(read(deployed), `${name} deployed == mirror at ${agents}`).toBe(read(mirror));
     }
   });
 

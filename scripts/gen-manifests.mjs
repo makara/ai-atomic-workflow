@@ -31,7 +31,7 @@ const PLUGIN_DESCRIPTIONS = {
   'graph-workflow-extra':
     'Optional release-prep pipeline — analyze proposes the next version and changelog inventory from git history; apply performs the confirmed release writes. Not required for normal operation.',
   'graph-fidelity':
-    'Platform-seam signal discipline — per-call discipline echo, context fidelity reduction, and observability, delivered as one module for OMP (ExtensionAPI) and opencode (Plugin).',
+    'Platform-seam signal discipline — single-line per-call discipline echo (identity + progress only), system-resident prompts (PCL + HLT core requirement), PCL input marking; R2 cost economy (compression/metering/settlement) suspended pending redesign (ADR 0175) — delivered as one module for OMP (ExtensionAPI) and opencode (Plugin).',
 };
 
 /** Scan the skills dir — sorted skill names (stable output). */

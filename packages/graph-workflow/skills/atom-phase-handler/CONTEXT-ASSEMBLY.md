@@ -48,4 +48,4 @@ recommendation present + auto -> execute it; no recommendation -> card.
 
 # Channel File Consumption
 
-Delivery rules + structural verbatim invariant per atom-graph-spec §Channel File Consumption (single source). Execution detail: the Checks block context row records bytes/savings/proxy state; Restore = `headroom_retrieve` (hash contract) primary.
+Delivery rules + structural verbatim invariant per atom-graph-spec §Channel File Consumption (single source). Execution detail: the Checks block context row is estimate-only (`~N tok`; A reference / B working / C growth / L3 prune counts) — no measured ledger exists since R2 metering is suspended (ADR 0175); restore-by-hash (`headroom_retrieve`) is not part of the runtime surface.

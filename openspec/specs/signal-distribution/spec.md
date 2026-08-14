@@ -91,7 +91,7 @@ The signal distribution SHALL distribute discipline signals through platform sea
 
 ### Requirement: Per-turn frame injection (with per-call discipline echo)
 
-The run-frame signal SHALL be assembled exactly once per dispatch by the agent-side handler (single assembly point holding dispatch facts: run id, node id, type, one-line task, declared operations). The signal layer SHALL NOT inject full run-frame content through platform seams — OMP `before_agent_start` frame messages, opencode `experimental.chat.system.transform` frame appends, and context-seam full-frame injections SHALL NOT exist. A per-call discipline echo SHALL be permitted: the context seam (OMP) and `messages.transform` (opencode) MAY insert a single discipline line rendered from the latest run frame in the outgoing message array by a pure function (per signal-seams) — a derivation of the handler frame, never a second assembly, carrying a `[seam]` marker, and skipped when no frame exists. No active-run mirror exists — the deleted mirror machinery has no consumer and no replacement.
+The run-frame signal SHALL be assembled exactly once per dispatch by the agent-side handler (single assembly point holding dispatch facts: run id, node id, type, one-line task, declared operations). The signal layer SHALL NOT inject full run-frame content through platform seams — OMP `before_agent_start` frame messages, opencode `experimental.chat.system.transform` frame appends, and context-seam full-frame injections SHALL NOT exist. A per-call discipline echo SHALL be permitted: the context seam (OMP) and `messages.transform` (opencode) MAY insert a single discipline line rendered from the latest run frame in the outgoing message array by a pure function (per graph-fidelity) — a derivation of the handler frame, never a second assembly, carrying a `[seam]` marker and appended to the most recent user message per call.
 
 #### Scenario: frame present after user message
 
@@ -153,22 +153,32 @@ Four prune laws SHALL govern L3 transitions: superseded (a newer version of the 
 
 ### Requirement: Prune laws mechanized (ownership realigned)
 
-The four prune laws (superseded, consumed, stale, orphaned) SHALL be enforced per tier: superseded and useless = platform-native on the OMP face (`compaction.supersedeReads` default-on, `compaction.dropUseless` — cache-aware per-turn stale-result pass) and mechanism (context-fidelity) on the opencode face; consumed = graph-side seam (context-seam elision of consumed upstream output to an L2 pointer, optional) plus agent discipline; stale and orphaned = platform idle compaction / elision plus agent discipline with Checks-ledger reporting. A coordinate with no implementation SHALL be recorded as backlog in the standard's mapping table — never as a platform capability boundary.
+The four prune laws (superseded, consumed, stale, orphaned) SHALL be enforced per tier: superseded and useless = platform-native on both faces (OMP `compaction.supersedeReads` default-on + `compaction.dropUseless`; opencode platform-native equivalents — no graph-side re-implementation, ADR 0170); consumed = agent discipline (Checks L3 counts; prose fallback when the plugin is absent) with platform-native residue handling; stale and orphaned = platform idle compaction plus agent discipline. No graph-fidelity context-seam elision is SHIPPED (removed, ADR 0170/0171); no session.compacting archive joins the mechanized surface — the platform owns compaction summaries and residue.
 
 #### Scenario: Superseded signal
 
 - **WHEN** a newer version of the same signal enters the context
-- **THEN** the older version is pruned by the native tier or the fidelity mechanism (or marked recoverable) rather than retained at full fidelity.
+- **THEN** the older version is pruned by the platform-native tier (or marked recoverable) rather than retained at full fidelity — no graph-side fidelity code duplicates the operation
 
 #### Scenario: Consumed output elides
 
-- **WHEN** a downstream node or gate has consumed an upstream node output and the consumed-elision seam is enabled
-- **THEN** the output's L0 copy is replaced by an L2 pointer on subsequent calls, restorable on demand
+- **WHEN** a downstream node or gate has consumed an upstream node output and the plugin is installed
+- **THEN** no graph-side elision or L2 pointer is emitted — the module ships no consumed-elision (ADR 0170); the consuming node reports the L3 discipline in its Checks context line, and platform-native residue handling applies
 
 #### Scenario: Absence is backlog
 
 - **WHEN** a (class, seam) coordinate has no implementation in the current deliverable
 - **THEN** the mapping table marks it backlog, and no requirement text declares an absence "SHALL be a recorded deviation" or "platform capability boundary"
+
+#### Scenario: Consumed law mechanical
+
+- **WHEN** a consumer node completes its dispatch and the plugin is installed
+- **THEN** no mechanical graph-side elision exists — the consumed law remains agent-disciplined with platform-native residue handling (the module's mechanical tier covers echo, reduction, compression, settlement, and metering only)
+
+#### Scenario: Consumed law prose fallback
+
+- **WHEN** the plugin is absent
+- **THEN** the consumed law remains agent-disciplined (Checks self-report, L3 count)
 
 ### Requirement: Post-hoc wording refined
 
@@ -195,12 +205,12 @@ The reclassification law (frame reclassifies user text into node data; PCL recla
 
 ### Requirement: Seam mapping clause
 
-The lattice SHALL map every (class, seam) coordinate to exactly one implementation: platform native, graph extension (signal-seams / context-fidelity), or agent discipline. Platform capabilities SHALL be verified against the pinned npm platform package by the probe suite (drift guard); a capability absence that cannot be implemented inside the deliverable SHALL be a backlog row, and the standard SHALL NOT contain "recorded deviation" or "platform capability boundary" clauses. The OMP face has emission-side seams (context, before_provider_request) and native L3 mechanics — R4 fidelity on OMP is native tier plus graph-side consumed elision, not agent-discipline-only.
+The lattice SHALL map every (class, seam) coordinate to exactly one implementation: platform native, graph extension (graph-fidelity), or agent discipline. Platform capabilities SHALL be verified against the pinned npm platform package by the probe suite (drift guard); a capability absence that cannot be implemented inside the deliverable SHALL be a backlog row, and the standard SHALL NOT contain "recorded deviation" or "platform capability boundary" clauses. The OMP face has emission-side seams (context, before_provider_request) and native L3 mechanics — R4 fidelity on OMP is native tier plus graph-side errored-result reduction and class-driven compression, not agent-discipline-only.
 
 #### Scenario: OMP face mapped
 
 - **WHEN** the standard's mapping table is read for the R4 (fidelity) coordinate on the OMP face
-- **THEN** it lists platform native (supersedeReads / dropUseless / compaction), the context seam (consumed elision), and the probe group that verifies the seam against the npm package — no boundary clause
+- **THEN** it lists platform native (supersedeReads / dropUseless / compaction), the context seam (errored-result reduction + class-driven compression), and the probe group that verifies the seam against the npm package — no boundary clause
 
 #### Scenario: no deviation clauses
 
@@ -221,35 +231,6 @@ The standard SHALL carry a mapping table — every (class, seam) coordinate maps
 - **WHEN** the seam mapping table enumerates observability events
 - **THEN** the observability entry includes `tool_execution_*` events in addition to `message_end`, `auto_compaction_end`, and `ttsr_triggered`
 
-### Requirement: Discipline echo contract (signal-seams)
-
-The per-call discipline echo SHALL be delivered by the graph-fidelity capability (renamed from signal-seams): a pure `renderDisciplineLine(texts)` function parses the latest run frame from the outgoing message array, renders a single discipline line (node id + declared operations + out-of-scope list derived from the frame) in the inline `· out of scope:` format, and the OMP context seam / opencode messages.transform insert it after the most recent user message per call. The echo SHALL apply in subagent sessions on both platforms (OMP extensions reload in subagent sessions; opencode subagent task sessions run the same prompt pipeline — platform-verified dispatch). The echo SHALL skip when no frame exists (non-graph sessions, subagents without frames). The echo SHALL NOT block, deny, or modify tool capability.
-
-#### Scenario: subagent without frame skips
-
-- **WHEN** a subagent session's outgoing request contains no run frame
-- **THEN** the echo is skipped — no discipline line is inserted
-
-#### Scenario: echo never blocks
-
-- **WHEN** the echo seam is active
-- **THEN** tool capability is identical with and without it — the echo is text-level only
-
-#### Scenario: owner renamed
-
-- **WHEN** the seam mapping table names the discipline-echo implementation owner
-- **THEN** it references `graph-fidelity` (the merged module), not `signal-seams`
-
-#### Scenario: inline format pinned
-
-- **WHEN** the spec's discipline-line format string is compared with the frame-contract pin
-- **THEN** they are identical, and a test asserts the equality
-
-#### Scenario: subagent sessions covered
-
-- **WHEN** a subagent session's outgoing request passes through the echo seam (OMP context event / opencode messages.transform — both platforms dispatch these for subagent sessions, platform-verified)
-- **THEN** the echo is applied with the same rules as the main session, and no optional off-by-default seam is required to extend coverage to subagents
-
 ### Requirement: Deploy copy generation ownership
 
 Deploy copies for platform-seam extensions are retired. `scripts/gen-manifests.mjs` SHALL generate manifest documents only (marketplace catalog + skills.sh groupings) with package-path references; it SHALL NOT emit platform deploy copies. Hand-written or generated repo-level extension shims are prohibited.
@@ -263,3 +244,22 @@ Deploy copies for platform-seam extensions are retired. `scripts/gen-manifests.m
 
 - **WHEN** `yarn manifests` runs
 - **THEN** only `.claude-plugin/marketplace.json` and `skills.sh.json` are (re)written, and no `.omp/extensions/` file is produced
+
+### Requirement: P0 frequency membership includes HLT core requirement
+
+The prompt frequency standard (P0–P3) SHALL extend P0 system-resident membership to the HLT core requirement: the distilled essence (six lines) is per-call resident while the full HLT surface (hot section + registry) stays P3 cold-read. The membership statement SHALL be recorded in the prompt-frequency standard (Token lifecycle glossary entry) as one sentence (zero new glossary terms) and in ADR 0162, which revises the ADR 0158 §5 judgment (HLT non-resident) — the prior judgment priced the full hot surface; the essence's lower cost and correctness value class change the calculus.
+
+#### Scenario: Glossary states membership
+
+- **WHEN** the prompt-frequency glossary entry is read
+- **THEN** it lists the HLT core requirement among P0 members (alongside style discipline and PCL vocabulary), in one sentence, without introducing a new glossary term
+
+#### Scenario: ADR 0162 records the revision
+
+- **WHEN** ADR 0162 is read
+- **THEN** it states that HLT essence is P0 resident, the full HLT surface remains P3, and it explicitly revises ADR 0158 §5 with a rationale (cost difference + correctness value class)
+
+#### Scenario: Full surface stays cold
+
+- **WHEN** the resident block renders
+- **THEN** it contains only the six-line essence, never the adapter table, obligations, protocol, or headroom sections of HLT-REGISTRY.md

@@ -628,3 +628,17 @@ The kernel SHALL define run mode as controlling single-decision presentation onl
 
 - **WHEN** an interview turn or a grilling round presents in auto mode
 - **THEN** a card SHALL appear — mode never gates confirmation or exploration conversations
+
+### Requirement: Core Requirement box on the HLT hot surface
+
+The atom-kernel SKILL.md §High-Level Tool Registry SHALL open with a "Core Requirement" box carrying the six-line HLT essence (registered-call shape, in-project code → serena, verify-after-write, loud failure, zero deny, cold-read pointer). The box is the single source of the essence text; the graph-fidelity resident entry is a compressed copy (attribution + hash). The box SHALL NOT expand the hot surface's operational detail — the adapter rule and obligations one-liners remain below it unchanged.
+
+#### Scenario: Box opens the HLT section
+
+- **WHEN** the §High-Level Tool Registry section is read
+- **THEN** the Core Requirement box is its first subsection and contains exactly the six-line essence
+
+#### Scenario: Hot surface size bounded
+
+- **WHEN** the HLT section is measured after the change
+- **THEN** the box adds at most ~6 lines and no adapter-table or obligations content moves into the hot surface

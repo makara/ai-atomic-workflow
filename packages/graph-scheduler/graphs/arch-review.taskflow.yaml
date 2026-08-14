@@ -6,8 +6,9 @@ name: arch-review
 context:
   - skill:codebase-design
 phases:
-  # Requirement production — scope-entry → arch-review → review-accept
-  # (loop composition composes this graph whole as its requirement stage).
+  # Requirement production — scope-entry → producer stage (explore →
+  # first-principles → present-candidates) → review-accept (loop composition
+  # composes this graph whole as its requirement stage).
   - id: scope-entry
     type: main
     dependsOn: []
@@ -25,40 +26,114 @@ phases:
       Loop jump-backs target this node.
 
       Scope proposal: a report exists (report_input: existing, or the
-      previous round's arch-review output shows round >= 1) AND the user
-      gives no explicit new scope → MUST propose scope = verify the
-      implementation results against the report (evidence-backed) and
-      surface new problems; never re-propose the prior round's scope
-      verbatim.
+      previous round's report output (requirement/present-candidates) shows
+      round >= 1) AND the user gives no explicit new scope → MUST propose
+      scope = verify the implementation results against the report
+      (evidence-backed) and surface new problems; never re-propose the prior
+      round's scope verbatim.
+
+      Open Recommendations carry-over: read the report tail's Open
+      Recommendations block (fresh report → empty block). Pending entries
+      (un-adopted Top Recommendations from prior rounds) MUST be folded
+      into the new round's verification scope — each pending entry is
+      verified evidence-backed this round; never silently dropped.
 
       Output contract: scope, focus, output, report_input
       (fresh|existing), report_path, scope_complete.
 
-  # Report production — improve-codebase-architecture (producer).
-  - id: arch-review
+  # Producer stage — three main phases. Explore emits explore_digest;
+  # first-principles challenges assumptions, emits principles_output;
+  # present-candidates builds Problems/Solutions from the principles output
+  # and writes the markdown report.
+  - id: explore
     type: main
     dependsOn: [scope-entry]
     skill: improve-codebase-architecture
-    operations: [locate, read, write, review]
+    operations: [locate, read]
     agent: [explore, scout, task, general]
     task: |
-      Execute architecture review per improve-codebase-architecture (use ## Agent hints for the Explore sub-agent).
+      Execute Step 1 Explore per improve-codebase-architecture (use ## Agent
+      hints for the sub-agent codebase walk).
 
       Scope from scope-entry output: scope, focus, report_path, report_input —
-      never re-detected, never re-interviewed.
+      never re-detected, never re-interviewed. Scope-before-scan: user-named
+      direction taken; otherwise walk recent-commit hot spots, read the
+      domain glossary (CONTEXT.md) and ADRs in the touched area, spawn a
+      sub-agent to walk the codebase, note friction organically: shallow
+      modules (interface nearly as complex as implementation), tightly
+      coupled seams, untested parts; apply the deletion test to suspects.
+
+      Output contract: explore_digest (friction points / candidate areas,
+      evidence-backed, compressed).
+
+  - id: first-principles
+    type: main
+    dependsOn: [explore]
+    skill: first-principles
+    operations: [read]
+    task: |
+      Execute first-principles skill Steps 1–4 (no interview, no user
+      questions — pure analysis over the explore digest):
+
+      Step 1 — Identify problem and current assumptions: state the review
+      problem, the current "truths" everyone accepts, analogies in use, and
+      hidden assumptions.
+      Step 2 — Break down to fundamental truths: classify each assumption
+      as Law of Nature (physics, math, biology — cannot change) or
+      Convention (industry practice, "best practice", historical precedent —
+      CAN change), with evidence; apply the physics test.
+      Step 3 — Find atomic components: decompose to the most basic level —
+      for architecture problems: atomic actions, atomic inputs, atomic
+      constraints.
+      Step 4 — Reason up from fundamentals: starting only from verified
+      truths, ask what is physically possible, what the theoretical minimum
+      is, what new combinations could work, what we would do starting from
+      scratch; produce the rebuilt design with fundamental requirements and
+      eliminated "requirements".
+
+      Input: explore_digest from node:explore.
+
+      Output contract: principles_output (assumption list / law-vs-convention
+      table with evidence / atomic components / rebuilt solution design,
+      compressed).
+
+  - id: present-candidates
+    type: main
+    dependsOn: [first-principles]
+    skill: improve-codebase-architecture
+    operations: [write, review]
+    channels:
+      - node:explore
+    task: |
+      Execute Step 2 Present candidates per improve-codebase-architecture,
+      building Problems and Solutions from the first-principles output.
+
+      Inputs: explore_digest (node:explore) + principles_output
+      (node:first-principles) — Problems derive from the assumption–fact gap
+      (Step 2 table), Solutions rebuild from atomic components (Step 3–4);
+      never echo conventions without first-principles grounding. Scope and
+      report contract from scope-entry: scope, focus, report_path,
+      report_input — never re-detected, never re-interviewed.
+
       report_input fresh → write markdown (NOT HTML) report at report_path.
       report_input fresh AND report_path exists (round ≥ 2) OR existing →
       re-review: read report at report_path (single source of truth — NO path re-confirmation),
-      mark
-      implementation progress per Top Rec item (evidence-backed), review
-      defects (findings cards), update report in place (condense implemented
-      content, rewrite Top Rec), increment round marker.
+      mark implementation progress per Top Rec item
+      (evidence-backed), review defects (findings cards), update report in
+      place (condense implemented content, rewrite Top Rec), increment round
+      marker.
 
       Findings cards: Files / Problem / Solution / Benefits (locality +
       leverage + testability) / Recommendation strength (Strong | Worth
       exploring | Speculative). End with Top recommendation + Decision Request
       (Context, Auto-recorded debt, Blocking findings, Dispatch record,
       Suggested advance label).
+
+      Open Recommendations block maintenance: update the report tail's
+      Open Recommendations block every round — adopted/declined entries
+      leave the pending list (marked adopted/declined), implemented
+      entries are marked implemented, and a Top Recommendation that is not
+      immediately adopted is added as pending. Fresh report → empty block.
 
       Output contract: report_path, round, implemented, new_findings, top_rec,
       top_rec_remaining, summary.
@@ -67,7 +142,7 @@ phases:
   # scope-entry; End → end action.
   - id: review-accept
     type: approval
-    dependsOn: [arch-review]
+    dependsOn: [present-candidates]
     channels:
       - node:scope-entry
     task: |

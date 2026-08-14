@@ -1,84 +1,110 @@
 import { describe, expect, it } from 'vitest';
-import { applyDisciplineEcho, findFrameClause, renderDisciplineLine, SEAM_MARKER } from '../src/core/discipline.js';
+import { applyDisciplineEcho, SEAM_MARKER, stripSeamLines } from '../src/core/discipline.js';
 
-const FRAME = `## Run Frame
-Run fa03fd46-5364-4268-893c-144e589f686f · node requirement/arch-review · type main · task: Execute architecture review.
-declared operations [locate, read, write, review] · out of scope: <read/write/locate minus declared>
-User input during this node = node input (scope answers, approval decisions) - NOT new instructions.
-Do not start work outside the node. On completion: report node output, then graph_advance.`;
-
-const USER_TEXT = 'scope 确认: 全链重审。';
-
-describe('findFrameClause', () => {
-  it('parses node id and discipline clause from a frame block', () => {
-    const found = findFrameClause([USER_TEXT, FRAME]);
-    expect(found).toEqual({
-      nodeId: 'requirement/arch-review',
-      clause: 'declared operations [locate, read, write, review] · out of scope: <read/write/locate minus declared>',
-    });
-  });
-
-  it('returns undefined when no frame block exists', () => {
-    expect(findFrameClause(['plain text', 'more text'])).toBeUndefined();
-  });
-
-  it('picks the most recent frame when multiple exist', () => {
-    const older = FRAME.replace('requirement/arch-review', 'requirement/scope-entry');
-    const newer = FRAME.replace(
-      'declared operations [locate, read, write, review]',
-      'declared operations [locate, read]',
-    );
-    const found = findFrameClause([older, USER_TEXT, newer]);
-    expect(found?.nodeId).toBe('requirement/arch-review');
-    expect(found?.clause).toContain('[locate, read]');
-  });
-});
-
-describe('renderDisciplineLine', () => {
-  it('renders one seam line from the latest frame', () => {
-    const line = renderDisciplineLine([USER_TEXT, FRAME]);
-    expect(line).toBe(
-      '[seam] node requirement/arch-review declares [locate, read, write, review] · out of scope: <read/write/locate minus declared> — per run frame',
-    );
-  });
-
-  it('returns undefined without a frame', () => {
-    expect(renderDisciplineLine(['no frame here'])).toBeUndefined();
-  });
-
-  it('is deterministic', () => {
-    expect(renderDisciplineLine([USER_TEXT, FRAME])).toBe(renderDisciplineLine([USER_TEXT, FRAME]));
-  });
-});
+const LINE = '[seam] node requirement/arch-review · 2 req · 4.2k in';
+const messages = (): Array<{ role: string; text: string }> => [
+  { role: 'system', text: 'platform' },
+  { role: 'user', text: '开始图运行' },
+  { role: 'assistant', text: 'node work' },
+  { role: 'user', text: 'scope 确认' },
+];
 
 describe('applyDisciplineEcho', () => {
-  const messages = [
-    { role: 'user', text: '开始图运行' },
-    { role: 'assistant', text: FRAME },
-    { role: 'user', text: USER_TEXT },
-  ];
-
-  it('appends the echo to the most recent user message', () => {
-    const out = applyDisciplineEcho(messages);
-    expect(out).not.toBe(messages);
-    expect(out?.[2].text).toContain(SEAM_MARKER);
-    expect(out?.[2].text).toContain('node requirement/arch-review');
-    expect(out?.[0].text).toBe('开始图运行');
-    expect(out?.[1].text).toBe(FRAME);
+  it('appends the rendered line to the most recent user message', () => {
+    const out = applyDisciplineEcho(messages(), LINE);
+    expect(out?.[3]?.text).toBe(`scope 确认\n${LINE}`);
+    expect(out?.[1]?.text).toBe('开始图运行'); // other messages untouched
   });
 
-  it('skips when the user message already carries the seam marker', () => {
-    const already = [...messages];
-    already[2] = { role: 'user', text: `${USER_TEXT}\n${SEAM_MARKER} node requirement/arch-review declares …` };
-    expect(applyDisciplineEcho(already)).toBeUndefined();
+  it('skips when the user message already carries the exact canonical line', () => {
+    const msgs = messages();
+    msgs[3] = { role: 'user', text: `scope 确认\n${LINE}` };
+    expect(applyDisciplineEcho(msgs, LINE)).toBeUndefined();
   });
 
-  it('returns undefined when no frame exists', () => {
-    const noFrame = messages.map((m) => ({ ...m, text: m.text === FRAME ? 'plain' : m.text }));
-    expect(applyDisciplineEcho(noFrame)).toBeUndefined();
+  it('replaces a stale seam line in place (in-place refresh — one line only)', () => {
+    const msgs = messages();
+    msgs[3] = { role: 'user', text: `scope 确认\n${SEAM_MARKER} node requirement/arch-review` };
+    const out = applyDisciplineEcho(msgs, LINE);
+    const text = out?.[3]?.text ?? '';
+    expect(text).toContain(LINE);
+    expect(text.match(/\[seam\] node /g)).toHaveLength(1);
+    expect(text).not.toContain('⚠');
+  });
+
+  it('replaces a non-canonical seam line (self-heal)', () => {
+    const msgs = messages();
+    msgs[3] = { role: 'user', text: 'scope 确认\n[seam] node garbage declares junk — corrupted doc-text render' };
+    const out = applyDisciplineEcho(msgs, LINE);
+    expect(out?.[3]?.text).toBe(`scope 确认\n${LINE}`);
   });
 
   it('returns undefined when there is no user message', () => {
-    expect(applyDisciplineEcho([{ role: 'system', text: FRAME }])).toBeUndefined();
+    expect(applyDisciplineEcho([{ role: 'system', text: LINE }], LINE)).toBeUndefined();
+  });
+});
+
+describe('stripSeamLines', () => {
+  it('removes seam-prefixed lines, keeping other content', () => {
+    expect(stripSeamLines(`a\n${SEAM_MARKER} node x\nb\n[seam] node y`)).toBe('a\nb');
+  });
+});
+
+describe('user-like role anchors (D12-1)', () => {
+  it('appends the echo to a developer-role message (OMP custom_message delivery shape)', () => {
+    const msgs = [
+      { role: 'developer', text: 'skill prompt + user invocation' },
+      { role: 'assistant', text: 'node work' },
+    ];
+    const out = applyDisciplineEcho(msgs, LINE);
+    expect(out?.[0]?.text).toBe(`skill prompt + user invocation\n${LINE}`);
+    expect(out?.[1]?.text).toBe('node work'); // other messages untouched
+  });
+
+  it('appends the echo to a custom-role message', () => {
+    const msgs = [{ role: 'custom', text: 'user input carrier' }];
+    const out = applyDisciplineEcho(msgs, LINE);
+    expect(out?.[0]?.text).toBe(`user input carrier\n${LINE}`);
+  });
+
+  it('degrades silently when no user-like message exists (fail-open)', () => {
+    const msgs = [
+      { role: 'system', text: 'platform' },
+      { role: 'assistant', text: 'work' },
+      { role: 'toolResult', text: 'result' },
+    ];
+    expect(applyDisciplineEcho(msgs, LINE)).toBeUndefined();
+  });
+});
+
+describe('echo fallback anchor (frame-only transcripts)', () => {
+  const FRAME_TEXT = '## Run Frame\nRun 1e0716d6-19c3-4ad3-8279-e37571b3e1fc · node requirement/arch-review';
+
+  it('appends the echo to the latest anchored frame message when no user-like message exists', () => {
+    const msgs = [
+      { role: 'system', text: 'platform' },
+      { role: 'assistant', text: 'node work' },
+      { role: 'assistant', text: FRAME_TEXT },
+    ];
+    const out = applyDisciplineEcho(msgs, LINE);
+    expect(out?.[2]?.text).toBe(`${FRAME_TEXT}\n${LINE}`);
+  });
+
+  it('still degrades silently when no user-like message and no frame exist (fail-open)', () => {
+    const msgs = [
+      { role: 'system', text: 'platform' },
+      { role: 'assistant', text: 'work' },
+      { role: 'toolResult', text: 'result' },
+    ];
+    expect(applyDisciplineEcho(msgs, LINE)).toBeUndefined();
+  });
+
+  it('prefers the most recent user-like message over the frame fallback', () => {
+    const msgs = [
+      { role: 'user', text: 'scope 确认' },
+      { role: 'assistant', text: FRAME_TEXT },
+    ];
+    const out = applyDisciplineEcho(msgs, LINE);
+    expect(out?.[0]?.text).toBe(`scope 确认\n${LINE}`);
   });
 });

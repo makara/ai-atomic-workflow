@@ -4,6 +4,12 @@
  * classes. Adapters normalize platform payloads into these shapes; core
  * functions operate on them and return them.
  *
+ * R2 (cost economy) runtime plumbing was removed during the R2/R1
+ * decoupling (ADR 0175): the reference tree under
+ * `graph-fidelity-context/src/context-management/` vendors its own protection/observability
+ * types where it needs them; shared core types stay importable from the
+ * reference tree (import direction: runtime → core → reference only).
+ *
  * @module
  */
 
@@ -11,23 +17,19 @@
 export interface EchoMessage {
   role?: string;
   text?: string;
-}
-
-/** Extracted frame facts: node id + the discipline clause. */
-export interface FrameClause {
-  nodeId: string;
-  clause: string;
+  /** Tool-result user message (OMP shape) — not a genuine user input. */
+  isToolResult?: boolean;
+  /** Tool-result ids carried by this message (any role — OMP user blocks / opencode tool parts). */
+  toolResultIds?: readonly string[];
 }
 
 /** Tool-call record extracted from an assistant part. */
 export interface ToolCallRecord {
-  /** Platform tool-call id — links the assistant call to its result part. */
   readonly id: string;
   readonly name: string;
-  readonly signature: string;
 }
 
-/** Observability facts accumulated from platform lifecycle events. */
+/** Observability facts accumulated from platform lifecycle events — consumed by the suspended R2 reference (kept for the redesign). */
 export interface ObservabilityFacts {
   requests: number;
   inputTokens: number;
@@ -38,7 +40,7 @@ export interface ObservabilityFacts {
   toolExecutions: number;
 }
 
-/** Persistent accumulator — injectable for tests. */
+/** Persistent accumulator — injectable for tests (suspended R2 reference). */
 export interface Accumulator {
   read(): ObservabilityFacts;
   record(partial: Partial<ObservabilityFacts>): void;

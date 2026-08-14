@@ -3,12 +3,23 @@
  * section placement. Keyed need × axis × slot: R1 · axis-3 S3 · input entry;
  * R2 · axis-3 S3 · section slot.
  */
-import { buildSystemPrompt } from '@oh-my-pi/pi-coding-agent/system-prompt';
-import { afterAll, describe, expect, it } from 'bun:test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { afterAll, describe, expect, it } from 'vitest';
 import { assertion, recordIo, verifyOutput, type ProbeAssertion } from './io';
+
+// The pinned npm platform package is bun-runtime-bound (pi-utils reads
+// `Bun.env` at module top level; pi-natives loader uses bun-only
+// `import.meta.dir`). Runtime probes of platform functions can only execute
+// under the bun runtime; under node/vitest they skip with a documented
+// reason (yarn migration debt: runner is yarn, platform runtime is bun).
+const isBunRuntime = typeof Bun !== 'undefined';
+
+async function loadSystemPrompt() {
+  const { buildSystemPrompt } = await import('@oh-my-pi/pi-coding-agent/system-prompt');
+  return buildSystemPrompt;
+}
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-a-'));
 const ctxFile = { path: path.join(tempDir, 'AGENTS.md'), content: 'PROBE-DISCIPLINE-LINE', depth: 0 };
@@ -51,7 +62,8 @@ afterAll(() => {
 });
 
 describe('PROBE A — R1 selection + R2 placement (C4/S3)', () => {
-  it('R1 · axis-3 S3 · all declared inputs enter the prompt', async () => {
+  it.skipIf(!isBunRuntime)('R1 · axis-3 S3 · all declared inputs enter the prompt', async () => {
+    const buildSystemPrompt = await loadSystemPrompt();
     const { systemPrompt } = await buildSystemPrompt({
       cwd: tempDir,
       contextFiles: [ctxFile],
@@ -82,7 +94,8 @@ describe('PROBE A — R1 selection + R2 placement (C4/S3)', () => {
     }
   });
 
-  it('R2 · axis-3 S3 · each input lands in its standard slot', async () => {
+  it.skipIf(!isBunRuntime)('R2 · axis-3 S3 · each input lands in its standard slot', async () => {
+    const buildSystemPrompt = await loadSystemPrompt();
     const { systemPrompt } = await buildSystemPrompt({
       cwd: tempDir,
       contextFiles: [ctxFile],
@@ -113,19 +126,23 @@ describe('PROBE A — R1 selection + R2 placement (C4/S3)', () => {
     }
   });
 
-  it('R5 · axis-1 C2 · negative: no run frame in platform output (frame = agent-side assembly)', async () => {
-    const { systemPrompt } = await buildSystemPrompt({
-      cwd: tempDir,
-      contextFiles: [],
-      rules: [],
-      alwaysApplyRules: [],
-      skills: [],
-      toolNames,
-      personality: 'none',
-    });
-    const rendered = systemPrompt.join('\n\n');
-    const noFrame = !rendered.includes('User input during this node') && !rendered.includes('declared operations');
-    assertions.push(assertion('no run frame in platform output', noFrame, 'frame is handler-assembled (agent-side)'));
-    expect(noFrame).toBe(true);
-  });
+  it.skipIf(!isBunRuntime)(
+    'R5 · axis-1 C2 · negative: no run frame in platform output (frame = agent-side assembly)',
+    async () => {
+      const buildSystemPrompt = await loadSystemPrompt();
+      const { systemPrompt } = await buildSystemPrompt({
+        cwd: tempDir,
+        contextFiles: [],
+        rules: [],
+        alwaysApplyRules: [],
+        skills: [],
+        toolNames,
+        personality: 'none',
+      });
+      const rendered = systemPrompt.join('\n\n');
+      const noFrame = !rendered.includes('User input during this node') && !rendered.includes('declared operations');
+      assertions.push(assertion('no run frame in platform output', noFrame, 'frame is handler-assembled (agent-side)'));
+      expect(noFrame).toBe(true);
+    },
+  );
 });

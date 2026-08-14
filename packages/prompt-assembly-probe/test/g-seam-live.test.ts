@@ -6,28 +6,36 @@
  * dist types. Reference-tree drift guard — same discipline as the D-group
  * envelope-tag fact.
  */
-import { ExtensionRunner } from '@oh-my-pi/pi-coding-agent';
-import { afterAll, describe, expect, it } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterAll, describe, expect, it } from 'vitest';
 import { assertion, recordIo, verifyOutput, type ProbeAssertion } from './io';
 
 const assertions: ProbeAssertion[] = [];
 
-const sharedTypesPath = path.resolve(
-  import.meta.dir,
-  '../node_modules/@oh-my-pi/pi-coding-agent/src/extensibility/shared-events.ts',
-);
-const extTypesPath = path.resolve(
-  import.meta.dir,
-  '../node_modules/@oh-my-pi/pi-coding-agent/src/extensibility/extensions/types.ts',
-);
+const here = fileURLToPath(new URL('.', import.meta.url));
+const platformRoot = path.resolve(here, '../../../node_modules/@oh-my-pi/pi-coding-agent');
+
+const sharedTypesPath = path.join(platformRoot, 'src/extensibility/shared-events.ts');
+const extTypesPath = path.join(platformRoot, 'src/extensibility/extensions/types.ts');
 const sharedSrc = fs.readFileSync(sharedTypesPath, 'utf8');
 const extSrc = fs.readFileSync(extTypesPath, 'utf8');
 
 const PROBE_MARKER = '[seam] PROBE-MARKER';
 
-function makeRunner() {
+// The pinned npm platform package (@oh-my-pi/pi-coding-agent@17.2.12) is
+// bun-runtime-bound (pi-utils/src/env.ts reads `Bun.env` at module top
+// level; pi-natives loader uses bun-only `import.meta.dir`) — its runtime
+// seam can only be exercised under the bun runtime. Under node/vitest these
+// live assertions skip with a documented reason; the fs-level signature and
+// distribution pins run everywhere. (Yarn migration debt: platform package
+// stays bun-bound — runner is yarn, platform runtime is bun.)
+const isBunRuntime = typeof Bun !== 'undefined';
+
+async function makeRunner() {
+  const { ExtensionRunner } = await import('@oh-my-pi/pi-coding-agent');
   const handler = async (event: { messages: Array<{ role?: string; content?: string }> }) => {
     const replaced = event.messages.map((m, i) =>
       i === event.messages.length - 1 ? { ...m, content: `${m.content ?? ''}\n${PROBE_MARKER}` } : m,
@@ -39,8 +47,7 @@ function makeRunner() {
     path: 'probe-g',
     handlers: new Map<string, ((event: never) => unknown)[]>([['context', [handler as (event: never) => unknown]]]),
   };
-  const runner = new ExtensionRunner([ext], {}, process.cwd(), { getCwd: () => process.cwd() }, {});
-  return runner;
+  return new ExtensionRunner([ext], {}, process.cwd(), { getCwd: () => process.cwd() }, {});
 }
 
 const signatureChecks = [
@@ -65,8 +72,8 @@ afterAll(() => {
       npm: '@oh-my-pi/pi-coding-agent@17.2.12',
     },
     {
-      liveRewrite: true,
-      originalUntouched: true,
+      liveRewrite: isBunRuntime,
+      originalUntouched: isBunRuntime,
       signatures: Object.fromEntries(signatureChecks),
     },
     assertions,
@@ -75,8 +82,8 @@ afterAll(() => {
 });
 
 describe('PROBE G — seam live assertions', () => {
-  it('G · context seam rewrite is effective on the outgoing array', async () => {
-    const runner = makeRunner();
+  it.skipIf(!isBunRuntime)('G · context seam rewrite is effective on the outgoing array', async () => {
+    const runner = await makeRunner();
     const msgs = [{ role: 'user', content: 'hi' }];
     const out = await runner.emitContext(msgs as never);
     const serialized = JSON.stringify(out);
@@ -85,8 +92,8 @@ describe('PROBE G — seam live assertions', () => {
     expect(present).toBe(true);
   });
 
-  it('G · original session messages are untouched (deep copy)', async () => {
-    const runner = makeRunner();
+  it.skipIf(!isBunRuntime)('G · original session messages are untouched (deep copy)', async () => {
+    const runner = await makeRunner();
     const msgs = [{ role: 'user', content: 'hi' }];
     await runner.emitContext(msgs as never);
     assertions.push(assertion('context seam: originals untouched', msgs[0].content === 'hi', msgs[0].content));
@@ -106,8 +113,8 @@ describe('PROBE G — seam live assertions', () => {
   // keeps the check skip-aware without in-test it.skip (group-C pattern).
   const ompList = (() => {
     try {
-      const res = Bun.spawnSync(['omp', 'plugin', 'list'], { stdout: 'pipe', stderr: 'pipe' });
-      return res.exitCode === 0 ? res.stdout.toString() : '';
+      const res = spawnSync('omp', ['plugin', 'list'], { stdio: 'pipe' });
+      return res.status === 0 ? res.stdout.toString() : '';
     } catch {
       return '';
     }
@@ -121,13 +128,13 @@ describe('PROBE G — seam live assertions', () => {
   });
 
   it('G · package declares native distribution channels (omp.extensions manifest + ./server entry)', () => {
-    const repoRoot = path.resolve(import.meta.dir, '../../..');
+    const repoRoot = path.resolve(here, '../../..');
     const pkg = JSON.parse(fs.readFileSync(path.resolve(repoRoot, 'packages/graph-fidelity/package.json'), 'utf8')) as {
       omp?: { extensions?: string[] };
       exports?: Record<string, string>;
     };
-    const manifestOk = pkg.omp?.extensions?.includes('./src/adapters/omp.ts') === true;
-    const serverOk = pkg.exports?.['./server'] === './src/adapters/opencode.ts';
+    const manifestOk = pkg.omp?.extensions?.includes('./dist/omp.js') === true;
+    const serverOk = pkg.exports?.['./server'] === './dist/opencode.js';
     assertions.push(assertion('distribution: omp.extensions manifest declared', manifestOk, JSON.stringify(pkg.omp)));
     assertions.push(assertion('distribution: exports["./server"] declared', serverOk, JSON.stringify(pkg.exports)));
     expect(manifestOk).toBe(true);

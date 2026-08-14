@@ -1,6 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
+/**
+ * R1 observability pins — the OMP `input` seam: mechanical PCL
+ * detection (mark-only) via the slimmed `wireObservability`. All R2
+ * wiring (usage metering, compaction outcome, tool-execution counters,
+ * accumulator persistence, settle drains) was disconnected with the
+ * R2/R1 decoupling (ADR 0175) — those pins are gone; the reference
+ * accumulator shapes keep running under test/context-management.
+ */
+import { describe, expect, it } from 'vitest';
 import { wireObservability, type OmpObservabilityApi } from '../src/adapters/omp.js';
-import { createAccumulator } from '../src/core/facts.js';
+import { detectPcl } from '../src/core/pcl.js';
 
 function stubApi() {
   const handlers = new Map<string, (event: never) => unknown>();
@@ -19,84 +27,56 @@ function stubApi() {
   return { api, handlers, entries };
 }
 
-describe('observability accumulation', () => {
-  it('accumulates usage facts from message_end', () => {
+describe('R1 observability surface', () => {
+  it('registers ONLY the input seam (R2 lifecycle handlers are gone)', () => {
     const { api, handlers } = stubApi();
-    const accumulator = wireObservability(api);
-    const handler = handlers.get('message_end');
-    expect(handler).toBeTypeOf('function');
-    (handler as (e: never) => unknown)({
-      message: { usage: { input: 100, cacheRead: 50, cacheWrite: 20 } },
-    } as never);
-    (handler as (e: never) => unknown)({
-      message: { usage: { input: 200, cacheRead: 0, cacheWrite: 30 } },
-    } as never);
-    expect(accumulator.read()).toEqual({
-      requests: 2,
-      inputTokens: 300,
-      cacheReadTokens: 50,
-      cacheWriteTokens: 50,
-      compactions: 0,
-      ttsrTriggers: 0,
-      toolExecutions: 0,
-    });
+    wireObservability(api);
+    expect(handlers.get('input')).toBeTypeOf('function');
+    for (const removed of [
+      'message_end',
+      'session_stop',
+      'session_shutdown',
+      'auto_compaction_end',
+      'ttsr_triggered',
+      'tool_execution_start',
+    ]) {
+      expect(handlers.has(removed)).toBe(false);
+    }
   });
+});
 
-  it('counts compaction ends and ttsr triggers', () => {
-    const { api, handlers } = stubApi();
-    const accumulator = wireObservability(api);
-    (handlers.get('auto_compaction_end') as (e: never) => unknown)({} as never);
-    (handlers.get('auto_compaction_end') as (e: never) => unknown)({} as never);
-    (handlers.get('ttsr_triggered') as (e: never) => unknown)({} as never);
-    expect(accumulator.read().compactions).toBe(2);
-    expect(accumulator.read().ttsrTriggers).toBe(1);
-  });
-
-  it('counts tool executions from tool_execution_start', () => {
-    const { api, handlers } = stubApi();
-    const accumulator = wireObservability(api);
-    const handler = handlers.get('tool_execution_start');
-    expect(handler).toBeTypeOf('function');
-    (handler as (e: never) => unknown)({ toolName: 'bash' } as never);
-    (handler as (e: never) => unknown)({ toolName: 'read' } as never);
-    expect(accumulator.read().toolExecutions).toBe(2);
-  });
-
-  it('persists facts via appendEntry without touching LLM context', () => {
+describe('input seam — mechanical PCL detection (mark-only)', () => {
+  it('marks vocabulary hits via appendEntry; never handled, never modifies text', () => {
     const { api, handlers, entries } = stubApi();
     wireObservability(api);
-    (handlers.get('message_end') as (e: never) => unknown)({
-      message: { usage: { input: 10 } },
-    } as never);
-    expect(entries.length).toBe(1);
-    expect(entries[0].type).toBe('graph-fidelity.observability');
-    expect((entries[0].data as { requests: number }).requests).toBe(1);
+    const input = handlers.get('input') as (e: never) => unknown;
+    const result = input({ type: 'input', text: 'Status please', source: 'interactive' } as never);
+    expect(result).toBeUndefined();
+    const marks = entries.filter((e) => e.type === 'graph-fidelity.pcl');
+    expect(marks).toHaveLength(1);
+    expect(marks[0]?.data).toEqual({ text: 'Status please', matched: 'status' });
   });
 
-  it('starts empty and merges partial records', () => {
-    const accumulator = createAccumulator();
-    expect(accumulator.read()).toEqual({
-      requests: 0,
-      inputTokens: 0,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      compactions: 0,
-      ttsrTriggers: 0,
-      toolExecutions: 0,
-    });
-    accumulator.record({ requests: 1 });
-    accumulator.record({ compactions: 2 });
-    expect(accumulator.read().requests).toBe(1);
-    expect(accumulator.read().compactions).toBe(2);
-  });
-
-  it('does not inject any message content', () => {
-    const { api, handlers } = stubApi();
-    const appendSpy = vi.spyOn(api, 'appendEntry');
+  it('non-PCL input → no mark, no entry, no side effects', () => {
+    const { api, handlers, entries } = stubApi();
     wireObservability(api);
-    (handlers.get('ttsr_triggered') as (e: never) => unknown)({} as never);
-    // appendEntry is the only context-visible surface exercised — events
-    // never produce message content through wireObservability.
-    expect(appendSpy).toHaveBeenCalledTimes(1);
+    const input = handlers.get('input') as (e: never) => unknown;
+    expect(
+      input({ type: 'input', text: 'Continue the review analysis', source: 'interactive' } as never),
+    ).toBeUndefined();
+    expect(entries.filter((e) => e.type === 'graph-fidelity.pcl')).toHaveLength(0);
+  });
+
+  it('detectPcl matches the leading keyword patterns case-insensitively', () => {
+    expect(detectPcl('status')).toBe('status');
+    expect(detectPcl('SHOW PROGRESS')).toBe('progress');
+    expect(detectPcl('back to requirement review')).toBe('back');
+    expect(detectPcl('jump to adopt')).toBe('jump');
+    expect(detectPcl('re-run the review')).toBe('re-run');
+    expect(detectPcl('end this round')).toBe('end');
+    expect(detectPcl('abort run')).toBe('abort');
+    expect(detectPcl('skip')).toBe('skip');
+    expect(detectPcl('history')).toBe('history');
+    expect(detectPcl('ordinary chat about the plan')).toBeUndefined();
   });
 });

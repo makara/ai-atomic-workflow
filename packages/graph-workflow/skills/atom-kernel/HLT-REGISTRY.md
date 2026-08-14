@@ -2,6 +2,20 @@
 
 High-Level Tool Registry - rule-first adapter resolution. Pure reference - loaded via pointer from atom-kernel SKILL.md §High-Level Tool Registry. Execution contract: registered tool call `{ intent, tool, args, bound }`; caller chooses tool + args; the entry supplies I/O contract, chain, obligations + n/a rules.
 
+## Core Requirement
+
+The distilled must-follow contract (single source — byte-equal to the atom-kernel hot surface box; the graph-fidelity resident block carries a compressed copy). Distillation judgment: load-bearing = violation cost × frequency — the rest of this file is operational detail.
+
+```text
+HLT core requirement (must-follow on every call):
+- State-changing work executes as registered calls {intent, tool, args, bound} — declared scope, no overreach
+- In-project code → serena (locate may route through jcodemunch); single engine, no fallback
+- Verify after every write (verify-after-write)
+- Code cells fail loudly — never silent degrade
+- Registered tool capability is never restricted (deny covers redundant platform paths only)
+- Detail: HLT-REGISTRY.md (cold-read)
+```
+
 ## Adapter Rule
 
 The adapter for an HLT registered call is resolved by **one static rule** - target domain decides the adapter family, operation decides the chain:
@@ -12,7 +26,7 @@ The adapter for an HLT registered call is resolved by **one static rule** - targ
 |in-project text-indexed|jcodemunch|platform-native (permissive)|platform-native (permissive)|platform-native (permissive)|—|—|—|
 |in-project text-unindexed / special / out-of-project|platform-native (permissive)|platform-native (permissive)|platform-native (permissive)|platform-native (permissive)|—|—|—|
 |run|—|—|—|—|shell|—|—|
-|compress|—|—|—|—|—|headroom|—|
+|compress|—|—|—|—|—|headroom (DISABLED — R2, ADR 0175)|—|
 |utility|—|—|—|—|—|—|platform-native (permissive)|
 
 - Target domain: in-project code (LSP/index-covered source); in-project text - indexed (yaml/toml/json/OpenAPI/Ansible) vs unindexed (markdown/plain); in-project special (sqlite/image/PDF/archive/notebook/non-UTF-8); out-of-project; run; compress.
@@ -26,11 +40,11 @@ Every operation class carries its obligations regardless of adapter (single home
 |operation|obligations|failure|
 |-|-|-|
 |locate|two-plane chain on code; index metadata consumed, not fabricated|loud (code) / pass (permissive)|
-|read|read chain (structural overview → sliced reads → compress-after-read >8KB)|loud (code) / pass (permissive)|
+|read|read chain (structural overview → sliced reads)|loud (code) / pass (permissive)|
 |write|preflight + verify after write + `register_edit` while jcodemunch in use and target indexed (`n/a: not indexed` otherwise)|loud (code) / pass (permissive)|
 |verify|evidence-only - verification of a prior write|degrade|
 |run|platform shell (`bash`, rtk prefix per project constraints)|pass|
-|compress|headroom contract (thresholds + protection list below)|degrade|
+|compress|DISABLED — R2 cost economy suspended (ADR 0175); headroom contract (class-driven unconditional + protection list below) retained as redesign reference|degrade|
 |review|evidence-only (review findings over declared inputs)|degrade|
 |archive|evidence-only (archive/estate closure)|degrade|
 |graph-ops|reach: run (graph lifecycle tools)|degrade|
@@ -56,13 +70,15 @@ Evidence loop: the tool's evidence rules drive the read loop; re-enter while uns
 5. **Unused fields omitted.** Optional params pass only when needed. Keep args minimal.
 6. **Legacy shape rejected.** Legacy 8-field protocol fields (`read_set`, `evidence`, `write_set`, `apply`, `verify`) are REJECTED - a registered call carries exactly `{ intent, tool, args, bound }`.
 
-Context-usage contract: thresholds JSON >2000 tok / code+logs >8000KB / text >8000KB; protection: reference-face, task-receipts, skill-injection, node-outputs, decisions, write-results; CCR retrieve-by-hash, TTL-unused = single-consumption; gate ok/cold/down.
+**DISABLED — R2 cost economy suspended (ADR 0175). Reference for redesign.** Context-usage contract: class-driven unconditional submission — working-face tool results are submitted to headroom compression by signal class, no size thresholds, no budget gates (the engine's router arbitrates no-op; user directive 5d; REVISED 2026-08-14 by change graph-fidelity-round5cd-notify-classification, replacing the former thresholds JSON >2000 tok / code+logs >8KB / text >8KB); protection: reference-face, task-receipts, skill-injection, node-outputs, decisions, write-results; CCR retrieve-by-hash, TTL-unused = single-consumption; gate ok/cold/down.
 
-**Discipline**: signal distribution - the run frame (assembled by the handler at dispatch) is the single out-of-scope channel; TTSR static rules are platform-native in-band reminders. Guidance is advisory, zero denial.
+**Discipline**: signal distribution - the run frame (assembled by the handler at dispatch) is the single out-of-scope channel; TTSR static rules are platform-native in-band reminders. Guidance is advisory; registered capability never restricted (redundant platform write paths may be denied).
 
 ## headroom
 
-Context compression - ad-hoc output + read-file compression (per-content-type thresholds: JSON/structured > 2K tokens, code/logs > 8KB, text/markdown > 8KB; sub-threshold no-op prohibited). Contract platform-neutral (headroom-ai upstream); platform deployment forms are instances. Channel consumption follows the read entry chain - no pipeline.
+> **DISABLED — R2 cost economy suspended (ADR 0175). Reference for redesign.**
+
+Context compression - ad-hoc output + read-file compression (class-driven unconditional: submission by signal class, no size thresholds, no budget gates; the engine's router arbitrates no-op — user directive 5d; REVISED 2026-08-14 by change graph-fidelity-round5cd-notify-classification). Contract platform-neutral (headroom-ai upstream); platform deployment forms are instances. Channel consumption follows the read entry chain - no pipeline. Kept verbatim as the redesign contract record — no runtime consumer while suspended.
 
 |Tool|Req params|Notes|
 |-|-|-|
@@ -74,7 +90,7 @@ Context compression - ad-hoc output + read-file compression (per-content-type th
 
 **Protection list** (never compress, never clean): reference-face content (skills, convention files, task text, constraints/run-mode blocks), task() sub-agent results, skill injection results, node outputs and approval/gate decisions, write-operation results. Compression and cleaning apply to working-face content only (volatile tool outputs, stale reads).
 
-**Health gate**: `ok` / `cold` (honest 0%) / `down` - markers `[HEADROOM COLD]` / `[HEADROOM PROXY DOWN]` (deployment-fault marker when the MCP server backend is unreachable). `down` never fails the node - the node proceeds uncompressed, and the state is recorded (platform events where available; contract check blocks otherwise).
+**Health gate**: `ok` / `cold` (honest 0%) / `down` - markers `[HEADROOM COLD]` / `[HEADROOM DOWN]` (engine-fault marker when the MCP server backend is unreachable — the proxy deployment is deleted). `down` never fails the node - the node proceeds uncompressed, and the state is recorded (platform events where available; contract check blocks otherwise).
 
 **History-cleaning clauses** (platform adapters implement; agent follows, observability records): nested compression summaries (new summary nests old - information not diluted); stale cleanup (same-args repeats keep latest; errored inputs purged after N turns; superseded reads cleanable); placeholder replacement never mutates session history; protected content enters summaries verbatim.
 

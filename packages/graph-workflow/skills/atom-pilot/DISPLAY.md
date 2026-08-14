@@ -4,13 +4,25 @@ Three verbosity tiers. `--verbose` flag enable Verbose. `--debug` flag enable De
 
 Platform harness auto-display raw tool I/O - beyond agent control. Agent control only own prose per tiers below.
 
+Display tiering (display minimalism - the three laws, per CONTEXT.md `display minimalism`): while the session carries canonical `[seam]` lines (graph-fidelity live), the mechanical single echo line is the ONLY per-call feedback - the pilot prints NO per-node status lines. In the degrade baseline (no `[seam]` line), per-node status lines print (below).
+
+## Node report format
+
+Node output reports = agent prose in the session - no code renderer produces them. Format rule single home: this document.
+
+- Node output reports render as concise prose summaries - no JSON code fences. Full contract data stays in the session (ADR 0143 - downstream `node:` channel consumption + audit unchanged).
+- Empty node output (no reportable content) renders no code block - blank fences eliminated.
+- Approval/gate decisions render as one line `decision: <action> (<label>)` - full IApprovalDecision JSON stays in the session for routing + audit.
+- Rule applies uniformly to main/approval/gate node types.
+- Verbosity tiers govern status lines + MCP dumps only. Node report format = agent prose, instruction-layer governed - no config flag exists, no code path renders the blocks.
+
 ## Quiet (default)
 
-Per-node status line + final result table.
+Per-node status line (degrade baseline only - skipped while `[seam]` lines are present) + compact 3-line final report.
 
 ### Per-node status
 
-One compact line per node - no decorations, no box-drawing.
+One compact line per node - no decorations, no box-drawing. Printed ONLY when no `[seam]` line is present in the session (mechanical tier: the plugin's single echo line replaces them).
 
 |Node type|Status line|
 |-|-|
@@ -21,21 +33,18 @@ One compact line per node - no decorations, no box-drawing.
 
 ### Final report (after "done")
 
-Native key/value table - no box-drawing (box borders overflow on variable-width content; tables align at any width).
+Three compact lines - no box-drawing, no free-floating prose stats:
 
-|Field|Value|
-|-|-|
-|🏁 Graph|`<graphName>` Complete|
-|⏱ Wall clock|`<total>ms`|
-|🔄 Retries|`×<N>`|
-|📉 Context|`<N> nodes · <X> KB · <Y>% saved · proxy <status>`|
-|🔧 Tools|`<V> violations · headroom <S>% saved · proxy <state>`|
-|🆔 Run|`<runId>`|
+```
+🏁 <graphName> done · ⏱ <total>ms · 🔄 ×<N> · 📉 <N> nodes · 🆔 <runId>
+```
 
-Result table:
+Result table (audit - kept in both tiers):
 
 |nodeId|Skill|Status|Duration|Output summary|
 |-|-|-|-|-|
+
+Approval decisions table (decision audit - kept in both tiers): see §Approval decisions.
 
 Status icons: ✅ = done, ⚠️ = failed.
 
@@ -55,11 +64,11 @@ Verbose + raw MCP JSON, `retryCount` per node, internal state changes.
 
 ## Context stats
 
-**Context stats** - after "done", aggregate: per-node `## Checks` block `context:` rows from node outputs (atom-phase-handler §Checks Block - reference/working/growth rows per node, L3 prune count, output estimate) + session-level compression from `headroom_stats` corroborated with Checks `tools:` headroom evidence (bytes/savings reported there). Platform observability facts accumulated by graph-fidelity (`appendEntry` `graph-fidelity.observability` - requests, input/cache tokens, compaction count, TTSR triggers, tool executions) MAY corroborate the aggregation when present (ADR 0150 - factual, not self-reported). `📉 ctx` row in the final report table - `<N> nodes · <X> KB · <Y>% saved · <Z> L3 pruned · proxy <status>` - `<status>` reflects proxy health (`ok` / `cold` / `down`); violation count (`[CONTEXT VIOLATION]` markers per atom-phase-handler §Markers) appended when non-zero. Degradation: a node without a `## Checks` block contributes its node row as `-` (block contract is unconditional; absence is itself a ledger fact); headroom_stats unavailable -> state the adapter state and omit adapter-derived values only.
+- **Context stats** - after "done", aggregate per-node `## Checks` block `context:` rows from node outputs (atom-phase-handler §Checks Block - single-line format) into the 📉 line. R2 cost economy is suspended (ADR 0175): headroom compression stats and graph-fidelity observability facts (appendEntry - requests, input/cache tokens, compaction counters, TTSR triggers) are NOT accumulated — the section consumes Checks rows only, and rows always report agent estimates (no measured ledger exists to reference). MAY-corroborate tolerates missing data by construction.
 
 ## Tools stats
 
-**Tools stats** - aggregate tool-usage violations across node outputs (markers per atom-phase-handler §Markers - count per node): `🔧 tools` row in the final report table - `<V> violations · headroom <S>% saved · proxy <state>` - savings from `headroom_stats`; proxy `<state>` = the three-state health gate defined in atom-kernel §Tool Schemas -> ## headroom (Health gate - `ok` / `cold` / `down` - marker strings per atom-phase-handler §Markers). Violations list the nodes.
+**Tools stats** - aggregate tool-usage violations across node outputs (markers per atom-phase-handler §Markers - count per node): `<V> violations` folds into the 📉 line. Headroom savings + health-gate state are suspended (R2, ADR 0175) — `[HEADROOM COLD]`/`[HEADROOM DOWN]` and `[CONTEXT VIOLATION]` markers are removed (atom-phase-handler §Markers); no headroom segment renders. Violations list the nodes.
 
 ## Approval decisions
 
@@ -78,11 +87,11 @@ Feedback is classified into three channels, each mapped to an existing primitive
 |Channel|Primitive|When|Persistence|
 |-|-|-|-|
 |Decision|`approval()` cards + Decision Request handoff (Context / Auto-recorded debt / Blocking findings / Dispatch record / Suggested advance label)|A routing decision is needed (approval/gate nodes; decision requests at review handoffs)|Session only — IApprovalDecision JSON kept in the conversation (platform transcript); routing via `branchTo`/`endRun`|
-|Status|Per-node status lines + final report table (this document)|Node boundaries only — never mid-node play-by-play|Session only (platform transcript); aggregate facts in the final report|
+|Status|Per-node status lines (degrade baseline only) + mechanical echo line (mechanical tier) + 3-line final report (this document)|Node boundaries only — never mid-node play-by-play|Session only (platform transcript); aggregate facts in the final report|
 |Risk|Inline conversation reporting + structured markers (`[CONSTRAINT VIOLATION]` / `[TOOL USAGE VIOLATION]`) + gate jumps|Mid-node deviations/impacts, violations — immediate, don't wait for the node boundary|Markers ride the node report in the session; prose stays in the session|
 
 Rules:
 
 - Never write feedback to files — the platform transcript is the session record; the scheduler tracks progress only.
 - Decision channel never hides a needed decision (no "reduce interaction rounds" omission).
-- Status channel never fabricates progress — node boundary lines only.
+- Status channel never fabricates progress — node boundary lines only; the mechanical tier never duplicates the echo line with prose status lines (law 1 - one line per call).

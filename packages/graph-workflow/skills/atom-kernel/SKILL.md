@@ -126,6 +126,18 @@ interview({ goal, context?, participation: 'mandatory' | 'as-needed' }) → cons
 
 # High-Level Tool Registry
 
+**Core Requirement** — the distilled must-follow contract (single source; the graph-fidelity resident block carries a compressed copy; detail cold-read from HLT-REGISTRY.md). Distillation judgment: load-bearing = violation cost × frequency — the rest is operational detail.
+
+```text
+HLT core requirement (must-follow on every call):
+- State-changing work executes as registered calls {intent, tool, args, bound} — declared scope, no overreach
+- In-project code → serena (locate may route through jcodemunch); single engine, no fallback
+- Verify after every write (verify-after-write)
+- Code cells fail loudly — never silent degrade
+- Registered tool capability is never restricted (deny covers redundant platform paths only)
+- Detail: HLT-REGISTRY.md (cold-read)
+```
+
 Closed set of high-level tools - the single execution contract for main-phase work. An execution = registered call `{ intent, tool, args, bound }`: registry entry supplies I/O contract, chain, verify + index obligations. Unknown tool names fail at analyze (candidate list). Legacy 8-field protocol fields REJECTED (details: HLT-REGISTRY.md §Protocol). Read-only calls end without writes; write calls verify per `Entry: verify` BEFORE reporting success.
 
 **Adapter rule (single home — one static rule, no enumeration)**: target domain decides the adapter family, operation decides the chain:
@@ -133,11 +145,11 @@ Closed set of high-level tools - the single execution contract for main-phase wo
 - in-project code → serena (locate: jcodemunch → serena; read/write/verify: serena)
 - in-project text-indexed → jcodemunch for locate; platform-native read/write (permissive)
 - in-project text-unindexed / special / out-of-project → platform-native (permissive)
-- run → platform shell; compress → headroom; review/archive/graph-ops/register_edit → platform-native (utility, permissive)
+- run → platform shell; compress → headroom (DISABLED — R2 cost economy suspended); review/archive/graph-ops/register_edit → platform-native (utility, permissive)
 
 Operation obligations (verify-after-write + conditional register_edit, read chain, evidence loop bound 3, loud-failure fault tolerance, n/a rules): see HLT-REGISTRY.md §Operation Obligations (cold — read on demand, never for the hot surface).
 
-**Scenario structure** (cold detail): key = scenario `(target domain x operation)` → exactly one adapter + obligations + n/a rules; the rule above is the derivation, the cold table is the exceptions. Full table + entries + validation + edge n/a: (see HLT-REGISTRY.md). Discipline mechanics: signal distribution — the run frame is the single out-of-scope channel; TTSR static rules are platform-native in-band reminders; zero denial, the agent's tool capability is never restricted. Adapter unavailable -> loud failure (see HLT-REGISTRY.md §Fault Tolerance).
+**Scenario structure** (cold detail): key = scenario `(target domain x operation)` → exactly one adapter + obligations + n/a rules; the rule above is the derivation, the cold table is the exceptions. Full table + entries + validation + edge n/a: (see HLT-REGISTRY.md). Discipline mechanics: signal distribution — the run frame is the single out-of-scope channel; TTSR static rules are platform-native in-band reminders; registered capability never restricted — deny covers redundant platform write paths only, a registered engine is never denied. Adapter unavailable -> loud failure (see HLT-REGISTRY.md §Fault Tolerance).
 
 **Evidence Loop**: re-enter while unsatisfied AND count < bound (default 3, per-call override); exceeded -> call FAILS with evidence-gap list (missing files/symbols), no write. Layering: call-internal = this contract; cross-call rework = graph gates (atom-graph-spec).
 
@@ -168,7 +180,7 @@ Compact params (full: SERENA-SCHEMAS.md):
 |`replace_content`|relative_path, needle, repl, mode (literal\|regex)|ambiguity -> error, revise needle|
 |`replace_in_files`|needle, repl, mode, paths_include/exclude_glob, dry_run, occurrence_ids, expected_count|dry-run preview + expected_count mismatch -> error|
 |`create_text_file`|relative_path, content|diagnostics-wrapped|
-|`read_file`|relative_path, start_line, end_line, max_answer_chars|sliced reads; >8KB -> compress|
+|`read_file`|relative_path, start_line, end_line, max_answer_chars|sliced reads|
 |`get_diagnostics_for_file`|relative_path (or symbol), min_severity|LSP-covered languages only|
 |`search_for_pattern`|pattern, relative_path, paths_include/exclude_glob|project-internal regex, FS tier|
 
@@ -193,7 +205,7 @@ Compact params (full: JCODEMUNCH-SCHEMAS.md):
 
 ## headroom
 
-Context compression - contract (MCP authoritative), trigger (>8KB), proxy forms, schema + health gate: see HLT-REGISTRY.md §headroom (single home).
+DISABLED — R2 cost economy suspended. Contract (MCP authoritative), class-driven trigger, schema + health gate retained as redesign reference: see HLT-REGISTRY.md §headroom (single home).
 
 ## graph-scheduler
 

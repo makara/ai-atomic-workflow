@@ -86,12 +86,17 @@ The entry skill delegates to interview() consensus mode per atom-kernel; it does
 
 ### Requirement: Skill ownership boundary
 
-The project modifies skills only inside `packages/` (source of truth: `packages/graph-workflow/skills/`). Deployment copies (~/.claude/skills, in-project .omp/skills) are user deployment — never edited, never assumed in sync, never referenced as source of truth.
+The project modifies skills only inside `packages/` (source of truth: `packages/graph-workflow/skills/`). Deployment copies (~/.claude/skills, in-project .omp/skills, repo-local .agents/skills) are user deployment — never edited, never assumed in sync, never referenced as source of truth.
 
 #### Scenario: Deployment copy untouched
 
 - **WHEN** a change updates a skill
 - **THEN** only the packages/ copy is modified; deployment copies are not edited
+
+#### Scenario: No deployment-copy sync assertion in tests
+
+- **WHEN** the test suite runs
+- **THEN** no test asserts repo-local deployment copies (`.agents/skills`) are byte-identical to the `.refs` mirror or to `skills-lock.json` content; deployment state is user-owned and never a suite invariant
 
 ### Requirement: Contract vocabulary aligned to glossary
 

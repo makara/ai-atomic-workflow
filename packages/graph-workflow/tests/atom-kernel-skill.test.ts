@@ -181,13 +181,17 @@ describe('atom-kernel SKILL.md - HLT Registry entry anatomy (static prose + sign
     );
     expect(rule).toMatch(/\|in-project code\|jcodemunch → serena\|serena\|serena\|serena\|—\|—\|—\|/);
     expect(rule).toMatch(/\|run\|—\|—\|—\|—\|shell\|—\|—\|/);
-    expect(rule).toMatch(/\|compress\|—\|—\|—\|—\|—\|headroom\|—\|/);
+    expect(rule).toMatch(/\|compress\|—\|—\|—\|—\|—\|headroom \(DISABLED — R2, ADR \d{3,4}\)\|—\|/);
   });
 
   it('records signal-distribution discipline - no enforcement language', () => {
     const intro = skill.slice(skill.indexOf('# High-Level Tool Registry'));
     expect(intro).toMatch(/signal distribution/);
-    expect(intro).toMatch(/zero denial/);
+    // Wording clarification: the retired "zero denial" claim is gone; the
+    // wording is "registered capability never restricted" (redundant
+    // platform write paths may be denied).
+    expect(intro).not.toMatch(/zero denial/);
+    expect(intro).toMatch(/registered capability never restricted/);
     expect(registryFile).toMatch(/signal distribution/);
     expect(registry).not.toMatch(/Enforcement\*\*: implemented/);
     expect(registry).not.toMatch(/deferred per-platform/);

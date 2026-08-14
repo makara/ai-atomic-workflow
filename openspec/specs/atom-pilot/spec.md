@@ -39,28 +39,54 @@ Given packages/graph-workflow/skills/atom-pilot/SKILL.md When reading §MCP Tool
 
 ### Requirement: native-table display rules
 
-Pilot output SHALL render as native markdown tables or single-line compact status — no box-drawing art, no free-floating prose stats. The final report SHALL be a two-column `| Metric | Value |` table (or equivalent key/value table) containing graph name, wall-clock time, retry count, context stats, tools stats, and runId. Per-node status SHALL be a single compact line (`✅ <nodeId> · <skill> · <N>ms`). Approval decisions SHALL render as a table (`nodeId | action | label | rationale?`).
+MODIFIED: Pilot output SHALL render as native markdown tables, single-line compact status, or the compact 3-line final report — no box-drawing art, no free-floating prose stats. The final report SHALL be THREE compact lines — `🏁 <graphName> done · ⏱ <wall clock> · 🔄 <retries> · 📉 <context stats> · 🆔 <runId>` — followed by the result table (nodeId | skill | status | duration | output summary) and the approval decisions table (nodeId | action | label | rationale?), which SHALL be kept for auditability. Per-node status lines (`✅ <nodeId> · <skill> · <N>ms`) SHALL print in the degrade baseline and SHALL be skipped while a canonical `[seam]` line is present in the session (the mechanical echo line replaces them). Node output reports SHALL render as concise prose summaries — never JSON code fences; empty node outputs SHALL render no code block; approval/gate decisions SHALL render as a single line `decision: <action> (<label>)` with the full IApprovalDecision JSON retained in the session for routing and audit. Node-report format strings live in `atom-pilot/DISPLAY.md` (display format single home), uniformly across main/approval/gate node types.
 
 #### Scenario: final report renders as table, not box
 
 - **WHEN** the pilot reports run completion
-- **THEN** the final report SHALL be a native markdown table with key/value rows
-- **THEN** no line SHALL overflow its border (box-drawing removed — 42-char border vs 72-char content misalignment eliminated)
+- **THEN** the final report SHALL be three compact lines (graph/wall/retries/context/runId) plus the result and approval tables
+- **THEN** no line SHALL use box-drawing (border overflow eliminated)
 
 #### Scenario: per-node status is one compact line
 
-- **WHEN** a node completes
+- **WHEN** a node completes and no `[seam]` line is present in the session
 - **THEN** the pilot SHALL print a single-line status: `✅ <nodeId> · <skill> · <N>ms` (main), `✅ <choice> · <N>ms` (approval), `🔀 <jump|pass> · <N>ms` (gate), `⚠️ <error> · <N>ms` (stub)
 
 #### Scenario: stats fold into table
 
 - **WHEN** the run ends
-- **THEN** context stats (`📉 ctx`) and tools stats (`🔧 tools`) SHALL appear as rows in the final report table — not free-floating prose lines
+- **THEN** context stats (`📉`) and retry count (`🔄`) SHALL appear in the 3-line report — not free-floating prose lines
 
 #### Scenario: approval decisions are a table
 
 - **WHEN** the pilot lists approval decisions after run completion
 - **THEN** they SHALL render as a table with columns `nodeId | action | label | rationale?` (rationale present for auto-executed decisions only)
+
+#### Scenario: Plugin present — status lines skipped
+
+- **WHEN** a run executes and the session carries canonical `[seam]` lines
+- **THEN** the pilot prints no per-node status lines and the 3-line final report
+
+#### Scenario: Degrade baseline
+
+- **WHEN** no `[seam]` line is present in the session
+- **THEN** the pilot prints per-node status lines and the 3-line final report
+
+#### Scenario: Node reports render as prose summaries
+
+- **WHEN** a main node completes and its output report is emitted
+- **THEN** the report SHALL render as a concise prose summary — no JSON code fence; the full output-contract data stays in the agent session for downstream `node:` channel consumption and audit
+
+#### Scenario: Empty output renders no code block
+
+- **WHEN** a node completes with an empty output
+- **THEN** no code block SHALL be rendered — blank fences are eliminated
+
+#### Scenario: Decisions render as a single line
+
+- **WHEN** an approval or gate decision is reported
+- **THEN** it SHALL render as one line `decision: <action> (<label>)`
+- **AND** the full IApprovalDecision JSON SHALL remain in the session for routing and audit
 
 ### Requirement: display format single home
 

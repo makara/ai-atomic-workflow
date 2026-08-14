@@ -56,7 +56,7 @@ The global deployment candidate `~/.agents/skills` SHALL NOT contain copies of s
 
 ### Requirement: atom-phase-handler — central dispatch handler
 
-`atom-phase-handler` SHALL be the single entry point for processing `NextNode` objects. It SHALL route by `node.type` to the appropriate handler (main, approval, or gate) and return the execution result. The approval handler SHALL assemble card content + the AI-judged recommendation and delegate the mode decision to `approval()` (assemble → approval() → IApprovalDecision → persist → route) — the mode branch lives in the kernel contract, not handler documents.
+MODIFIED: `atom-phase-handler` SHALL be the single entry point for processing `NextNode` objects. It SHALL route by `node.type` to the appropriate handler (main, approval, or gate) and return the execution result. The approval handler SHALL assemble card content + the AI-judged recommendation and delegate the mode decision to `approval()` (assemble → approval() → IApprovalDecision → persist → route) — the mode branch lives in the kernel contract, not handler documents. Node output reports (main step 6) SHALL be emitted as concise prose summaries per the atom-pilot DISPLAY.md node-report format — never a JSON code fence; an empty output SHALL be reported without a code block; approval/gate decisions SHALL report the single-line `decision: <action> (<label>)` form while the full IApprovalDecision JSON stays in the session for routing.
 
 #### Scenario: Handler routes by node type
 
@@ -78,6 +78,22 @@ The global deployment candidate `~/.agents/skills` SHALL NOT contain copies of s
 - **WHEN** execution completes (main, approval, or gate)
 - **THEN** the result SHALL include `nodeId`, `status`, `output`, and `durationMs` (session display — the handler-measured wall clock; duration is NOT transmitted to `graph_advance`, which derives it from timestamps)
 - **THEN** approval decisions SHALL carry the selected action and optional note
+
+#### Scenario: Main node output reported as prose summary
+
+- **WHEN** a main node completes and step 6 reports the node output
+- **THEN** the report SHALL be emitted as a concise prose summary per the atom-pilot DISPLAY.md node-report format — never a JSON code fence; the full output-contract data remains in the agent session
+
+#### Scenario: Empty output reported without a code block
+
+- **WHEN** a node's output is empty (no reportable content)
+- **THEN** no code block SHALL be emitted — the blank-fence rendering is eliminated
+
+#### Scenario: Approval/gate decision single-line with full JSON retained
+
+- **WHEN** an approval or gate node completes with an IApprovalDecision output
+- **THEN** the report SHALL carry the single-line `decision: <action> (<label>)` form
+- **AND** the full IApprovalDecision JSON SHALL stay in the session for the pilot's routing (graph_advance branchTo / graph_jump / endRun) and audit
 
 ### Requirement: Input-stage consumption
 
@@ -357,3 +373,50 @@ MODIFIED: the handler-assembled run-frame block for main nodes SHALL include the
 
 - **WHEN** the handler skill contract tests run
 - **THEN** a test asserts the discipline line for a sample declared set equals the deterministic render (declared list + out-of-scope list) — a change to the render logic fails the test
+
+### Requirement: Checks context row — measured-first data source
+
+The handler SHALL fill the `## Checks` `context:` row's output figure from graph-fidelity's measured usage when present; the agent estimate SHALL be the degrade path when the plugin is absent or no usage event was observed. The row format SHALL remain a single line, factual for the executed node (ledger-as-was, auditable). MODIFIED: the data source wording is corrected to the implemented seam — facts accumulate from the `message_end` metering channel (the completed assistant message carries the populated usage facts; `message_update` streaming snapshots never populate them, empirically all-zero, unregistered) and settle at the context-seam frame-change detection with the turn-boundary `session_stop` drain on the OMP face (ADR 0171). The previous wording ("fire-and-forget message-update channel, settled at the platform turn-boundary stop event") described a superseded seam — ADR 0171 decision 2 REVISED anchors metering on `message_end` only; the settle executes at context-seam frame-change (omp.ts:510), `session_stop` is the idempotent last-node drain.
+
+#### Scenario: Measured source present
+
+- **WHEN** the run has graph-fidelity installed and measured usage exists for the node
+- **THEN** the row reports the measured figures (requests, tokens, cache) instead of an estimate, and the figure references the settled ledger (`measured`) without copying it — the metering facts originate from the `message_end` completed-message usage, never from `message_update` streaming snapshots (all-zero, unregistered)
+
+#### Scenario: Degrade to estimate
+
+- **WHEN** no measured usage is available
+- **THEN** the row reports the agent estimate (existing behavior, unchanged)
+
+#### Scenario: Line format reference truth
+
+- **WHEN** the handler documents the seam line's output-figure semantics (the `▣ [seam]` line the `context:` row references as `measured`)
+- **THEN** it SHALL reference the implemented 8-cell value-ratio rendering `▣ [seam] node <id> · N/M · │████░░│ cur/ref` (ADR 0161) — no percent segment, no "metering segment" label (the former `│██░░│ 40.0%` 4-cell format is pre-ADR-0161 and never renders); metering deltas fold into the settlement audit entry, not a line segment
+
+### Requirement: Display tiering with seam-live detection
+
+The handler SHALL detect graph-fidelity presence by seam liveness: the most recent user messages carrying a canonical `[seam]` line SHALL mark the plugin present. When present, the handler SHALL NOT assemble the prose feedback blocks it otherwise would — the Context hints block SHALL NOT be assembled, and the prose `## Checks` block SHALL NOT be assembled (violation markers SHALL still prefix node output when violations exist). When absent (degrade), the handler SHALL assemble the minimal prose baseline: NO Context hints block (removed — the frame and constraints already carry the selection and discipline facts), and a single-line `## Checks` block.
+
+#### Scenario: Plugin present
+
+- **WHEN** a main node dispatches and the recent user messages carry a canonical `[seam]` line
+- **THEN** no Context hints block and no prose Checks block are assembled; violation markers still prefix output on violation
+
+#### Scenario: Plugin absent — minimal prose baseline
+
+- **WHEN** a main node dispatches and no `[seam]` line is present in recent user messages
+- **THEN** the dispatch carries no Context hints block and a single-line Checks block; behavior correctness is unchanged (zero denial)
+
+### Requirement: Single-line Checks block (prose baseline)
+
+The `## Checks` block SHALL render as ONE line — `## Checks: constraints ok · tools n/a · reasoning ok · ctx A n · B n · C n · L3 n · out ~n tok` — with green rows collapsed. Violation rows SHALL expand with detail and SHALL prefix the node output with the violation markers (emission rules unchanged: `[CONSTRAINT VIOLATION: <count>]`, `[TOOL USAGE VIOLATION: <count>]`, `[REASONING VIOLATION: <count>]`, `[CONTEXT VIOLATION: <count>]`). The tools row SHALL name chain-head evidence per declared class or an `n/a` structural reason; missing evidence per declared class SHALL count as violation (unchanged). The four former sections do not exist as separate sections.
+
+#### Scenario: All green
+
+- **WHEN** a main node completes with no violations and no declared tool classes
+- **THEN** the Checks block is a single line with `ok`/`n/a` values
+
+#### Scenario: Violation expands
+
+- **WHEN** a declared tool class lacks chain-head evidence
+- **THEN** the tools segment expands with the violation detail and `[TOOL USAGE VIOLATION: 1]` prefixes the output

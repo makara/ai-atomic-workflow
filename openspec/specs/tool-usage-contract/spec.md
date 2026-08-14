@@ -6,19 +6,24 @@ MCP tool usage is a first-class observable contract with deterministic triggers:
 
 ## Requirements
 
-### Requirement: Deterministic output-size trigger SHALL compress before reasoning
+### Requirement: Compression before reasoning follows class-driven contract with direct-surface sub-clause
 
-A tool result or file content larger than 8KB (≈2K tokens) SHALL be compressed via `headroom_compress` before the agent reasons over it; the original SHALL remain retrievable by hash. The threshold SHALL be mechanical (result size), not heuristic.
+Compression before reasoning SHALL follow the class-driven contract when the graph-fidelity seam is live: working-face compression decisions are made by signal class (unconditional submission of class-eligible content, protection list honored, engine-arbitrated no-op) — not by budget thresholds, size gates, or scaling ramps. For bash/artifact scenarios where raw outputs reach the agent directly, a tool result or file content larger than 8KB (≈2K tokens) SHALL be compressed via `headroom_compress` before the agent reasons over it; the original SHALL remain retrievable by hash. The output-size trigger SHALL be mechanical (result size), not heuristic, and applies only to the direct-surface sub-clause.
 
-#### Scenario: Large tool output compresses
+#### Scenario: Class standard applies
 
-- **WHEN** a tool returns a result larger than 8KB
+- **WHEN** the graph-fidelity seam is live (mechanical tier)
+- **THEN** compression decisions follow the class-driven contract (unconditional by class, protection list, engine-arbitrated no-op), not the output-size rule or budget gates
+
+#### Scenario: Direct-surface sub-clause applies
+
+- **WHEN** a bash/artifact scenario surfaces a raw tool result larger than 8KB directly in the agent context
 - **THEN** the agent SHALL call `headroom_compress` on it before reasoning
 - **AND** the compressed form SHALL carry the hash for `headroom_retrieve`
 
-#### Scenario: Small output needs no compression
+#### Scenario: Sub-clause n/a reason
 
-- **WHEN** a tool result is at or below 8KB
+- **WHEN** a direct-surface tool result is at or below 8KB
 - **THEN** no compression SHALL be required
 - **AND** the `Tool usage check:` line SHALL report `n/a: <threshold not met>`
 
@@ -127,17 +132,17 @@ Every main node output SHALL end with a `Tool usage check:` section — one line
 
 ### Requirement: Headroom health SHALL be a three-state gate
 
-Headroom availability SHALL be probed and reported as `down`, `cold`, or `ok`, and the final report stats SHALL aggregate from Tool usage check evidence and `headroom_stats` (no `.context.json` manifests).
+Headroom availability SHALL be probed and reported as `down`, `cold`, or `ok`, and the final report stats SHALL aggregate from Tool usage check evidence and `headroom_stats` (no `.context.json` manifests). The gate names the headroom MCP engine state — the HTTP proxy deployment is deleted (ADR 0160), and the marker is `[HEADROOM DOWN]`.
 
 #### Scenario: Proxy down is marked
 
-- **WHEN** the headroom proxy is unreachable
-- **THEN** the run SHALL carry `[HEADROOM PROXY DOWN]` observability
+- **WHEN** the headroom MCP engine is unreachable
+- **THEN** the run SHALL carry `[HEADROOM DOWN]` observability — the marker names the engine state (the HTTP proxy deployment is deleted, ADR 0160)
 - **AND** compress calls SHALL still proceed (honest 0% fallback) with the state recorded
 
 #### Scenario: Cold proxy reports bootstrap state
 
-- **WHEN** the proxy is up but the Kompress model is still bootstrapping
+- **WHEN** the engine is up but the Kompress model is still bootstrapping
 - **THEN** the state SHALL be `cold`
 - **AND** the savings line SHALL report the actual 0% with the `cold` state attached
 
@@ -193,3 +198,26 @@ The Tool usage check SHALL reference the hot parameter surfaces for evidence (ch
 - **WHEN** a check records headroom compress evidence
 - **THEN** the evidence SHALL reference the MCP contract tools
 - **AND** proxy deployment SHALL NOT alter the contract reference
+
+### Requirement: Health-gate marker renamed
+
+The headroom health-gate marker `[HEADROOM PROXY DOWN]` is renamed `[HEADROOM DOWN]` (the proxy deployment is deleted; the marker now names the MCP engine state).
+
+#### Scenario: Down marker emission
+
+- **WHEN** the headroom MCP engine is unreachable
+- **THEN** the marker `[HEADROOM DOWN]` is emitted per the health-gate contract, and the node proceeds uncompressed
+
+### Requirement: Class-driven compression trigger standard
+
+The headroom compress trigger standard is class-driven: when the graph-fidelity seam is live, working-face compression decisions SHALL follow the graph-fidelity class-driven unconditional contract (signal class + protection list + zero deny; the headroom engine's router arbitrates no-op) — not budget thresholds, size gates, or scaling ramps (ADR 0167). The agent-side output-size trigger (>8KB) remains as a sub-clause for bash/artifact scenarios where raw outputs still reach the agent directly.
+
+#### Scenario: Class standard applies
+
+- **WHEN** the graph-fidelity seam is live (mechanical tier)
+- **THEN** compression decisions follow the graph-fidelity class-driven contract (unconditional by class, protection list, engine-arbitrated no-op), not the output-size rule or budget gates
+
+#### Scenario: Output-size sub-clause
+
+- **WHEN** a bash/artifact scenario surfaces a raw output >8KB in the agent context
+- **THEN** direct `headroom_compress` applies (existing sub-threshold no-op prohibition preserved)

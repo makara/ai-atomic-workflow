@@ -7,21 +7,19 @@
  * channel. The send-path trio (before_agent_start / context /
  * before_provider_request) is asserted present in the npm dist.
  */
-import { afterAll, describe, expect, it } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterAll, describe, expect, it } from 'vitest';
 import { assertion, recordIo, verifyOutput, type ProbeAssertion } from './io';
 
 const assertions: ProbeAssertion[] = [];
 
-const ompRunner = path.resolve(
-  import.meta.dir,
-  '../node_modules/@oh-my-pi/pi-coding-agent/src/extensibility/extensions/runner.ts',
-);
-const ompTypes = path.resolve(
-  import.meta.dir,
-  '../node_modules/@oh-my-pi/pi-coding-agent/src/extensibility/extensions/types.ts',
-);
+const here = fileURLToPath(new URL('.', import.meta.url));
+const platformRoot = path.resolve(here, '../../../node_modules/@oh-my-pi/pi-coding-agent');
+
+const ompRunner = path.join(platformRoot, 'src/extensibility/extensions/runner.ts');
+const ompTypes = path.join(platformRoot, 'src/extensibility/extensions/types.ts');
 const runnerSrc = fs.readFileSync(ompRunner, 'utf8');
 const typesSrc = fs.readFileSync(ompTypes, 'utf8');
 

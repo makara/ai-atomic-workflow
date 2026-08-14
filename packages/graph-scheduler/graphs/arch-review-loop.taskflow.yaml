@@ -4,7 +4,7 @@ name: arch-review-loop
 # loop-accept) reads it without per-phase declaration. The owning node skips
 # its own promoted stream.
 context:
-  - node:requirement/arch-review
+  - node:requirement/present-candidates
 phases:
   # Three-stage loop: requirement (arch-review) → round-continue content gate →
   # adopt (adopt-with-docs) + implement (spec-implement) on the proceed route;
@@ -63,7 +63,7 @@ phases:
     type: gate
     dependsOn: [implement]
     jumps:
-      - when: 'requirement/arch-review output shows top_rec_remaining: true AND requirement/scope-entry retryCount < 8'
+      - when: 'requirement/present-candidates output shows top_rec_remaining: true AND requirement/scope-entry retryCount < 8'
         to: requirement/scope-entry
 
   # Round-end — loop again (Top Rec remains + bound) or complete.

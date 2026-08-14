@@ -65,7 +65,7 @@ phases:
       then implementation (spec-implement). No-content rule: adopting output
       change_name empty (nothing to adopt) → recommend end (end action
       completes the run — auto mode ends automatically).
-  # Spec production — openspec-propose (headless). Reads the adoption record
+  # Spec production — upstream openspec-propose. Reads the adoption record
   # (change_name / adr_created / decisions) via the adopting stream — declared
   # read edge (composition: sibling phase; standalone: stripped at dispatch).
   - id: spec-propose
@@ -76,12 +76,21 @@ phases:
     channels:
       - node:adopting
     task: |
-      Generate delta spec change per openspec-propose (headless — change
-      resolution per skill Headless Mode).
+      Generate delta spec change per the upstream openspec-propose skill.
 
       Change name from adopting output change_name (echo); change exists →
-      update the existing change in place (no duplicates). Echo
-      adr_created + decisions (track gate + pipeline-done consume).
+      update the existing change in place (no duplicates). No change name
+      from adopting and no {args.changeName} and no single active openspec
+      change → output spec_status: blocked with the candidate list —
+      never guess a name. Material ambiguity not resolved by the adoption
+      conversation → record reasonable assumptions in the planning
+      artifacts per the skill guardrails. Delta authoring: read the
+      target main spec's requirement names before writing
+      specs/<capability-path>/spec.md; MODIFIED
+      references an existing requirement name as-read — never an
+      invented name; ADDED/REMOVED describe genuine additions/removals
+      relative to the main spec as-read. Echo adr_created + decisions
+      (track gate + pipeline-done consume).
 
       Output contract: change_name, domains, file_paths, validation_result,
       spec_status, adr_created (echo), decisions (echo).
