@@ -1,6 +1,8 @@
 /**
- * Topology pure functions — Kahn sort, dependency resolution, route-aware
- * readiness, upstream/downstream tracing (JUMP + validation only).
+ * Topology pure functions — route-aware readiness, join resolution, and
+ * downstream tracing (JUMP reset scope). Kahn sorting and upstream tracing
+ * were deleted as dead production exports (topoLayers/findUpstream — zero
+ * production callers, graph-schema-w6-close).
  *
  * Route-first redesign: readiness is route-aware — a node
  * activates iff its route is active and every dependency is terminal or on an
@@ -11,110 +13,6 @@
  */
 
 import type { Phase } from './types.js';
-
-/**
- * Build adjacency map: key = phase id, value = ids of phases that depend on key.
- * Edge direction: if B depends on A, then A → B (A must run before B).
- */
-function buildDependents(phases: readonly Phase[]): Map<string, string[]> {
-  const deps = new Map<string, string[]>();
-  for (const p of phases) {
-    const upstream = p.dependsOn;
-    if (!upstream) continue;
-    for (const u of upstream) {
-      const list = deps.get(u);
-      if (list) {
-        list.push(p.id);
-      } else {
-        deps.set(u, [p.id]);
-      }
-    }
-  }
-  return deps;
-}
-
-/**
- * Build indegree map: key = phase id, value = count of unfulfilled upstream dependencies.
- */
-function buildIndegree(phases: readonly Phase[]): Map<string, number> {
-  const indeg = new Map<string, number>();
-  for (const p of phases) {
-    const upstream = p.dependsOn;
-    indeg.set(p.id, upstream ? upstream.length : 0);
-  }
-  return indeg;
-}
-
-/**
- * Topologically sort phases into layers using Kahn's algorithm.
- * Phases in the same layer have no mutual dependencies — they can run concurrently.
- *
- * @throws {Error} if a cycle is detected (processed < total phases).
- */
-export function topoLayers(phases: readonly Phase[]): Phase[][] {
-  if (phases.length === 0) return [];
-
-  const byId = new Map(phases.map((p) => [p.id, p]));
-  const indeg = buildIndegree(phases);
-  const dependents = buildDependents(phases);
-
-  // initial frontier — nodes with indegree 0
-  const queue: string[] = [];
-  for (const [id, deg] of indeg) {
-    if (deg === 0) queue.push(id);
-  }
-
-  const layers: Phase[][] = [];
-  let processed = 0;
-
-  while (queue.length > 0) {
-    // snapshot current frontier as one layer
-    const layerIds = [...queue];
-    queue.length = 0;
-
-    const layer: Phase[] = [];
-    for (const id of layerIds) {
-      const p = byId.get(id);
-      if (p) layer.push(p);
-      processed++;
-
-      // reduce indegree of dependents
-      const children = dependents.get(id) ?? [];
-      for (const child of children) {
-        const newDeg = (indeg.get(child) ?? 1) - 1;
-        indeg.set(child, newDeg);
-        if (newDeg === 0) queue.push(child);
-      }
-    }
-    layers.push(layer);
-  }
-
-  if (processed !== phases.length) {
-    const remainingIds = phases.filter((p) => (indeg.get(p.id) ?? 0) > 0).map((p) => p.id);
-
-    // Check for missing dependencies — references to non-existent phases
-    const missingRefs = new Set<string>();
-    for (const id of remainingIds) {
-      const p = byId.get(id)!;
-      const upstream = p.dependsOn ?? [];
-      for (const u of upstream) {
-        if (!byId.has(u)) missingRefs.add(u);
-      }
-    }
-
-    if (missingRefs.size > 0) {
-      throw new Error(
-        `Missing dependency in phase graph — referenced non-existent phase(s): ${[...missingRefs].sort().join(', ')}`,
-      );
-    }
-
-    throw new Error(
-      `Cycle detected in phase graph — ${remainingIds.length} node(s) unreachable: ${remainingIds.sort().join(', ')}`,
-    );
-  }
-
-  return layers;
-}
 
 /**
  * Route activation map — routeId → activating node id. Presence = active;
@@ -178,24 +76,6 @@ export function resolveReady(
     }
     return deps.every((d) => terminal.has(d));
   });
-}
-
-/** Find all upstream phases reachable from fromPhaseId via dependsOn edges (BFS). */
-export function findUpstream(fromPhaseId: string, phases: readonly Phase[]): string[] {
-  const byIdLocal = new Map(phases.map((p) => [p.id, p]));
-  const seen = new Set<string>();
-  const queue = [fromPhaseId];
-  while (queue.length > 0) {
-    const cur = queue.pop()!;
-    const deps = byIdLocal.get(cur)?.dependsOn ?? [];
-    for (const d of deps) {
-      if (!seen.has(d)) {
-        seen.add(d);
-        queue.push(d);
-      }
-    }
-  }
-  return [...seen];
 }
 
 /** Find all downstream phases reachable from nodeId via reverse dependency edges (BFS). */

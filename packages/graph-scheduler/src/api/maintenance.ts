@@ -16,13 +16,17 @@ import { parse as parseYaml } from 'yaml';
 
 import { validateProjectContext } from '../context/contracts.js';
 import { GraphRepository } from '../lib/db/repository.js';
+import { RegistryLoader } from '../registry-loader.js';
 import { SERVER_STARTED_AT } from '../runtime-start.js';
-import { ConfigFileSchema } from '../schemas/index.js';
+import { ConfigFileSchema, WorkflowSchema } from '../schemas/index.js';
 import type { PersistenceError, SchedulerError } from '../types.js';
 
-import { clearRunCaches, dropRunCaches } from './run-caches.js';
+import type { FileSystem } from '../filesystem.js';
+import { loadGraphWithRegistry } from './graph-loader.js';
+import { dropSnapshotCursor, snapshotCursorCacheClear } from './snapshot.js';
 
-const TASKFLOW_FILE_PATTERN = /\.taskflow\.yaml$/;
+/** Workflow YAML file pattern — suffix-free (schema determines identity, not the file name). */
+const TASKFLOW_FILE_PATTERN = /\.ya?ml$/;
 
 /** Scan inputs — resolved by the runtime facade (config resolution lives there). */
 export interface IGraphInitScan {
@@ -56,11 +60,13 @@ export interface IGraphInitReport {
     readonly errors: string[];
     /** non-blocking contract warnings */
     readonly warnings: string[];
+    /** per-graph machine problems — contract/inventory pass per graph (schema-valid graphs only) */
+    readonly graphProblems: Array<{ name: string; filePath: string; problems: string[] }>;
     readonly config: IConfigHealth;
   };
 }
 
-/** Scan a graphs dir for *.taskflow.yaml files — missing dir → empty list. */
+/** Scan a graphs dir for workflow YAML files — missing dir → empty list. */
 function scanGraphsDir(dir: string): Array<{ filePath: string; raw: string }> {
   let entries;
   try {
@@ -132,16 +138,20 @@ function checkConfigHealth(cwd: string): IConfigHealth {
  * (estate-maintain consistency gate) — not engine health. Errors are
  * returned in the report — they do NOT fail the effect (report-only).
  */
-export function graphInit(scan: IGraphInitScan): Effect.Effect<IGraphInitReport, PersistenceError, GraphRepository> {
+export function graphInit(
+  scan: IGraphInitScan,
+): Effect.Effect<IGraphInitReport, PersistenceError | SchedulerError, GraphRepository | FileSystem | RegistryLoader> {
   return Effect.gen(function* () {
     const repo = yield* GraphRepository;
     yield* repo.initialize();
 
     const errors: string[] = [];
     const warnings: string[] = [];
+    const graphProblems: Array<{ name: string; filePath: string; problems: string[] }> = [];
 
     const graphs: Array<{ filePath: string; graph: Record<string, unknown> }> = [];
     const dirs = scan.projectTaskflowDir ? [scan.projectTaskflowDir, scan.builtinGraphsDir] : [scan.builtinGraphsDir];
+
     for (const dir of dirs) {
       for (const { filePath, raw } of scanGraphsDir(dir)) {
         let parsed: unknown;
@@ -151,7 +161,34 @@ export function graphInit(scan: IGraphInitScan): Effect.Effect<IGraphInitReport,
           errors.push(`${filePath}: YAML parse error — ${err instanceof Error ? err.message : String(err)}`);
           continue;
         }
-        graphs.push({ filePath, graph: parsed as Record<string, unknown> });
+        // Health check validates against the Workflow schema — not YAML-parse
+        // only: schema violations surface in the health report.
+        const schemaResult = WorkflowSchema.safeParse(parsed);
+        if (!schemaResult.success) {
+          errors.push(
+            `${filePath}: schema validation failed — ${schemaResult.error.issues.map((i) => i.message).join('; ')}`,
+          );
+          continue;
+        }
+        const graph = parsed as Record<string, unknown>;
+        graphs.push({ filePath, graph });
+
+        // Full load-time contract pass per graph — errors fail fast, warnings
+        // surfaced. Loads through the registry-aware path (flattened flow
+        // view + inventory per source graph), identical to graph_start.
+        // Shadowing guard: when a project graph shadows a same-named builtin,
+        // the scanned builtin file is not what actually loads — only the
+        // resolved path carries the load-time problems. Skip the mismatch
+        // (the shadowing project file reports its own row).
+        const name = typeof graph.name === 'string' ? graph.name : '';
+        const loaded = yield* Effect.either(loadGraphWithRegistry(name));
+        if (loaded._tag === 'Right') {
+          if (loaded.right.resolvedPath === filePath) {
+            graphProblems.push({ name, filePath, problems: loaded.right.problems });
+          }
+        } else {
+          errors.push(`${filePath}: contract validation failed — ${loaded.left.message}`);
+        }
       }
     }
 
@@ -168,7 +205,7 @@ export function graphInit(scan: IGraphInitScan): Effect.Effect<IGraphInitReport,
     return {
       initialized: true,
       serverStartedAt: new Date(SERVER_STARTED_AT).toISOString(),
-      validation: { errors, warnings, config: checkConfigHealth(scan.cwd) },
+      validation: { errors, warnings, graphProblems, config: checkConfigHealth(scan.cwd) },
     };
   });
 }
@@ -178,7 +215,7 @@ export function graphInit(scan: IGraphInitScan): Effect.Effect<IGraphInitReport,
  *
  * Deletes all runs with fsm_state = 'completed'. If `before` is provided,
  * only deletes runs whose updated_at is before the given ISO timestamp.
- * In-memory run caches are dropped for every deleted run.
+ * The snapshot cursor is dropped for every deleted run.
  *
  * @param before — optional ISO 8601 cutoff; runs updated before this are deleted
  * @returns number of runs deleted
@@ -188,7 +225,7 @@ export function cleanCompleted(before?: string): Effect.Effect<number, Persisten
     const repo = yield* GraphRepository;
     const deletedIds = yield* repo.deleteCompletedRuns(before);
     for (const runId of deletedIds) {
-      dropRunCaches(runId);
+      dropSnapshotCursor(runId);
     }
     return deletedIds.length;
   });
@@ -210,8 +247,8 @@ export function cleanAll(): Effect.Effect<number, PersistenceError, GraphReposit
       count++;
     }
 
-    // Every run deleted — caches must follow, no stale entries left behind
-    clearRunCaches();
+    // Every run deleted — cursors must follow, no stale state left behind
+    snapshotCursorCacheClear();
 
     return count;
   });

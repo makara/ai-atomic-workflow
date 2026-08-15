@@ -1,4 +1,38 @@
 name: adopt-with-docs
+$schema: ../schemas/workflow.schema.json
+version: 1.0.0
+# Node overview table (atom inventory). Bounded compound goals:
+# connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS (AND/OR/IF/
+# THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR operands,
+# conditional paths ≤ 3. Entry shape { id, type, goal, constraints? } — goal
+# states the atom's intent; mechanism lives in the goal (flow entries state
+# "expands <use> subgraph"). constraints: one-sentence prose rules — general
+# boundaries + explicit non-goals, ≤ 5 per atom, never machine-validated.
+# User-maintained.
+inventory:
+  - id: adopt-scope
+    type: main
+    goal: Executes atom-scope-interview to confirm the adoption goal and trace intent
+    constraints:
+      - does not propose scope — the adoption goal comes from the review report
+      - never asks for the output path — derived
+  - id: adopting
+    type: main
+    goal: Runs grilling rounds to settle the adoption decisions THEN appends the record
+    constraints:
+      - never auto-gated — cards in any mode
+      - never zero-question — whole frontier per round
+  - id: adopt-accept
+    type: approval
+    goal: Accept the adoption consensus OR route rework
+    constraints:
+      - routes only — never changes the record
+  - id: spec-propose
+    type: main
+    goal: Executes openspec-propose to create the change with proposal, specs, design and tasks
+    constraints:
+      - planning only — never edits project code
+      - never guesses the change name — blocked + candidates instead
 # Graph-level ambient context — domain modeling vocabulary for the adoption
 # conversation. Three-tier channel model: conventions (CONTEXT.md) and ADR
 # records arrive via platform convention layer / config.json context.
@@ -90,7 +124,7 @@ phases:
       references an existing requirement name as-read — never an
       invented name; ADDED/REMOVED describe genuine additions/removals
       relative to the main spec as-read. Echo adr_created + decisions
-      (track gate + pipeline-done consume).
+      (track gate + workflow-done consume).
 
       Output contract: change_name, domains, file_paths, validation_result,
       spec_status, adr_created (echo), decisions (echo).

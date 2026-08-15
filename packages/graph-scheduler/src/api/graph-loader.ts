@@ -1,9 +1,9 @@
 /**
- * API Graph Loader — graph definition loading, caching, and adaptation.
+ * API Graph Loader — graph definition loading and adaptation.
  *
  * Extracted from crud.ts.
- * Loads graph definitions (registry-aware), caches per-run, and adapts
- * taskflow-core Taskflow to FSM TaskflowGraph.
+ * Loads graph definitions (registry-aware) fresh per call, and adapts
+ * workflow-core Workflow to FSM WorkflowGraph.
  *
  * Machine validation only: graph YAML contracts, channel shape, user-
  * supplement layer existence. Skill prose is never parsed here — entry-skill
@@ -13,37 +13,54 @@
  */
 
 import { Effect } from 'effect';
-import { validateGraphContracts, validateProjectContext } from '../context/contracts.js';
-import { debugLog } from '../debug.js';
+import {
+  validateGraphContracts,
+  validateGraphInventory,
+  validateGraphRegistryDrift,
+  validateProjectContext,
+} from '../context/contracts.js';
 import { FileSystem, FileSystemError } from '../filesystem.js';
 import { flattenFlowPhases, MAX_FLOW_DEPTH } from '../flow-flatten.js';
-import type { TaskflowGraph } from '../fsm/transition.js';
-import type { Taskflow } from '../graph-definition.js';
-import { loadGraph, loadGraphFromPath } from '../graph-definition.js';
+import type { WorkflowGraph } from '../fsm/transition.js';
+import type { Workflow } from '../graph-definition.js';
+import { loadGraphFromPath, probeGraph } from '../graph-definition.js';
 import { validatePhase } from '../phase-handler/index.js';
 import { RegistryLoader } from '../registry-loader.js';
 import type { GraphDefinitionError, RegistryLoadError, SchedulerError } from '../types.js';
 import { FlowPhaseError } from '../types.js';
-
-import { graphLoadCache } from './run-caches.js';
 
 /**
  * Load-time contract pass — runs on the flattened graph after
  * schema validation, before any dispatch. Machine-owned checks only:
  * graph YAML contract violations fail the load with GraphDefinitionError
  * (fail-fast — never deferred to dispatch); warnings are surfaced via
- * debugLog and never block.
+ * the problems stream and never block.
  */
 function runContractsPass(
-  tf: Taskflow,
+  tf: Workflow,
   filePath: string,
   graphName: string,
+  sourceGraphs: ReadonlyArray<{ tf: Workflow; filePath: string; registryDescription?: string }>,
   projectContext?: readonly string[],
-): Effect.Effect<{ tf: Taskflow; warnings: string[] }, GraphDefinitionError, never> {
+): Effect.Effect<{ tf: Workflow; warnings: string[] }, GraphDefinitionError, never> {
   return Effect.gen(function* () {
     const contracts = validateGraphContracts(tf, filePath);
     const errors = [...contracts.errors];
     const warnings = [...contracts.warnings];
+
+    // Graph inventory — validated per source graph against its OWN phase
+    // declarations (flow entries resolve pre-flatten; the flattened phase
+    // set cannot see flow ids). Runs inside the post-flatten contract pass;
+    // warnings join the contract-warning stream alongside all others.
+    for (const source of sourceGraphs) {
+      warnings.push(...validateGraphInventory(source.tf, source.filePath));
+      // Registry description drift — each source graph's own registry entry
+      // description is checked against its own phase set (per source graph;
+      // flow subgraphs carry their own registry descriptions).
+      if (source.registryDescription) {
+        warnings.push(...validateGraphRegistryDrift(source.tf, source.registryDescription, source.filePath));
+      }
+    }
 
     // User-supplement layer existence validation — four-layer channel model: exact
     // file missing -> load error, glob zero-match -> warning. Runs against
@@ -54,9 +71,6 @@ function runContractsPass(
       warnings.push(...pc.warnings);
     }
 
-    for (const w of warnings) {
-      debugLog('load', { event: 'contract_warning', graph: graphName, warning: w });
-    }
     if (errors.length > 0) {
       return yield* Effect.fail<GraphDefinitionError>({
         _tag: 'GraphDefinitionError',
@@ -69,8 +83,8 @@ function runContractsPass(
   });
 }
 
-/** Recursively collect all `use` graph names from a Taskflow. */
-export function collectFlowRefs(tf: Taskflow, seen: Set<string>): string[] {
+/** Recursively collect all `use` graph names from a Workflow. */
+function collectFlowRefs(tf: Workflow, seen: Set<string>): string[] {
   const refs: string[] = [];
   for (const phase of tf.phases) {
     if (phase.type === 'flow' && typeof phase.use === 'string' && !seen.has(phase.use)) {
@@ -82,16 +96,18 @@ export function collectFlowRefs(tf: Taskflow, seen: Set<string>): string[] {
 }
 
 interface LoadedNamedGraph {
-  readonly tf: Taskflow;
+  readonly tf: Workflow;
   /** Path the graph was loaded from — for contract-pass reporting. */
   readonly filePath: string;
   /** Resolution source — project registry, builtin registry, or file-name fallback. */
   readonly resolvedFrom: 'project' | 'builtin' | 'fallback';
+  /** Registry entry description — the drift check target (undefined for fallback resolution). */
+  readonly registryDescription?: string;
 }
 
 /**
  * Load a graph by name with unified resolution: project registry entry
- * (explicit path) first, taskflow-directory search as fallback. Same
+ * (explicit path) first, workflow-directory search as fallback. Same
  * semantics for top-level graphs and flow subgraphs.
  */
 function loadNamedGraph(
@@ -106,16 +122,19 @@ function loadNamedGraph(
     );
     if (resolvedPath._tag === 'Right') {
       const { path, source } = resolvedPath.right;
-      return { tf: yield* loadGraphFromPath(path, name), filePath: path, resolvedFrom: source };
+      const registry = yield* Effect.either(
+        Effect.gen(function* () {
+          const registryLoader = yield* RegistryLoader;
+          return yield* registryLoader.registry;
+        }),
+      );
+      const registryDescription = registry._tag === 'Right' ? registry.right.get(name)?.description : undefined;
+      return { tf: yield* loadGraphFromPath(path, name), filePath: path, resolvedFrom: source, registryDescription };
     }
-    // Fallback: taskflow-dir search — resolve the actual absolute path for
-    // the identity banner (never a bare filename).
-    const fallbackPath = yield* Effect.gen(function* () {
-      const fs = yield* FileSystem;
-      return fs.resolvePath(`${name}.taskflow.yaml`);
-    });
-    const filePath = fallbackPath ?? `${name}.taskflow.yaml`;
-    return { tf: yield* loadGraph(name), filePath, resolvedFrom: 'fallback' };
+    // Fallback: schema probe — suffix-free, declared-name identity
+    // (registry miss → any workflow YAML whose declared name matches).
+    const probed = yield* probeGraph(name);
+    return { tf: probed.wf, filePath: probed.filePath, resolvedFrom: 'fallback' };
   });
 }
 
@@ -134,32 +153,38 @@ export interface GraphLoadMeta {
   readonly resolvedPath: string;
   /** Graph top-level description (purpose-focused free text) — undefined when absent. */
   readonly description?: string;
+  /** Load-time machine warnings — inventory consistency, description drift, project context. Empty when clean. */
+  readonly problems: string[];
 }
 
 export function loadGraphWithRegistry(
   graphName: string,
   projectContext?: readonly string[],
-): Effect.Effect<Taskflow & GraphLoadMeta, SchedulerError | RegistryLoadError, FileSystem | RegistryLoader> {
+): Effect.Effect<Workflow & GraphLoadMeta, SchedulerError | RegistryLoadError, FileSystem | RegistryLoader> {
   return Effect.gen(function* () {
     const loaded = yield* loadNamedGraph(graphName);
 
     // Phase 1 merge-at-load: pre-load all referenced child graphs, then flatten
     const seen = new Set<string>();
     let pendingRefs = collectFlowRefs(loaded.tf, seen);
-    const childMap = new Map<string, Taskflow>();
+    const childMap = new Map<string, { tf: Workflow; filePath: string; registryDescription?: string }>();
 
     // Load child graphs iteratively (breadth-first for simplicity)
     while (pendingRefs.length > 0) {
       for (const refName of pendingRefs) {
         const childResult = yield* Effect.either(loadNamedGraph(refName));
         if (childResult._tag === 'Right') {
-          childMap.set(refName, childResult.right.tf);
+          childMap.set(refName, {
+            tf: childResult.right.tf,
+            filePath: childResult.right.filePath,
+            registryDescription: childResult.right.registryDescription,
+          });
         } else if (isFileNotFound(childResult.left)) {
           yield* Effect.fail(
             new FlowPhaseError(
               refName,
               'GRAPH_NOT_FOUND',
-              `child graph '${refName}' not found in registry or taskflow dirs`,
+              `child graph '${refName}' not found in registry or workflow dirs`,
             ),
           );
         } else {
@@ -172,69 +197,73 @@ export function loadGraphWithRegistry(
       for (const refName of pendingRefs) {
         const child = childMap.get(refName);
         if (child) {
-          const childRefs = collectFlowRefs(child, seen);
+          const childRefs = collectFlowRefs(child.tf, seen);
           nextRefs.push(...childRefs);
         }
       }
       pendingRefs = nextRefs;
     }
 
-    const loadChild = (childName: string): Taskflow | null => childMap.get(childName) ?? null;
+    const loadChild = (childName: string): Workflow | null => childMap.get(childName)?.tf ?? null;
     const flat = flattenFlowPhases(loaded.tf, loadChild, 1, MAX_FLOW_DEPTH);
-    // Contract checks run at load: errors fail fast, warnings surface.
-    const result = yield* runContractsPass(flat, loaded.filePath, graphName, projectContext);
+    // Contract checks run at load: errors fail fast, warnings surface. The
+    // inventory consistency check runs inside the pass (per source graph).
+    const sourceGraphs = [
+      { tf: loaded.tf, filePath: loaded.filePath, registryDescription: loaded.registryDescription },
+      ...Array.from(childMap.values()).map((child) => ({
+        tf: child.tf,
+        filePath: child.filePath,
+        registryDescription: child.registryDescription,
+      })),
+    ];
+    const result = yield* runContractsPass(flat, loaded.filePath, graphName, sourceGraphs, projectContext);
+
     return {
       ...result.tf,
       resolvedFrom: loaded.resolvedFrom,
       resolvedPath: loaded.filePath,
       description: loaded.tf.description,
+      problems: result.warnings,
     };
   });
 }
 /**
- * Load a graph definition for a run — cache-aware.
- * First call for a run loads from disk; subsequent calls reuse cached.
- * Cache key = runId, so different runs don't collide even with same graphName.
+ * Load a graph definition for a run — direct fresh load, no cache.
+ * Every dispatch reads and validates the graph from disk; the load result
+ * carries problems (no type-level erasure, no compatibility layer).
  */
 export function loadGraphForRun(
-  runId: string,
   graphName: string,
   projectContext?: readonly string[],
-): Effect.Effect<Taskflow, SchedulerError | RegistryLoadError, FileSystem | RegistryLoader> {
-  return Effect.gen(function* () {
-    const cached = graphLoadCache.get(runId);
-    if (cached) return cached;
-
-    const tf = yield* loadGraphWithRegistry(graphName, projectContext);
-    graphLoadCache.set(runId, tf);
-    return tf;
-  });
+): Effect.Effect<Workflow & GraphLoadMeta, SchedulerError | RegistryLoadError, FileSystem | RegistryLoader> {
+  return loadGraphWithRegistry(graphName, projectContext);
 }
 
 /**
- * Adapt taskflow-core Taskflow to the FSM's TaskflowGraph shape.
+ * Adapt workflow-core Workflow to the FSM's WorkflowGraph shape.
  * Also runs each phase through its handler's validate() — after schema.parse().
  * Flow phases are already flattened at this point; type is main/approval.
  */
-export function toTaskflowGraph(tf: Taskflow): Effect.Effect<TaskflowGraph, GraphDefinitionError> {
+export function toWorkflowGraph(tf: Workflow): Effect.Effect<WorkflowGraph, GraphDefinitionError> {
   return Effect.try({
     try: () => {
-      const validatedPhases: Array<Taskflow['phases'][number]> = [];
+      const validatedPhases: Array<Workflow['phases'][number]> = [];
       for (const p of tf.phases) {
         // Unknown phase type fails graph load — never a silent pass-through.
         // Error names the type + registered list (from UnknownPhaseTypeError message).
         validatedPhases.push(validatePhase(p));
       }
       return {
-        name: tf.name ?? 'unnamed',
+        name: tf.name,
         description: tf.description,
         context: tf.context ?? [],
+        constraints: tf.constraints ?? [],
         phases: validatedPhases,
       };
     },
     catch: (err: unknown): GraphDefinitionError => ({
       _tag: 'GraphDefinitionError',
-      graphName: tf.name ?? 'unnamed',
+      graphName: tf.name,
       message: err instanceof Error ? err.message : String(err),
     }),
   });

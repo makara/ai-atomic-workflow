@@ -1,7 +1,7 @@
 /**
  * Integration tests for runtime scenarios.
  *
- * Exercises createRuntime with fixture taskflow graphs through
+ * Exercises createRuntime with fixture workflow graphs through
  * linear cycles, jump, force-end, concurrent runs, and error paths.
  */
 import { Effect } from 'effect';
@@ -50,7 +50,7 @@ function makeFixture(): Fixture {
       },
     ],
   };
-  writeFileSync(join(taskflowDir, 'linear-agent-test.taskflow.yaml'), JSON.stringify(linearGraph, null, 2));
+  writeFileSync(join(taskflowDir, 'linear-agent-test.yaml'), JSON.stringify(linearGraph, null, 2));
 
   // 3-phase graph for force-end scenario (scenario 3)
   const forceEndGraph = {
@@ -76,7 +76,7 @@ function makeFixture(): Fixture {
       },
     ],
   };
-  writeFileSync(join(taskflowDir, 'force-end-test.taskflow.yaml'), JSON.stringify(forceEndGraph, null, 2));
+  writeFileSync(join(taskflowDir, 'force-end-test.yaml'), JSON.stringify(forceEndGraph, null, 2));
 
   // Gate+approval pair graph (scenario 6) — machine gate before human card; no end node
   const gatePairGraph = {
@@ -101,20 +101,20 @@ function makeFixture(): Fixture {
       { id: 'accept', type: 'approval', dependsOn: ['auto-gate'] },
     ],
   };
-  writeFileSync(join(taskflowDir, 'gate-pair-test.taskflow.yaml'), JSON.stringify(gatePairGraph, null, 2));
+  writeFileSync(join(taskflowDir, 'gate-pair-test.yaml'), JSON.stringify(gatePairGraph, null, 2));
 
   // Built-in openspec-apply graph (scenario 7) — real gate+approval pair, mid-chain rework
   const builtinRoot = join(__dirname, '..', '..', 'graphs');
-  copyFileSync(join(builtinRoot, 'openspec-apply.taskflow.yaml'), join(taskflowDir, 'openspec-apply.taskflow.yaml'));
+  copyFileSync(join(builtinRoot, 'openspec-apply.yaml'), join(taskflowDir, 'openspec-apply.yaml'));
 
   // Registry
   const registry = {
     graphs: [
-      { name: 'linear-agent-test', path: 'linear-agent-test.taskflow.yaml' },
-      { name: 'jump-test', path: 'jump-test.taskflow.yaml' },
-      { name: 'force-end-test', path: 'force-end-test.taskflow.yaml' },
-      { name: 'gate-pair-test', path: 'gate-pair-test.taskflow.yaml' },
-      { name: 'openspec-apply', path: 'openspec-apply.taskflow.yaml' },
+      { name: 'linear-agent-test', path: 'linear-agent-test.yaml' },
+      { name: 'jump-test', path: 'jump-test.yaml' },
+      { name: 'force-end-test', path: 'force-end-test.yaml' },
+      { name: 'gate-pair-test', path: 'gate-pair-test.yaml' },
+      { name: 'openspec-apply', path: 'openspec-apply.yaml' },
     ],
   };
   const registryPath = join(taskflowDir, 'registry.json');
@@ -164,7 +164,7 @@ describe('runtime scenarios', () => {
 
   // ── Scenario 1: Linear agent full cycle ──────────────────────────
 
-  it('completes a 3-phase linear agent DAG end-to-end', async () => {
+  it('completes a 3-phase linear agent graph end-to-end', async () => {
     const rt = await createTestRuntime(fix);
 
     // Start — first author node dispatches directly (no activation prefix)

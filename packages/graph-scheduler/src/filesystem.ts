@@ -26,7 +26,7 @@ export class FileSystemError {
  * FileSystem Context.Tag — injectable I/O seam.
  *
  * `readFile` returns Effect<string, FileSystemError>; `resolvePath` returns
- * the absolute path a relative file resolves to through the taskflow dirs
+ * the absolute path a relative file resolves to through the workflow dirs
  * (or the input when absolute), null when not found. Consumers catch
  * FileSystemError in Effect.gen and re-wrap into domain-specific error
  * types (GraphDefinitionError, AgentConfigError).
@@ -34,8 +34,16 @@ export class FileSystemError {
 export class FileSystem extends Context.Tag('FileSystem')<
   FileSystem,
   {
+    /**
+     * List the workflow YAML files (`.yaml`/`.yml`) under the search dirs —
+     * used by the schema-probe fallback (suffix-free graph discovery).
+     * Absolute paths; unreadable/missing dirs → empty list.
+     */
+    readonly listYamlFiles: () => string[];
     readonly readFile: (path: string) => Effect.Effect<string, FileSystemError>;
-    /** Resolve a relative path through the taskflow dirs → absolute path (input when absolute); null when not found. */
+    /** Resolve a relative path through the workflow dirs → absolute path (input when absolute); null when not found. */
     readonly resolvePath: (filePath: string) => string | null;
+    /** Resolve a declared `$schema` URI to an existing schema document — against the declaring file's directory, then the package schemas dir; null when unresolvable. */
+    readonly resolveSchemaUri: (uri: string, filePath: string) => string | null;
   }
 >() {}

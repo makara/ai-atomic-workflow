@@ -17,13 +17,13 @@ interface Fixture {
 }
 
 function writeGraph(fixture: Fixture, name: string, graph: Record<string, unknown>): void {
-  writeFileSync(join(fixture.taskflowDir, `${name}.taskflow.yaml`), JSON.stringify(graph, null, 2));
+  writeFileSync(join(fixture.taskflowDir, `${name}.yaml`), JSON.stringify(graph, null, 2));
 }
 
 function writeRegistry(fixture: Fixture, names: string[]): void {
   writeFileSync(
     join(fixture.taskflowDir, 'registry.json'),
-    JSON.stringify({ graphs: names.map((n) => ({ name: n, path: `${n}.taskflow.yaml` })) }, null, 2),
+    JSON.stringify({ graphs: names.map((n) => ({ name: n, path: `${n}.yaml` })) }, null, 2),
   );
 }
 
@@ -172,6 +172,51 @@ describe('load-time contract validation', () => {
     expect(res._tag).toBe('Right');
     if (res._tag === 'Right') {
       expect(res.right.node?.nodeId).toBe('writer');
+    }
+  });
+
+  it('graph with flow phase + matching inventory loads clean — flow entries resolve per source graph', async () => {
+    // Inventory is validated per source graph inside the post-flatten contract
+    // pass: flow entries must NOT warn (they resolve against the source graph's
+    // own phase set). Registry needs the child graph registered for flattening.
+    const child = {
+      name: 'child-graph',
+      phases: [
+        { id: 'child-main', type: 'main', skill: 'scenario-agent-skill', task: 'c', dependsOn: [], operations: [] },
+      ],
+    };
+    const parent = {
+      name: 'inv-flow',
+      phases: [
+        { id: 'entry', type: 'main', skill: 'scenario-agent-skill', task: 'e', dependsOn: [], operations: [] },
+        { id: 'child', type: 'flow', use: 'child-graph', dependsOn: ['entry'] },
+      ],
+      inventory: [
+        { id: 'entry', type: 'main', goal: 'Run the entry step then expand the child' },
+        { id: 'child', type: 'flow', goal: 'Expand child-graph subgraph' },
+      ],
+    };
+    writeGraph(fixture, 'child-graph', child);
+    writeGraph(fixture, 'inv-flow', parent);
+    writeRegistry(fixture, ['child-graph', 'inv-flow']);
+
+    const program = Effect.gen(function* () {
+      const rt: SchedulerRuntime = yield* createRuntime({
+        dbPath: ':memory:',
+        taskflowDir: fixture.taskflowDir,
+        registryPaths: [join(fixture.taskflowDir, 'registry.json')],
+        context: [],
+      });
+      const res = yield* Effect.either(Effect.tryPromise(() => rt.graphStart('inv-flow', { mode: 'auto' })));
+      yield* Effect.tryPromise(() => rt.dispose());
+      return res;
+    });
+
+    const res = await Effect.runPromise(program);
+    expect(res._tag).toBe('Right');
+    if (res._tag === 'Right') {
+      // Flatten dispatches the entry phase first — inventory must not block load
+      expect(res.right.node?.nodeId).toBe('entry');
     }
   });
 });

@@ -17,7 +17,7 @@ Phases with `dependsOn` length > 1:
 
 ### Any-join Constraints
 
-1. **Deadlock** - when ALL upstreams of an `any` phase stay unactivated (members of unselected routes), the phase never fires. Prevent: `any`-join upstreams SHALL sit on the implicit default route or a route guaranteed to activate - an `any` join over branch-route members is legal ONLY when a preceding decision node guarantees at least one member activates (the branch-route join pattern - see §Routes: pipeline-done joins the chosen track's terminal while the unselected track never blocks).
+1. **Deadlock** - when ALL upstreams of an `any` phase stay unactivated (members of unselected routes), the phase never fires. Prevent: `any`-join upstreams SHALL sit on the implicit default route or a route guaranteed to activate - an `any` join over branch-route members is legal ONLY when a preceding decision node guarantees at least one member activates (the branch-route join pattern - see §Routes: workflow-done joins the chosen track's terminal while the unselected track never blocks).
 2. **Partial activation** - `any` phase fires after one upstream completes. Remaining upstream nodes stay `pending` (unactivated).
 3. **Downstream awareness** - `any` phase downstreams see upstreams as completed or pending; jump conditions and AI recommendations reference observable facts (output contract fields, decision values, retryCount), never node status.
 4. **Route span** - `join: any` requires the direct upstream set to span >=2 routes (validator-enforced). A join whose upstreams all sit on one route is `all`-semantics - omit `join`.
@@ -76,22 +76,24 @@ YAML: see YAML-EXAMPLES.md §Loop Router Pattern.
 
 A run completes by one of two mechanisms:
 
-1. **Natural drain** - no node is `active` and no node is eligible (route active && dependencies satisfied - the topological result of the DAG). Unselected-route members stay `pending` forever and never block completion (see §Routes).
+1. **Natural drain** - no node is `active` and no node is eligible (route active && dependencies satisfied - the topological result of the dependency edges). Unselected-route members stay `pending` forever and never block completion (see §Routes).
 2. **Approval `end` action** - the AI recommendation or the human choice routes the run to completion: `graph_advance` with `endRun: true` -> run completed (`node: null` follows). Auto mode ends automatically when end IS the recommendation.
 
 Neither mechanism references a node - completion is an action and a drain, never a marker phase.
 
 ## Constraint Layering
 
-Project constraints - `.graph-scheduler/constraints.md` - arrive at every node (main/approval/gate) as `## Constraints` block. The source is the activation load (§Activation): the pilot loads once per activation (compiled-artifact contract: `.graph-scheduler/constraints.json` caches the caveman-compiled rule set — existence = validity, deletion = reset, `compiled_at` audit-only — fast path emits the artifact verbatim with zero markdown I/O; compile path reads `## Rules` and writes the artifact) and holds the round's constraint snapshot in the session — round-level freeze (the round's dispatches read the same session copy; a mid-round edit never affects the in-flight round). No run-record snapshot, no process cache, no scheduler file reads - the artifact is agent-side, and the pilot startup carries the protocol. Layer order (additive floor):
+Three layers, two injected sources. **Project layer** - `.graph-scheduler/constraints.md` - arrives at every node (main/approval/gate) as `[project]`-prefixed block entries. The source is the activation load (§Activation): the pilot loads once per activation (compiled-artifact contract: `.graph-scheduler/constraints.json` caches the caveman-compiled rule set — existence = validity, deletion = reset, `compiled_at` audit-only — fast path emits the artifact verbatim with zero markdown I/O; compile path reads `## Rules` and writes the artifact) and holds the round's constraint snapshot in the session — round-level freeze (the round's dispatches read the same session copy; a mid-round edit never affects the in-flight round). No run-record snapshot, no process cache, no scheduler file reads. **Graph layer** - the graph's top-level `constraints` field - arrives at every node as `[graph]`-prefixed `NodeDetail.constraints` entries, read by the scheduler from the loaded graph definition at dispatch (machine dispatch facts - unbypassable, present even in pilot-less runs). **Composition clause** - the graph layer covers the composed surface: a composed graph's `constraints` union includes every composed subgraph's top-level constraints (flow/`use` flatten merges them, root entries first then subgraph entries in composition order; symmetric with the inventory use-chain union; transitive through nested composition; a subgraph without constraints contributes nothing). **Dispatch-time snapshot clause** - graph-layer entries are read from the current graph definition at each dispatch (advance/jump/force-end re-load the graph file): editing the graph file mid-run changes the `[graph]` entries of subsequent dispatches, while the project layer holds the activation-loaded round snapshot - the two injected channels have documented, asymmetric snapshot semantics; there is no run-record freezing. **Entry layer** - inventory entry-level `constraints[]` - stays doc-only: review surface for graph-maintain/arch-review, NEVER injected into the dispatch block (two-carrier principle: task text is the precise instruction). The handler merges the two injected sources into one `## Constraints` block.
 
-platform layer < node-level task/context < skill-level `## Rules`
+Layering precedence (lower appends only):
+
+platform layer < project layer (`[project]`) < graph layer (`[graph]`) < node-level task/context < skill-level `## Rules`
 
 - Lower layer appends only - never overrides upper layer
 - Same-dimension conflict (e.g. language) -> keep both entries, agent judges by more specific layer
-- Dedup: drop entries duplicating `lang.conversation`/`lang.documents`/`git.policy` structured fields (atom-kernel rule 3 reuse)
+- Dedup: drop entries duplicating `lang.conversation`/`lang.documents`/`git.policy` structured fields (atom-kernel rule 3 reuse); applies to the merged block
 - Block cap 2 KB - exceed -> explicit warning, never silent truncation
-- The YAML `constraints` phase field was removed - project constraints are the single constraints source; `$`-prefixed ids are schema-rejected (the activation prologue was removed — the source is the compiled artifact)
+- The YAML phase-level `constraints` field was removed - graph-level rules go to the top-level `constraints` field; project discipline stays in `.graph-scheduler/constraints.md` (compiled artifact); `$`-prefixed ids are schema-rejected (the activation prologue was removed)
 
 ## Channel File Consumption
 
@@ -101,7 +103,7 @@ Channel file entries (globs / bare paths) consume per the HLT read chain (atom-k
 
 ## Approval Decision Confirmation
 
-Approval phase (`type: approval`) = decision-confirmation node. Accepts AI recommendation, takes free input, routes. The default card = **Accept** (the AI recommendation) + **system free input** (approval() custom input) + **AI-generated contextual options** (retry/jump/end/branch-route - judged at execution from the judgment context (per §Jump Semantics) + snapshot + run mode, never written). Written routing actions exist ONLY for explicit branch-route selection (the sole system-wide scenario: openspec-pipeline minimal/detailed tracks).
+Approval phase (`type: approval`) = decision-confirmation node. Accepts AI recommendation, takes free input, routes. The default card = **Accept** (the AI recommendation) + **system free input** (approval() custom input) + **AI-generated contextual options** (retry/jump/end/branch-route - judged at execution from the judgment context (per §Jump Semantics) + snapshot + run mode, never written). Written routing actions exist ONLY for explicit branch-route selection (the sole system-wide scenario: spec-implement track selection — minimal/detailed tracks).
 
 ### Branch-Route Actions
 

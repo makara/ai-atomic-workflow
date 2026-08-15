@@ -14,7 +14,7 @@
 |`retryCount`|number|yes|Current retry count, 0-based - the node's own jump re-execution count (never zeroed). Gate jump bounds reference the TARGET node's `retryCount` from the snapshot (single counter - atom-graph-spec §Gate Jump Conditions).|
 |`dependsOn`|string[]?|all|Upstream node IDs - scheduling only (topological order, JUMP closure, join resolution). Direct dependsOn outputs arrive as context for ALL types (main parity - gate/approval judgment context included)|
 
-The dispatch handler skill is the constant `atom-phase-handler` for main/approval/gate - agent-side knowledge, never carried in the payload (no `handlerSkill` NodeDetail field). Run mode + constraints are NOT NodeDetail fields - they arrive at activation (graph_start `args.mode`; pilot-loaded constraints) as session facts.
+The dispatch handler skill is the constant `atom-phase-handler` for main/approval/gate - agent-side knowledge, never carried in the payload (no `handlerSkill` NodeDetail field). Run mode is NOT a NodeDetail field - it arrives at activation (graph_start `args.mode`) as a session fact. Graph-level constraints ARE carried: `NodeDetail.constraints` = `[graph]`-prefixed dispatch facts from the loaded graph definition (unbypassable); project-level constraints arrive via the pilot-loaded activation session copy.
 
 ## Type-Specific Fields
 

@@ -1,4 +1,36 @@
 name: release-prep
+$schema: ../schemas/workflow.schema.json
+version: 1.0.0
+# Node overview table (atom inventory). Bounded compound goals:
+# connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS (AND/OR/IF/
+# THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR operands,
+# conditional paths ≤ 3. Entry shape { id, type, goal, constraints? } — goal
+# states the atom's intent; mechanism lives in the goal (flow entries state
+# "expands <use> subgraph"). constraints: one-sentence prose rules — general
+# boundaries + explicit non-goals, ≤ 5 per atom, never machine-validated.
+# User-maintained.
+inventory:
+  - id: propose
+    type: main
+    goal: Executes release-prep-analyze to propose the version and changelog inventory
+    constraints:
+      - version derives from git tag history — never package.json
+      - never executes git tag/commit/push — deterministic + idempotent pre-tag
+  - id: plan-grill
+    type: main
+    goal: Runs grilling to confirm every planned release operation
+    constraints:
+      - never auto-gated — every operation confirmed before any write
+  - id: apply
+    type: main
+    goal: Executes release-prep-apply to bump versions and fold the changelog
+    constraints:
+      - never executes git tag/commit/push — overwrite-style, idempotent
+  - id: release-review
+    type: approval
+    goal: Accept the release prep OR route rework; continue completes the run
+    constraints:
+      - never executes tag/commit — the user runs them manually from the final report
 phases:
   # Proposal — read-only analysis (version from git tags, never package.json;
   # deterministic + idempotent pre-tag; never git tag/commit/push).

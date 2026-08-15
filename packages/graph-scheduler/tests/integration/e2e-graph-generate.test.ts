@@ -13,25 +13,24 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 
-import type { Taskflow } from '../../src/graph-definition.js';
-import { TaskflowSchema } from '../../src/schemas/taskflow.js';
-import { topoLayers } from '../../src/topology.js';
+import type { Workflow } from '../../src/graph-definition.js';
+import { WorkflowSchema } from '../../src/schemas/workflow.js';
 import type { Phase } from '../../src/types.js';
 
 const VALID_PHASE_TYPES: Record<string, true> = { main: true, approval: true, gate: true, flow: true };
 
-function loadGraph(name: string): Taskflow {
+function loadGraph(name: string): Workflow {
   const pkgRoot = join(__dirname, '..', '..');
-  const graphPath = join(pkgRoot, 'graphs', `${name}.taskflow.yaml`);
+  const graphPath = join(pkgRoot, 'graphs', `${name}.yaml`);
   const raw = readFileSync(graphPath, 'utf-8');
   const parsed = parseYaml(raw);
-  return TaskflowSchema.parse(parsed);
+  return WorkflowSchema.parse(parsed);
 }
 
 // ── graph-generate — concrete maker graph ─────────────────────────────────
 
 describe('graph-generate — schema compliance', () => {
-  it('loads and parses as valid TaskflowSchema', () => {
+  it('loads and parses as valid WorkflowSchema', () => {
     const graph = loadGraph('graph-generate');
     expect(graph).toBeDefined();
     expect(graph.name).toBe('graph-generate');
@@ -40,7 +39,7 @@ describe('graph-generate — schema compliance', () => {
     expect(graph.phases.length).toBe(7);
   });
 
-  it('has expected 7 phases for the concrete maker journey (spec-first pipeline)', () => {
+  it('has expected 7 phases for the concrete maker journey (spec-first workflow)', () => {
     const graph = loadGraph('graph-generate');
     const phaseIds = graph.phases.map((p) => p.id);
     expect(phaseIds).toEqual(['entry', 'spec', 'spec-accept', 'implement', 'review', 'gate', 'accept']);
@@ -52,8 +51,21 @@ describe('graph-generate — schema compliance', () => {
     for (const p of phases) {
       expect(VALID_PHASE_TYPES[String(p.type)], `${p.id} type`).toBe(true);
     }
-    const layers = topoLayers(phases);
-    expect(layers.length).toBeGreaterThan(0);
+    // Acyclic check — DFS with recursion stack. Load enforces acyclicity via
+    // the contract pass (dependency cycle → load error, graph-schema-w6-close);
+    // this DFS additionally guards the fixture structure.
+    const visiting = new Set<string>();
+    const visited = new Set<string>();
+    const visit = (id: string): void => {
+      if (visiting.has(id)) throw new Error(`cycle detected at ${id}`);
+      if (visited.has(id)) return;
+      visiting.add(id);
+      for (const dep of phases.find((p) => p.id === id)?.dependsOn ?? []) visit(dep);
+      visiting.delete(id);
+      visited.add(id);
+    };
+    for (const p of phases) visit(p.id);
+    expect(visited.size).toBe(phases.length);
   });
 
   it('entry is an entry node with the shared scope-interview skill', () => {

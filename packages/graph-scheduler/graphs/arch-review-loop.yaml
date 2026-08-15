@@ -1,4 +1,45 @@
 name: arch-review-loop
+$schema: ../schemas/workflow.schema.json
+version: 1.0.0
+# Node overview table (atom inventory). Bounded compound
+# goals: connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS
+# (AND/OR/IF/THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR
+# operands (retryCount bound not counted), conditional paths ≤ 3. Entry
+# shape { id, type, goal, constraints? } — goal states the atom's intent;
+# mechanism lives in the goal (flow entries state "expands <use>
+# subgraph"). constraints: one-sentence prose rules — general boundaries +
+# explicit non-goals, ≤ 5 per atom, never machine-validated. User-maintained.
+inventory:
+  - id: requirement
+    type: flow
+    goal: Expands arch-review subgraph
+    constraints:
+      - composition only — child rules live in the subgraph
+  - id: round-continue
+    type: approval
+    goal: Proceed IF a Top Recommendation remains, ELSE end the run
+    constraints:
+      - routes only — never re-runs the requirement phase
+  - id: adopt
+    type: flow
+    goal: Expands adopt-with-docs subgraph
+    constraints:
+      - composition only — child rules live in the subgraph
+  - id: implement
+    type: flow
+    goal: Expands spec-implement subgraph
+    constraints:
+      - composition only — child rules live in the subgraph
+  - id: loop-gate
+    type: gate
+    goal: Jump back to scope-entry IF a Top Recommendation remains AND retry bound is not reached
+    constraints:
+      - machine judgment only — never decides beyond declared jump conditions
+  - id: loop-accept
+    type: approval
+    goal: Loop again IF re-review is needed, ELSE complete the run
+    constraints:
+      - routes only — never edits the report
 # Global channel — the review report stream is promoted into ambient context:
 # every decision/gate phase of the loop (round-continue, adopt, loop-gate,
 # loop-accept) reads it without per-phase declaration. The owning node skips

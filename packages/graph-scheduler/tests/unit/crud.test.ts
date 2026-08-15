@@ -12,7 +12,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { GraphAdvanceSchema, GraphStartSchema } from '../../server.js';
 import type { NodeDetail } from '../../src/api/crud.js';
-import { graphLoadCache } from '../../src/api/run-caches.js';
 import type { SchedulerRuntime } from '../../src/scheduler-runtime.js';
 import { createRuntime } from '../../src/scheduler-runtime.js';
 
@@ -51,7 +50,7 @@ async function makeFixture(graphs: Record<string, string>): Promise<Fixture> {
   mkdirSync(taskflowDir, { recursive: true });
 
   for (const [name, json] of Object.entries(graphs)) {
-    writeFileSync(join(taskflowDir, `${name}.taskflow.yaml`), json);
+    writeFileSync(join(taskflowDir, `${name}.yaml`), json);
   }
 
   // Builtin registry covers main + approval — no project override needed.
@@ -498,7 +497,7 @@ describe('graphJump', () => {
     if (fix?.cleanup) fix.cleanup();
   });
 
-  it('jumps to target phase in a running DAG', async () => {
+  it('jumps to target phase in a running graph', async () => {
     fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
     const { runId } = await startRun(fix.rt, 'linear-agent');
 
@@ -608,68 +607,6 @@ describe('graphStatus', () => {
 });
 
 // ---------------------------------------------------------------------------
-// run caches — graph definition cache: created at start, dropped on force-end/cleanup, kept on jump
-// (constraints are NOT process-cached — they snapshot into the run record at graph_start)
-// ---------------------------------------------------------------------------
-
-describe('run cache lifecycle', () => {
-  let fix: Fixture;
-
-  afterEach(() => {
-    if (fix?.cleanup) fix.cleanup();
-  });
-
-  it('populates graph cache at graphStart', async () => {
-    fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
-    const { runId } = await fix.rt.graphStart('linear-agent', { mode: 'auto' });
-    expect(graphLoadCache.has(runId)).toBe(true);
-  });
-
-  it('drops graph cache on graphForceEnd', async () => {
-    fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
-    const { runId } = await fix.rt.graphStart('linear-agent', { mode: 'auto' });
-    expect(graphLoadCache.has(runId)).toBe(true);
-
-    await fix.rt.graphForceEnd(runId);
-    expect(graphLoadCache.has(runId)).toBe(false);
-  });
-
-  it('keeps graph cache on graphJump — run stays active', async () => {
-    fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
-    const { runId } = await fix.rt.graphStart('linear-agent', { mode: 'auto' });
-    await fix.rt.graphJump(runId, 'agent-a');
-    expect(graphLoadCache.has(runId)).toBe(true);
-  });
-
-  it('drops graph cache for completed runs only on graphCleanCompleted', async () => {
-    fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
-    const { runId: doneRun } = await startRun(fix.rt, 'linear-agent');
-    await fix.rt.graphAdvance(doneRun, 'agent-a');
-    await fix.rt.graphAdvance(doneRun, 'agent-b');
-    const { runId: liveRun } = await fix.rt.graphStart('linear-agent', { mode: 'auto' });
-    expect(graphLoadCache.has(doneRun)).toBe(true);
-    expect(graphLoadCache.has(liveRun)).toBe(true);
-
-    const { deleted } = await fix.rt.graphCleanCompleted();
-    expect(deleted).toBe(1);
-    expect(graphLoadCache.has(doneRun)).toBe(false);
-    // live run untouched
-    expect(graphLoadCache.has(liveRun)).toBe(true);
-  });
-
-  it('clears all graph caches on graphCleanAll', async () => {
-    fix = await makeFixture({ 'linear-agent': linearAgentGraph() });
-    const before = graphLoadCache.size;
-    await fix.rt.graphStart('linear-agent', { mode: 'auto' });
-    await fix.rt.graphStart('linear-agent', { mode: 'auto' });
-    expect(graphLoadCache.size).toBe(before + 2);
-
-    await fix.rt.graphCleanAll();
-    expect(graphLoadCache.size).toBe(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Activation — mode at graph_start, no prologue nodes
 // ---------------------------------------------------------------------------
 
@@ -696,9 +633,29 @@ describe('activation mode', () => {
     expect(node?.nodeId).toBe('a');
     // No prologue rows — the run contains author nodes only
     expect(snapshot.nodes.filter((n) => n.nodeId.startsWith('$'))).toEqual([]);
-    // NodeDetail never carries runMode/constraints (activation facts live at graph_start / pilot)
+    // NodeDetail never carries runMode (activation fact at graph_start);
+    // constraints ARE carried as dispatch facts — empty when the graph declares none
     expect(node && 'runMode' in node).toBe(false);
-    expect(node && 'constraints' in node).toBe(false);
+    expect(node && 'constraints' in node).toBe(true);
+    expect(node?.constraints).toEqual([]);
+  });
+
+  it('graph-level constraints ride every NodeDetail as [graph] dispatch facts', async () => {
+    const withConstraints = JSON.stringify({
+      name: 'with-constraints',
+      constraints: ['reports in Chinese', 'no git write operations'],
+      phases: [
+        { id: 'a', type: 'main', skill: 'test-agent-skill', task: 'do a', operations: [] },
+        { id: 'accept', type: 'approval', dependsOn: ['a'], task: 'Accept?', topic: 'Accept?' },
+      ],
+    });
+    fix = await makeFixture({ 'with-constraints': withConstraints });
+    const { runId, node } = await fix.rt.graphStart('with-constraints', { mode: 'auto' });
+    const next = await fix.rt.graphAdvance(runId, node!.nodeId);
+
+    expect(node?.constraints).toEqual(['[graph] reports in Chinese', '[graph] no git write operations']);
+    expect(next.node?.constraints).toEqual(['[graph] reports in Chinese', '[graph] no git write operations']);
+    await fix.rt.graphForceEnd(runId);
   });
 
   it('author entry is the first dispatch — no prefix to advance', async () => {
@@ -848,7 +805,7 @@ describe('global channel — effective merge at dispatch', () => {
     });
     const taskflowDir = join(tmpdir(), `crud-test-${Math.random().toString(36).slice(2)}`);
     mkdirSync(taskflowDir, { recursive: true });
-    writeFileSync(join(taskflowDir, 'project-scoped.taskflow.yaml'), g);
+    writeFileSync(join(taskflowDir, 'project-scoped.yaml'), g);
     const rt = await Effect.runPromise(
       createRuntime({
         dbPath: ':memory:',

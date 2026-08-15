@@ -10,7 +10,7 @@
 
 import { Effect } from 'effect';
 import type { FsmEffect, FsmNodeState } from '../fsm/effects.js';
-import type { FsmState, TaskflowGraph } from '../fsm/transition.js';
+import type { FsmState, WorkflowGraph } from '../fsm/transition.js';
 import { GraphRepository, type GraphRun, type NodeStateEntry, type NodeStateUpdate } from '../lib/db/repository.js';
 import { NodeStateSchema } from '../schemas/index.js';
 import type { PersistenceError } from '../types.js';
@@ -94,7 +94,7 @@ export function reconstructFsmState(
 export function executeEffects(
   effects: readonly FsmEffect[],
   repo: GraphRepository['Type'],
-  _graph: TaskflowGraph,
+  _graph: WorkflowGraph,
 ): Effect.Effect<void, PersistenceError> {
   return Effect.gen(function* () {
     for (const effect of effects) {

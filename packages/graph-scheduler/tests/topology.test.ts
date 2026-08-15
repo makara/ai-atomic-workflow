@@ -1,10 +1,11 @@
 /**
- * Tests for topology.ts — Kahn algorithm, cycle detection, dependency resolution,
- * and upstream tracing. All pure functions — direct I/O tests, zero mocks.
+ * Tests for topology.ts — route-aware readiness, join resolution, and the
+ * built-in graph dependency-edge regression guard (inline DFS; load enforces
+ * acyclicity via the contract pass). All pure functions — direct I/O tests, zero mocks.
  */
 
 import { describe, expect, it } from 'vitest';
-import { findUpstream, resolveReady, topoLayers } from '../src/topology.js';
+import { resolveReady } from '../src/topology.js';
 import type { Phase } from '../src/types.js';
 
 // ── Phase factories ────────────────────────────────────────────────────────
@@ -21,69 +22,6 @@ function main(id: string, dependsOn?: string[]): Phase {
 function approval(id: string, dependsOn?: string[]): Phase {
   return phase(id, 'approval', dependsOn);
 }
-
-// Helper: extract phase ids from layers
-function ids(layers: Phase[][]): string[][] {
-  return layers.map((layer) => layer.map((p) => p.id));
-}
-
-// ── topoLayers ─────────────────────────────────────────────────────────────
-
-describe('topoLayers', () => {
-  it('empty array returns empty layers', () => {
-    expect(topoLayers([])).toEqual([]);
-  });
-
-  it('single phase returns one layer', () => {
-    expect(ids(topoLayers([main('a')]))).toEqual([['a']]);
-  });
-
-  it('linear DAG: a → b → c', () => {
-    const phases = [main('a'), main('b', ['a']), main('c', ['b'])];
-    expect(ids(topoLayers(phases))).toEqual([['a'], ['b'], ['c']]);
-  });
-
-  it('diamond DAG: a → b,c → d', () => {
-    const phases = [main('a'), main('b', ['a']), main('c', ['a']), main('d', ['b', 'c'])];
-    expect(ids(topoLayers(phases))).toEqual([['a'], ['b', 'c'], ['d']]);
-  });
-
-  it('complex DAG with 3 layers of concurrency', () => {
-    const phases = [
-      main('a'),
-      main('b', ['a']),
-      main('c', ['a']),
-      main('d', ['a']),
-      main('e', ['b', 'c']),
-      main('f', ['d']),
-      approval('g', ['e', 'f']),
-    ];
-    expect(ids(topoLayers(phases))).toEqual([['a'], ['b', 'c', 'd'], ['e', 'f'], ['g']]);
-  });
-
-  it('disconnected subgraphs co-exist in same layers', () => {
-    const phases = [main('a'), main('b'), main('c', ['a']), main('d', ['b'])];
-    expect(ids(topoLayers(phases))).toEqual([
-      ['a', 'b'],
-      ['c', 'd'],
-    ]);
-  });
-
-  it('cycle detected: a → b → a', () => {
-    const phases = [main('a', ['b']), main('b', ['a'])];
-    expect(() => topoLayers(phases)).toThrow();
-  });
-
-  it('cycle detected: a → b → c → a', () => {
-    const phases = [main('a', ['c']), main('b', ['a']), main('c', ['b'])];
-    expect(() => topoLayers(phases)).toThrow();
-  });
-
-  it('self-loop detected: a → a', () => {
-    const phases = [main('a', ['a'])];
-    expect(() => topoLayers(phases)).toThrow();
-  });
-});
 
 // ── resolveReady ───────────────────────────────────────────────────────────
 
@@ -194,46 +132,15 @@ describe('resolveReady — join mode', () => {
   });
 });
 
-// ── findUpstream ───────────────────────────────────────────────────────────
-
-describe('findUpstream', () => {
-  it('no dependencies — returns empty', () => {
-    const phases = [main('a')];
-    expect(findUpstream('a', phases)).toEqual([]);
-  });
-
-  it('direct upstream found', () => {
-    const phases = [main('a'), main('b', ['a'])];
-    expect(findUpstream('b', phases)).toEqual(['a']);
-  });
-
-  it('transitive upstream via BFS', () => {
-    const phases = [main('a'), main('b', ['a']), main('c', ['b'])];
-    const upstream = findUpstream('c', phases);
-    expect(upstream.sort()).toEqual(['a', 'b']);
-  });
-
-  it('diamond — finds all ancestors', () => {
-    const phases = [main('root'), main('left', ['root']), main('right', ['root']), main('merge', ['left', 'right'])];
-    const upstream = findUpstream('merge', phases);
-    expect(upstream.sort()).toEqual(['left', 'right', 'root']);
-  });
-
-  it('orphan node not in graph — returns empty', () => {
-    const phases = [main('a')];
-    expect(findUpstream('nonexistent', phases)).toEqual([]);
-  });
-});
-
 // ── Built-in graph topology validation ─────────────────────────────────────
 
-describe('built-in graph DAG validation', () => {
-  it('graph-generate.taskflow.yaml has acyclic DAG and no flow refs — concrete maker graph', () => {
+describe('built-in graph dependency-edge validation', () => {
+  it('graph-generate.yaml has acyclic dependency edges and no flow refs — concrete maker graph', () => {
     const { readFileSync } = require('node:fs');
     const { join } = require('node:path');
     const { parse: parseYaml } = require('yaml');
     const pkgRoot = join(__dirname, '..');
-    const graphPath = join(pkgRoot, 'graphs', 'graph-generate.taskflow.yaml');
+    const graphPath = join(pkgRoot, 'graphs', 'graph-generate.yaml');
     const raw = readFileSync(graphPath, 'utf-8');
     const graph = parseYaml(raw);
     const phases: Phase[] = graph.phases.map((p: Record<string, unknown>) => ({
@@ -242,8 +149,21 @@ describe('built-in graph DAG validation', () => {
       dependsOn: (p.dependsOn as string[]) ?? [],
       mode: 'exclusive' as const,
     }));
-    const layers = topoLayers(phases);
-    expect(layers.length).toBeGreaterThan(0);
+    // Acyclic check — DFS with recursion stack. Load enforces acyclicity via
+    // the contract pass (dependency cycle → load error, graph-schema-w6-close);
+    // this DFS additionally guards the fixture structure.
+    const visiting = new Set<string>();
+    const visited = new Set<string>();
+    const visit = (id: string): void => {
+      if (visiting.has(id)) throw new Error(`cycle detected at ${id}`);
+      if (visited.has(id)) return;
+      visiting.add(id);
+      for (const dep of phases.find((p) => p.id === id)?.dependsOn ?? []) visit(dep);
+      visiting.delete(id);
+      visited.add(id);
+    };
+    for (const p of phases) visit(p.id);
+    expect(visited.size).toBe(phases.length);
     const useRefs = graph.phases
       .map((p: Record<string, unknown>) => p.use as string | undefined)
       .filter((u: string | undefined): u is string => u !== undefined);
@@ -255,7 +175,7 @@ describe('built-in graph DAG validation', () => {
     const { join } = require('node:path');
     const { parse: parseYaml } = require('yaml');
     const pkgRoot = join(__dirname, '..');
-    const graphFiles = readdirSync(join(pkgRoot, 'graphs')).filter((f: string) => f.endsWith('.taskflow.yaml'));
+    const graphFiles = readdirSync(join(pkgRoot, 'graphs')).filter((f: string) => f.endsWith('.yaml'));
     for (const f of graphFiles) {
       const graph = parseYaml(readFileSync(join(pkgRoot, 'graphs', f), 'utf-8'));
       const phaseIds = new Set(graph.phases.map((p: { id: string }) => p.id));

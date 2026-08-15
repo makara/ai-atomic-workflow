@@ -24,7 +24,7 @@ async function makeFixture(graphs: Record<string, string>, registry?: string): P
   mkdirSync(taskflowDir, { recursive: true });
 
   for (const [name, json] of Object.entries(graphs)) {
-    writeFileSync(join(taskflowDir, `${name}.taskflow.yaml`), json);
+    writeFileSync(join(taskflowDir, `${name}.yaml`), json);
   }
 
   const rt = await Effect.runPromise(
@@ -77,7 +77,7 @@ describe('graph_start identity fields', () => {
   it('graph_start returns resolvedFrom + resolvedPath for a fallback-resolved graph', async () => {
     const result = await fix.rt.graphStart('described', { mode: 'auto' });
     expect(result.resolvedFrom).toBe('fallback');
-    expect(result.resolvedPath).toMatch(/described\.taskflow\.yaml$/);
+    expect(result.resolvedPath).toMatch(/described\.yaml$/);
   });
 
   it('graph_start carries the graph description when declared', async () => {
@@ -97,7 +97,7 @@ describe('registry project-first precedence', () => {
   beforeEach(async () => {
     // Project registry shadows a same-named builtin entry.
     const registry = JSON.stringify({
-      graphs: [{ name: 'e2e-minimal', path: 'e2e-minimal.taskflow.yaml', description: 'project shadow' }],
+      graphs: [{ name: 'e2e-minimal', path: 'e2e-minimal.yaml', description: 'project shadow' }],
     });
     fix = await makeFixture(
       {

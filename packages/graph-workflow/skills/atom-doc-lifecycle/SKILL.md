@@ -77,7 +77,7 @@ Verify task completion against code evidence before archive. Code = ground truth
 |unchecked|no hit|keep unchecked + register unverified|
 
 - **Token extraction**: pull backtick-wrapped identifiers from task description, then kebab/snake-case names, then behavior verbs paired with artifact names. Grep scope: `contextFiles` + repo-root-relative paths, including graphs, skills, and test trees.
-- **Evidence form by task type**: graph definition -> YAML phase/eval/when/channels hit + line in `packages/graph-scheduler/graphs/*.taskflow.yaml`; skill change -> SKILL.md section + version in skills tree; doc task -> file exists + content grep; test task -> test file + assertion name in `packages/**/*.test.ts`; schema/CLI contract -> type definition / command output hit.
+- **Evidence form by task type**: graph definition -> YAML phase/eval/when/channels hit + line in `packages/graph-scheduler/graphs/*.yaml`; skill change -> SKILL.md section + version in skills tree; doc task -> file exists + content grep; test task -> test file + assertion name in `packages/**/*.test.ts`; schema/CLI contract -> type definition / command output hit.
 - **Fallback** (no token in description): read delta specs `specs/**/*.md`, extract noun phrases from SHALL behavior sentences, grep those. Still vague -> mark drift "task unverifiable - rewrite description or add spec". Never guess, never check off.
 - **Skip class**: pure doc/verification tasks. Verify assertion itself - parse file, grep zero matches, confirm existence. No code search.
 

@@ -4,20 +4,24 @@
 
 |Field|Type|Required|Purpose|
 |-|-|-|-|
-|`name`|string|yes|Graph identifier - resolved by scheduler registry. Kebab-case.|
+|`name`|string|yes|Graph identifier - the identity field (schema-determined identity: any YAML passing WorkflowSchema validation IS a graph; the declared name is the identity, never the file name). Kebab-case. Non-empty - a document without a valid `name` does not load.|
+|`$schema`|string (URI)|no|Self-description header - URI reference to the derived JSON Schema document (`workflow.schema.json`, draft 2020-12). Optional: absent documents validate against the default WorkflowSchema (backward compatible). Malformed (whitespace-containing) values fail at load.|
+|`version`|string (semver)|no|Self-description header - format version of the document (semver, e.g. `1.0.0`). Non-semver fails schema validation; a major mismatch vs the engine's supported format major fails load with a loud rejection (never silent degradation).|
 |`description`|string|no|Purpose-focused free text - states what the graph does/produces (identity metadata, displayed in the pilot banner before the first node; carried by `graph_start`). Optional, non-enumerated, zero behavior branching - a description is identity for humans, never a machine-consumed directive.|
-|`phases`|Phase[]|yes|Phase list. Declaration order cosmetic - execution order resolved exclusively by dependsOn DAG. List in dependency order for readability.|
+|`inventory`|Inventory[]|no|Node overview table - dedicated schema key for the atom list (the term "atom" does NOT name the key). Each entry `{ id, type, goal, constraints? }`: `id` must exist in `phases`; `type` must match the phase declaration - mismatch = load warning via the post-flatten contract pass (per source graph), never blocking, never silent. No `skill` field - the phase-level `skill` field is the single source; a legacy `skill` key is ignored (stripped at parse, no rejection). The execution mechanism lives in the goal: skill-bound main nodes name the executing skill in verb form ("Executes atom-scope-interview to acquire scope"); flow entries state "expands <use> subgraph"; approval/gate entries carry decision semantics. `goal` = bounded compound intent sentence (what the atom accomplishes): connectors AND/THEN/IF-ELSE/OR - structural keywords SHALL be ALL-CAPS (`AND`, `OR`, `IF`, `THEN`, `ELSE`), distinct from ordinary prose `and`/`or`; conditional phrases use IF; ordinary nodes ≤ 5 steps; gates ≤ 3 AND/OR operands (retryCount bound NOT counted); conditional paths ≤ 3 - bounds are convention. `constraints` (optional) = array of one-sentence prose rules - general boundaries plus explicit non-goals ("does not X" / "avoids Y"); at most 5 per atom (convention bound, user-calibratable); general rules prefer positive framing, non-goals state the negation directly; prose only - no structural keywords, no new word-list members; content is never machine-validated (zero validation axis - discipline lives at generation time and review). The former `description` key is NOT accepted (no backward compatibility - stale entries fail schema validation). Bounds are convention, user-calibratable. Case discipline binds LLM-produced inventories (writer/design MUST comply at generation); user-hand-written entries are exempt - no machine validation axis. Flow entries: single entry stating "expands <use> subgraph"; effective atom surface = use-chain union (composing graphs do not duplicate child entries). Ownership: AI MAY generate when absent (writer tooling emits at creation); once present, user-only maintenance (or user-requested change - never silent); any graph-maintenance operation follows the inventory.|
+|`constraints`|string[]|no|Graph-level constraints - graph content behavior rules (same self-containment family as `inventory`: both travel with the graph file). One-sentence prose rules - general boundaries + explicit non-goals ("does not X" / "avoids Y"); ≤ 10 entries per graph (convention bound, user-calibratable); prose only, no structural keywords; content never machine-validated (zero validation axis - discipline at generation + review). Absent field = empty set (no warning, no error). Composed graphs union composed subgraphs' constraints (see ROUTING.md §Constraint Layering - composition clause). Injected into EVERY dispatched node as `[graph]`-prefixed `NodeDetail.constraints` entries (scheduler dispatch facts - unbypassable, works without a pilot), merged by the dispatch handler with `[project]`-prefixed project rules (activation session copy - see ROUTING.md §Constraint Layering). Phase-level `constraints` YAML field remains rejected (removed field).|
+|`phases`|Phase[]|yes|Phase list. Declaration order cosmetic - execution order resolved exclusively by dependsOn edges. List in dependency order for readability.|
 
 ## Phase Fields
 
-YAML field names shown below. Scheduler resolves to internal NodeDetail fields at runtime - see `atom-phase-handler` NODE-SCHEMA.md §NodeDetail for full schema. Field names in `.taskflow.yaml` differ from NodeDetail for some fields - table maps both.
+YAML field names shown below. Scheduler resolves to internal NodeDetail fields at runtime - see `atom-phase-handler` NODE-SCHEMA.md §NodeDetail for full schema. Field names in workflow YAML differ from NodeDetail for some fields - table maps both.
 
 |Field (YAML)|NodeDetail|Type|Required|Purpose|
 |-|-|-|-|-|
 |`id`|`nodeId`|string|yes|Unique phase identifier. Kebab-case.|
 |`type`|`type`|string|yes|Phase type - closed enum: dispatch types `main`/`approval`/`gate` + composition type `flow` expanded at load time. See §Type Ownership Layers.|
 |`dependsOn`|`dependsOn`|string[]|yes|Upstream phase IDs. Empty `[]` for entry nodes.|
-|`skill`|`skill`|string?|`main`|Execution skill - the skill that runs this phase's work; serves as the channels contract source (dual-track). Registry `skill` is the handler, never a dispatch target.|
+|`skill`|`skill`|string?|`main`|Execution skill - the skill that runs this phase's work; serves as the channels contract source (dual-track). Optional: skill-less phases omit the field (no `skill: none` convention). Registry `skill` is the handler, never a dispatch target.|
 |`agent`|`agent`|string[]?|`main`|Agent hints - priority-ordered sub-agent type preferences (e.g. `[reviewer, task]`). Advisory: skills pick the first available type when they dispatch; absent -> platform default. Arrays may carry multi-platform spellings (e.g. `[reviewer, explore, task, general]`) - availability and the platform default resolve per atom-kernel §Platform Spellings. Arrives as `## Agent hints:` block.|
 |`operations`|`operations`|string[]?|`main`|Operation classes - closed-set members of the High-Level Tool Registry (atom-kernel §High-Level Tool Registry). Phase declaration overrides/complements the dispatched skill's `Operation classes` default (union semantics; phase wins on conflict). Absent = skill default. Values validated against the closed set at graph load - unknown class -> loud rejection. Declarative only: scheduler passes through to NodeDetail; verification handler-side. See §HLT Operations Declaration.|
 |`use`|-|string|`flow` type|Referenced graph name. Static constant - merge-at-load flattens. `{...}` dynamic expression -> error (Phase 2 deferred). Required for flow - the only flow field (def/with/maxDepth removed).|
@@ -55,7 +59,7 @@ Auto-supplied fields (NEVER write in YAML):
 - `skill` (string) - resolved from `skill` field; the execution skill for the phase's work.
 - `retryCount` (number) - runtime counter. 0-based. The node's own jump re-execution count; gate jump bounds reference the TARGET node's `retryCount` (single counter - see §Gate Jump Conditions).
 
-The dispatch handler skill is the constant `atom-phase-handler` for main/approval/gate — agent-side knowledge, never carried in the payload (no `handlerSkill` NodeDetail field). Run mode and project constraints are NOT NodeDetail fields - they arrive at activation (graph_start `args.mode`; pilot-loaded constraints, §Activation). `constraints`/`runMode` declared in YAML -> schema rejection with migration hints; `$`-prefixed ids -> schema rejection (activation prologue removed).
+The dispatch handler skill is the constant `atom-phase-handler` for main/approval/gate — agent-side knowledge, never carried in the payload (no `handlerSkill` NodeDetail field). Run mode is NOT a NodeDetail field - it arrives at activation (graph_start `args.mode`). Graph-level constraints ARE carried (`NodeDetail.constraints` — `[graph]`-prefixed dispatch facts); project constraints arrive via the pilot-loaded activation session copy. Phase-level `constraints`/`runMode` declared in YAML -> schema rejection with migration hints; `$`-prefixed ids -> schema rejection (activation prologue removed).
 
 ## Route Field (all phase types)
 
@@ -168,7 +172,7 @@ YAML: see YAML-EXAMPLES.md §Comments.
 
 ### File Location
 
-Graph YAML files live in the scheduler's graphs directory. File name `<name>.taskflow.yaml` maps to graph `name` for `graph_start({ graphName })` resolution.
+Graph YAML files live in the scheduler's graphs directory. Any YAML file (`<name>.yaml`) is a candidate — no suffix convention; graph identity is the declared `name` field (schema-validated). `graph_start({ graphName })` resolves against the declared name.
 
 ### Registry
 
@@ -192,7 +196,7 @@ Normative content rules for `task` text and graph comments - the structure a tas
 Main phase tasks SHALL contain exactly three content classes, in order:
 
 1. **Directive** - what to execute/produce, referencing the phase `skill`. One line suffices: `Execute <skill> graph mode per <skill> skill` or the produce-verb for skill-less phases.
-2. **Phase-local invariants** - facts the dispatched skill cannot know: consumed output fields by name, routing/route semantics, retry bounds, phase MUST/NEVER rules (e.g. pipeline-done's incomplete-judgment check).
+2. **Phase-local invariants** - facts the dispatched skill cannot know: consumed output fields by name, routing/route semantics, retry bounds, phase MUST/NEVER rules (e.g. workflow-done's incomplete-judgment check).
 3. **Output contract** - machine-parseable emission fields. Exactly one block, canonical spelling:
 
 ```yaml
@@ -211,7 +215,7 @@ Task text SHALL NOT contain content present in the dispatched skill, the handler
 
 ### Comment Rule
 
-Graph YAML comments SHALL declare topology intent only - one line per phase block, stating structural purpose (stage role, why a gate/route exists). Prose narration of phase behavior, DAG flow, or task content SHALL NOT appear; ADR/doc references are prohibited (mirrors the why-only comment policy).
+Graph YAML comments SHALL declare topology intent only - one line per phase block, stating structural purpose (stage role, why a gate/route exists). Prose narration of phase behavior, graph flow, or task content SHALL NOT appear; ADR/doc references are prohibited (mirrors the why-only comment policy).
 
 ### Output Contract Spelling
 

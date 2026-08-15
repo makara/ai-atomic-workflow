@@ -7,7 +7,7 @@
  * - 2.2 route-first contract: gate jumps backward-only + bounded, route-hygiene
  *   warning, redundant transitive dependency rejection
  * - route-first fleet contract: no end nodes, no branches/default/mode/when/eval,
- *   approvals declare no written routing except the pipeline branch-route scenario,
+ *   approvals declare no written routing except the track-accept branch-route scenario,
  *   every gate jump is backward + retryCount-bounded
  * - 2.3 gate jump condition hygiene (hardcoded output path / sibling existence)
  * - 2.6 topology assertion: approval ready only when review node done
@@ -20,11 +20,11 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 
-import { toTaskflowGraph } from '../src/api/graph-loader.js';
+import { toWorkflowGraph } from '../src/api/graph-loader.js';
 import { buildSnapshot } from '../src/api/snapshot.js';
-import { validateGraphContracts } from '../src/context/contracts.js';
-import type { FsmState, TaskflowGraph } from '../src/fsm/transition.js';
-import type { Taskflow } from '../src/graph-definition.js';
+import { validateGraphContracts, validateGraphInventory } from '../src/context/contracts.js';
+import type { FsmState, WorkflowGraph } from '../src/fsm/transition.js';
+import type { Workflow } from '../src/graph-definition.js';
 import { PhaseSchema } from '../src/schemas/phase.js';
 import { resolveReady } from '../src/topology.js';
 import type { Phase } from '../src/types.js';
@@ -33,16 +33,16 @@ const PKG_ROOT = join(__dirname, '..');
 
 /** built-in graphs dispatched to contract checks (fleet scans) */
 const BUILTIN_GRAPHS = [
-  'arch-review.taskflow.yaml',
-  'arch-review-loop.taskflow.yaml',
-  'e2e-minimal.taskflow.yaml',
-  'graph-generate.taskflow.yaml',
-  'adopt-with-docs.taskflow.yaml',
-  'openspec-apply.taskflow.yaml',
-  'openspec-engineer.taskflow.yaml',
-  'spec-implement.taskflow.yaml',
-  'estate-maintain.taskflow.yaml',
-  'release-prep.taskflow.yaml',
+  'arch-review.yaml',
+  'arch-review-loop.yaml',
+  'e2e-minimal.yaml',
+  'graph-generate.yaml',
+  'adopt-with-docs.yaml',
+  'openspec-apply.yaml',
+  'openspec-engineer.yaml',
+  'spec-implement.yaml',
+  'estate-maintain.yaml',
+  'release-prep.yaml',
 ] as const;
 
 function loadGraph(name: string): Record<string, unknown> {
@@ -98,11 +98,11 @@ function upstreamClosureOf(id: string, byId: Map<string, Record<string, unknown>
 // ---------------------------------------------------------------------------
 // 2.5 — skill optional on main phases; 'agent' phase type unregistered
 // skill-less main passes contract
-// validation, and the removed 'agent' type fails at load (toTaskflowGraph →
+// validation, and the removed 'agent' type fails at load (toWorkflowGraph →
 // GraphDefinitionError).
 // ---------------------------------------------------------------------------
 
-// Load-time rejection — toTaskflowGraph is runtime-free (static type dispatch).
+// Load-time rejection — toWorkflowGraph is runtime-free (static type dispatch).
 
 describe('2.5 main phase skill optional; agent type unregistered', () => {
   it('skill-less main phase passes validation', () => {
@@ -144,9 +144,9 @@ describe('2.5 main phase skill optional; agent type unregistered', () => {
       name: 'test',
 
       phases: [{ id: 'a', type: 'agent', dependsOn: [], skill: 'code-review', task: 'x' }],
-    } as unknown as Taskflow;
-    await expect(Effect.runPromise(toTaskflowGraph(tf))).rejects.toThrow(/Unknown phase type 'agent'/);
-    await expect(Effect.runPromise(toTaskflowGraph(tf))).rejects.toThrow(/Registered types:/);
+    } as unknown as Workflow;
+    await expect(Effect.runPromise(toWorkflowGraph(tf))).rejects.toThrow(/Unknown phase type 'agent'/);
+    await expect(Effect.runPromise(toWorkflowGraph(tf))).rejects.toThrow(/Registered types:/);
   });
 
   it('built-in fleet declares zero agent phases (unregistered)', () => {
@@ -486,7 +486,7 @@ describe('2.2 route-first contract', () => {
 // ---------------------------------------------------------------------------
 // Route-first fleet contract — all built-in graphs follow the v4 shape:
 // no end nodes, no removed fields, approvals without written routing (except
-// the pipeline branch-route scenario), gates as bounded backward jumps.
+// the track-accept branch-route scenario), gates as bounded backward jumps.
 // Raw assertions only — load-path validation lives in the graph-loading tests.
 // ---------------------------------------------------------------------------
 
@@ -507,7 +507,7 @@ describe('route-first fleet contract', () => {
     }
   });
 
-  it('approvals declare no written routing — except pipeline-accept branch-route, and never default: true', () => {
+  it('approvals declare no written routing — except track-accept branch-route, and never default: true', () => {
     for (const name of BUILTIN_GRAPHS) {
       const graph = loadGraph(name);
       const phases = (graph.phases ?? []) as Array<Record<string, unknown>>;
@@ -517,10 +517,10 @@ describe('route-first fleet contract', () => {
           Record<string, unknown>
         >;
         if (
-          (name === 'spec-implement.taskflow.yaml' && p.id === 'pipeline-accept') ||
-          (name === 'arch-review-loop.taskflow.yaml' && p.id === 'round-continue')
+          (name === 'spec-implement.yaml' && p.id === 'track-accept') ||
+          (name === 'arch-review-loop.yaml' && p.id === 'round-continue')
         ) {
-          // the ONLY branch-route scenarios — pipeline track selection and the
+          // the ONLY branch-route scenarios — track selection and the
           // loop content gate (continue → proceed route + declared end); no default
           expect(actions.length, `${name}/${String(p.id)} branch-route actions`).toBe(2);
           for (const a of actions) {
@@ -664,12 +664,12 @@ describe('2.6 approval readiness depends on review node only', () => {
 // 2.14 — graph-generate concrete maker graph (identity redesign):
 // entry → spec → spec-accept → implement → review → gate → accept. Single
 // kind (graph), single operation (create); no skeleton, no kind switch, no
-// skill co-production. Implement writes .taskflow.yaml + registry entry +
+// skill co-production. Implement writes .yaml + registry entry +
 // attached doc at .graph-scheduler/docs/<name>.md.
 // ---------------------------------------------------------------------------
 
 describe('2.14 graph-generate concrete maker graph topology', () => {
-  const graph = loadGraph('graph-generate.taskflow.yaml');
+  const graph = loadGraph('graph-generate.yaml');
   const phases = graph.phases as Array<Record<string, unknown>>;
   const phaseOf = (id: string): Record<string, unknown> => {
     const p = phases.find((ph) => ph.id === id);
@@ -769,7 +769,7 @@ describe('2.15 openspec-apply / openspec-engineer spec-skill rule', () => {
   const RULE = /atom-skill-spec.*atom-doc-maintain|graph → atom-graph-spec/s;
 
   it('openspec-apply: apply-change + change-review declare the mapping rule', () => {
-    const graph = loadGraph('openspec-apply.taskflow.yaml');
+    const graph = loadGraph('openspec-apply.yaml');
     const phases = graph.phases as Array<Record<string, unknown>>;
     for (const id of ['apply-change', 'change-review']) {
       const p = phases.find((ph) => ph.id === id);
@@ -780,7 +780,7 @@ describe('2.15 openspec-apply / openspec-engineer spec-skill rule', () => {
   });
 
   it('openspec-engineer: implement + implement-review declare the mapping rule', () => {
-    const graph = loadGraph('openspec-engineer.taskflow.yaml');
+    const graph = loadGraph('openspec-engineer.yaml');
     const phases = graph.phases as Array<Record<string, unknown>>;
     for (const id of ['implement', 'implement-review']) {
       const p = phases.find((ph) => ph.id === id);
@@ -791,7 +791,7 @@ describe('2.15 openspec-apply / openspec-engineer spec-skill rule', () => {
   });
 
   it('no static skill:atom-graph-spec channel in either implementation graph', () => {
-    for (const name of ['openspec-apply.taskflow.yaml', 'openspec-engineer.taskflow.yaml']) {
+    for (const name of ['openspec-apply.yaml', 'openspec-engineer.yaml']) {
       const graph = loadGraph(name);
       const phases = graph.phases as Array<Record<string, unknown>>;
       for (const p of phases) {
@@ -810,7 +810,7 @@ describe('2.15 openspec-apply / openspec-engineer spec-skill rule', () => {
 // ---------------------------------------------------------------------------
 
 describe('2.9 spec-implement graph topology', () => {
-  const graph = loadGraph('spec-implement.taskflow.yaml');
+  const graph = loadGraph('spec-implement.yaml');
   const phases = graph.phases as Array<Record<string, unknown>>;
   const phaseOf = (id: string): Record<string, unknown> => {
     const p = phases.find((ph) => ph.id === id);
@@ -821,10 +821,10 @@ describe('2.9 spec-implement graph topology', () => {
   it('five phases in dependency order with single entry and no end marker', () => {
     expect(phases.map((p) => p.id)).toEqual([
       'spec-extract',
-      'pipeline-accept',
+      'track-accept',
       'minimal-track',
       'detailed-track',
-      'pipeline-done',
+      'workflow-done',
     ]);
     const entries = phases.filter((p) => ((p.dependsOn ?? []) as unknown[]).length === 0);
     expect(entries.map((p) => p.id)).toEqual(['spec-extract']);
@@ -836,12 +836,12 @@ describe('2.9 spec-implement graph topology', () => {
   });
 
   it('machinery chain depends linearly — twin tracks any-join to terminal; no doc-maintenance stage', () => {
-    expect(phaseOf('pipeline-accept').dependsOn).toEqual(['spec-extract']);
-    expect(phaseOf('minimal-track').dependsOn).toEqual(['pipeline-accept']);
-    expect(phaseOf('detailed-track').dependsOn).toEqual(['pipeline-accept']);
-    expect(phaseOf('pipeline-done').dependsOn).toEqual(['minimal-track', 'detailed-track']);
-    expect(phaseOf('pipeline-done').join).toBe('any');
-    // pipeline-done is the terminal — no gate after it (single loop in the
+    expect(phaseOf('track-accept').dependsOn).toEqual(['spec-extract']);
+    expect(phaseOf('minimal-track').dependsOn).toEqual(['track-accept']);
+    expect(phaseOf('detailed-track').dependsOn).toEqual(['track-accept']);
+    expect(phaseOf('workflow-done').dependsOn).toEqual(['minimal-track', 'detailed-track']);
+    expect(phaseOf('workflow-done').join).toBe('any');
+    // workflow-done is the terminal — no gate after it (single loop in the
     // composition); tracks own their post-archive closure
   });
 
@@ -857,8 +857,8 @@ describe('2.9 spec-implement graph topology', () => {
     expect(task).toMatch(/adr_created ECHOES the adoption record/);
   });
 
-  it('pipeline-accept is the branch-route approval — two continue actions, no default', () => {
-    const accept = phaseOf('pipeline-accept');
+  it('track-accept is the branch-route approval — two continue actions, no default', () => {
+    const accept = phaseOf('track-accept');
     expect(accept.type).toBe('approval');
     const routing = accept.routing as Record<string, unknown>;
     const actions = (routing.actions ?? []) as Array<Record<string, unknown>>;
@@ -868,9 +868,9 @@ describe('2.9 spec-implement graph topology', () => {
     expect(actions.every((a) => a.default === undefined)).toBe(true);
   });
 
-  it('no auto-loop gate — pipeline-done is the terminal (single loop in arch-review-loop)', () => {
+  it('no auto-loop gate — workflow-done is the terminal (single loop in arch-review-loop)', () => {
     expect(phases.some((p) => p.type === 'gate')).toBe(false);
-    expect(phaseOf('pipeline-done').channels).toEqual(
+    expect(phaseOf('workflow-done').channels).toEqual(
       expect.arrayContaining([
         'node:spec-extract',
         'node:minimal-track/archive',
@@ -897,7 +897,7 @@ describe('2.9 spec-implement graph topology', () => {
     // adoption record from the adopt stage); stripped at dispatch in
     // standalone runs (run-scope gate)
     expect(phaseOf('spec-extract').channels).toEqual(['node:adopt/spec-propose', 'node:adopt/adopting']);
-    expect(phaseOf('pipeline-done').channels).toEqual([
+    expect(phaseOf('workflow-done').channels).toEqual([
       'node:spec-extract',
       'node:minimal-track/archive',
       'node:detailed-track/openspec-archive',
@@ -907,7 +907,7 @@ describe('2.9 spec-implement graph topology', () => {
   it('skill declarations — no generation skill in spec-implement; openspec-propose lives in the adopt stage', () => {
     expect(phaseOf('spec-extract').skill).toBeUndefined();
     expect(phases.some((p) => p.skill === 'openspec-propose')).toBe(false);
-    const adopt = loadGraph('adopt-with-docs.taskflow.yaml');
+    const adopt = loadGraph('adopt-with-docs.yaml');
     const adoptPhases = adopt.phases as Array<Record<string, unknown>>;
     const propose = adoptPhases.find((p) => p.id === 'spec-propose');
     expect(propose?.skill).toBe('openspec-propose');
@@ -920,7 +920,7 @@ describe('2.9 spec-implement graph topology', () => {
 // ---------------------------------------------------------------------------
 
 describe('2.10 openspec-engineer graph topology', () => {
-  const graph = loadGraph('openspec-engineer.taskflow.yaml');
+  const graph = loadGraph('openspec-engineer.yaml');
   const phases = graph.phases as Array<Record<string, unknown>>;
   const phaseOf = (id: string): Record<string, unknown> => {
     const p = phases.find((ph) => ph.id === id);
@@ -956,9 +956,10 @@ describe('2.10 openspec-engineer graph topology', () => {
     const toSpec = phaseOf('to-spec');
     // decided journey entry: the decision is already recorded — no
     // interview skill, no input-source detection; the machinery track is
-    // entered raw with the recorded decision
+    // entered raw with the recorded decision. Execution skill bound per
+    // round-4 F3 (to-spec exists in the global skill set).
     expect(toSpec.dependsOn).toEqual([]);
-    expect(toSpec.skill).toBeUndefined();
+    expect(toSpec.skill).toBe('to-spec');
     expect(toSpec.input).toBeUndefined();
     expect(String(toSpec.task)).toMatch(/No interview/);
   });
@@ -1020,7 +1021,7 @@ describe('2.10 openspec-engineer graph topology', () => {
 // ---------------------------------------------------------------------------
 
 describe('2.13 arch-review-loop three-stage partition topology (requirement + adopt + implement flows)', () => {
-  const graph = loadGraph('arch-review-loop.taskflow.yaml');
+  const graph = loadGraph('arch-review-loop.yaml');
   const phases = graph.phases as Array<Record<string, unknown>>;
   const phaseOf = (id: string): Record<string, unknown> => {
     const p = phases.find((ph) => ph.id === id);
@@ -1072,7 +1073,7 @@ describe('2.13 arch-review-loop three-stage partition topology (requirement + ad
   it('review/scope-entry carries the scope interview contract — no Run Mode topic', () => {
     // the per-round entry node lives inside the arch-review flow — composed as
     // review/scope-entry in the loop
-    const arch = loadGraph('arch-review.taskflow.yaml');
+    const arch = loadGraph('arch-review.yaml');
     const archPhases = arch.phases as Array<Record<string, unknown>>;
     const entry = archPhases.find((p) => p.id === 'scope-entry');
     expect(entry).toBeDefined();
@@ -1102,9 +1103,9 @@ describe('2.13 arch-review-loop three-stage partition topology (requirement + ad
     // Output contract — the parameter channel; the doc-update
     // classification-only variant no longer exists (graph deleted)
     const entries = [
-      { graph: 'arch-review.taskflow.yaml', node: 'scope-entry' },
-      { graph: 'graph-generate.taskflow.yaml', node: 'entry' },
-      { graph: 'adopt-with-docs.taskflow.yaml', node: 'adopt-scope' },
+      { graph: 'arch-review.yaml', node: 'scope-entry' },
+      { graph: 'graph-generate.yaml', node: 'entry' },
+      { graph: 'adopt-with-docs.yaml', node: 'adopt-scope' },
     ];
     for (const entry of entries) {
       const g = loadGraph(entry.graph);
@@ -1115,14 +1116,14 @@ describe('2.13 arch-review-loop three-stage partition topology (requirement + ad
       expect(phase?.skill).toBe('atom-scope-interview');
       expect(task, entry.graph + ' ' + entry.node + ' directive').toMatch(/per atom-scope-interview/);
     }
-    const gen = loadGraph('graph-generate.taskflow.yaml');
+    const gen = loadGraph('graph-generate.yaml');
     const genTask = String(
       (gen.phases as ReadonlyArray<{ id: string; task?: unknown }>).find((p) => p.id === 'entry')?.task,
     );
     expect(genTask).toMatch(/dual-name check=graph_name/);
     expect(genTask).toMatch(/context=optional/);
     expect(genTask).toMatch(/output path=user_owned/);
-    const adopt = loadGraph('adopt-with-docs.taskflow.yaml');
+    const adopt = loadGraph('adopt-with-docs.yaml');
     const adoptTask = String(
       (adopt.phases as ReadonlyArray<{ id: string; task?: unknown }>).find((p) => p.id === 'adopt-scope')?.task,
     );
@@ -1170,7 +1171,7 @@ describe('2.13 arch-review-loop three-stage partition topology (requirement + ad
   it('review-accept is the Requirement-ready terminal — no written routing, judgment context via node: channels', () => {
     // the requirement accept terminal lives inside the arch-review flow —
     // composed as review/review-accept in the loop
-    const arch = loadGraph('arch-review.taskflow.yaml');
+    const arch = loadGraph('arch-review.yaml');
     const archPhases = arch.phases as Array<Record<string, unknown>>;
     const accept = archPhases.find((p) => p.id === 'review-accept');
     expect(accept).toBeDefined();
@@ -1240,7 +1241,7 @@ describe('2.13 arch-review-loop three-stage partition topology (requirement + ad
   it('implement flow carries NO internal auto-iteration gate — the loop is single (loop-gate only)', () => {
     // the machinery has no internal gate — flattened composition contains no
     // implement/implement-loop-gate; rework is the single loop-gate
-    const machinery = loadGraph('spec-implement.taskflow.yaml');
+    const machinery = loadGraph('spec-implement.yaml');
     const machineryPhases = machinery.phases as Array<Record<string, unknown>>;
     expect(machineryPhases.some((p) => p.id === 'implement-loop-gate')).toBe(false);
     expect(machineryPhases.some((p) => p.type === 'gate')).toBe(false);
@@ -1259,7 +1260,7 @@ describe('2.13 arch-review-loop three-stage partition topology (requirement + ad
   });
 
   it('arch-review = standalone requirement production: scope-entry → explore → first-principles → present-candidates → review-accept; no grill flow', () => {
-    const arch = loadGraph('arch-review.taskflow.yaml');
+    const arch = loadGraph('arch-review.yaml');
     const phases2 = arch.phases as Array<Record<string, unknown>>;
     // five-phase requirement production graph — scope-entry entry node,
     // three-phase producer stage (explore main — improve-codebase-architecture
@@ -1408,7 +1409,7 @@ describe('2.8 snapshot nodes enumeration (M2)', () => {
   });
 
   it('snapshot annotates pending nodes on inactive routes with unactivated: true', () => {
-    const graph: TaskflowGraph = {
+    const graph: WorkflowGraph = {
       name: 'g',
       phases: [
         { id: 'a', type: 'main', operations: [] },
@@ -1552,5 +1553,78 @@ describe('4.8 task content spec — moved agent-side', () => {
     expect(errors).toEqual([]);
     expect(warnings.some((w) => w.includes('non-canonical'))).toBe(false);
     expect(warnings.some((w) => w.includes('legacy'))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4.9 — Graph inventory: consistency warnings (never blocking)
+// ---------------------------------------------------------------------------
+
+describe('4.9 graph inventory consistency', () => {
+  const baseGraph = {
+    name: 'inv',
+    phases: [
+      { id: 'main-a', type: 'main', skill: 'sk-a', task: 'a', dependsOn: [], operations: [] },
+      { id: 'app-b', type: 'approval', dependsOn: ['main-a'] },
+      { id: 'gate-c', type: 'gate', dependsOn: ['app-b'], jumps: [{ when: 'x', to: 'main-a' }] },
+      { id: 'flow-d', type: 'flow', use: 'sub', dependsOn: [] },
+    ],
+  };
+
+  it('matching inventory entries validate warning-free', () => {
+    const graph = {
+      ...baseGraph,
+      inventory: [
+        { id: 'main-a', type: 'main', goal: 'Run a then report', constraints: ['does not retry silently'] },
+        { id: 'app-b', type: 'approval', goal: 'Accept the result' },
+        { id: 'gate-c', type: 'gate', goal: 'Jump back when verdict fails or bound reached' },
+        { id: 'flow-d', type: 'flow', goal: 'Expand sub subgraph' },
+      ],
+    };
+    expect(validateGraphInventory(graph, 'inv.yaml')).toHaveLength(0);
+  });
+
+  it('flow entries resolve against the source phase set — no warnings', () => {
+    // Flow phases exist only in the source graph; validateGraphInventory runs
+    // per source graph inside the post-flatten contract pass (runContractsPass).
+    const graph = {
+      ...baseGraph,
+      inventory: [{ id: 'flow-d', type: 'flow', goal: 'Expand sub subgraph' }],
+    };
+    expect(validateGraphInventory(graph, 'inv.yaml')).toHaveLength(0);
+  });
+
+  it('warns on entry referencing a missing phase — never errors', () => {
+    const graph = {
+      ...baseGraph,
+      inventory: [{ id: 'ghost', type: 'main', goal: 'Nope' }],
+    };
+    const warnings = validateGraphInventory(graph, 'inv.yaml');
+    expect(warnings.some((w) => w.includes('inventory entry "ghost" references no phase'))).toBe(true);
+  });
+
+  it('warns on type mismatch', () => {
+    const graph = {
+      ...baseGraph,
+      inventory: [{ id: 'app-b', type: 'main', goal: 'Wrong type' }],
+    };
+    const warnings = validateGraphInventory(graph, 'inv.yaml');
+    expect(
+      warnings.some((w) => w.includes('inventory entry "app-b" type mismatch') && w.includes('declares "main"')),
+    ).toBe(true);
+  });
+
+  it('legacy skill key is not a check axis — no warning', () => {
+    // Entry shape is { id, type, goal, constraints? }; a legacy `skill` key is
+    // stripped at schema parse and must NOT produce a skill-mismatch warning.
+    const graph = {
+      ...baseGraph,
+      inventory: [{ id: 'app-b', type: 'approval', goal: 'Accepts the result', skill: 'sk-other' }],
+    };
+    expect(validateGraphInventory(graph, 'inv.yaml')).toHaveLength(0);
+  });
+
+  it('absent inventory changes nothing', () => {
+    expect(validateGraphInventory(baseGraph, 'inv.yaml')).toHaveLength(0);
   });
 });

@@ -53,7 +53,7 @@ function makeFixture(): Fixture {
       },
     ],
   };
-  writeFileSync(join(taskflowDir, 'pass-test.taskflow.yaml'), JSON.stringify(passGraph, null, 2));
+  writeFileSync(join(taskflowDir, 'pass-test.yaml'), JSON.stringify(passGraph, null, 2));
 
   // Rework graph — gate retry jump targets the terminal upstream writer
   // (JUMP reset path): writer → review → gate (jump to writer) → accept; no end node
@@ -86,12 +86,12 @@ function makeFixture(): Fixture {
       },
     ],
   };
-  writeFileSync(join(taskflowDir, 'rework-test.taskflow.yaml'), JSON.stringify(reworkGraph, null, 2));
+  writeFileSync(join(taskflowDir, 'rework-test.yaml'), JSON.stringify(reworkGraph, null, 2));
 
   const registry = {
     graphs: [
-      { name: 'pass-test', path: 'pass-test.taskflow.yaml' },
-      { name: 'rework-test', path: 'rework-test.taskflow.yaml' },
+      { name: 'pass-test', path: 'pass-test.yaml' },
+      { name: 'rework-test', path: 'rework-test.yaml' },
     ],
   };
   const registryPath = join(taskflowDir, 'registry.json');

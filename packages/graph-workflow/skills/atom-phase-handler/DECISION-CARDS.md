@@ -31,7 +31,7 @@ Human decision card (approval() manual/absent branch) - field mapping:
    - Direct dependsOn reports: assemble `## Upstream: <dependsOnId>` blocks from the agent session (the executing agent produced them; platform history recovery after compaction) (main parity).
    - `channels` `node:` targets: assemble `## Upstream: <nodeTarget>` blocks from the agent session; missing -> note `<nodeTarget> has no output` in the context (node pending/unactivated; a condition referencing it evaluates false).
    - Snapshot: per-node states incl. `retryCount` - jump bounds reference the TARGET node's `retryCount` (single counter, JUMP-maintained, never zeroed; every node in the jump closure - target + downstream terminals - increments, so a gate downstream of a rework target carries a non-zero retryCount after rework rounds).
-   - Prepend `## Run Frame` (SKILL.md §Run Frame Block) + `## Run Mode: <mode>` (activation session fact — graph_start args.mode) + constraints blocks (activation session copy — pilot-loaded; same layer as main/approval).
+   - Prepend `## Run Frame` (SKILL.md §Run Frame Block) + `## Run Mode: <mode>` (activation session fact — graph_start args.mode) + constraints blocks (merged: `[graph]` dispatch facts from `node.constraints` + `[project]` activation session copy — same merged block as main/approval).
 2. Evaluate jumps in declaration order:
    - judge each condition; the first `"true"` selects its jump; stop. No hit -> pass through.
    - judge() per atom-kernel §judge() - constrained true/false answer; judgment failure -> no hit -> pass through (conservative).

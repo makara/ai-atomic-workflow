@@ -3,7 +3,7 @@
 ## Flow Phase Example
 
 ```yaml
-# Parent graph — skill-change-workflow.taskflow.yaml
+# Parent graph — skill-change-workflow.yaml
 name: skill-change-workflow
 phases:
   - id: plan
@@ -22,6 +22,72 @@ phases:
     task: |
       Accept change
       Recommendation follows the plan-parse judgment.
+```
+
+## Inventory Example
+
+```yaml
+# Node overview table — one entry per phase (atom). Entry shape
+# { id, type, goal, constraints? }: id must exist in phases, type must
+# match the phase declaration (mismatch = load warning, never blocking).
+# No skill field — the phase-level skill is the single source; the
+# mechanism lives in the goal (skill-bound mains name it in verb form;
+# flows state "expands <use> subgraph"). Structural keywords ALL-CAPS
+# (AND/OR/IF/THEN/ELSE) — LLM-produced inventories MUST comply; prose
+# and/or lowercase. constraints: one-sentence prose rules — general
+# boundaries + explicit non-goals, ≤ 5 per atom, never machine-validated.
+# Graph-level constraints — optional top-level field (same self-containment
+# family as inventory): one-sentence prose rules — general boundaries +
+# explicit non-goals, ≤ 10 per graph, never machine-validated. Injected into
+# every dispatched node as [graph]-prefixed entries.
+constraints:
+  - reports and plans in Chinese
+  - does not modify files outside packages/ — proposal only
+name: inventory-demo
+inventory:
+  - id: plan
+    type: main
+    goal: Executes sk-plan to analyze requirements THEN write the plan
+    constraints:
+      - does not implement the plan — writes it only
+  - id: skill-ops
+    type: flow
+    goal: Expands skill-author subgraph
+    constraints:
+      - composition only — child rules live in the subgraph
+  - id: review
+    type: approval
+    goal: Accept the change IF the plan judgment passes
+    constraints:
+      - routes only — never edits the plan
+  - id: rework-gate
+    type: gate
+    goal: Jump back to plan IF review fails OR retry bound reached
+    constraints:
+      - machine judgment only — never decides beyond declared jump conditions
+phases:
+  - id: plan
+    type: main
+    dependsOn: []
+    skill: sk-plan
+    task: |
+      Analyze requirements.
+  - id: skill-ops
+    type: flow
+    use: skill-author
+    dependsOn: [plan]
+  - id: review
+    type: approval
+    dependsOn: [skill-ops]
+    task: |
+      Accept change
+      Recommendation follows the plan-parse judgment.
+  - id: rework-gate
+    type: gate
+    dependsOn: [review]
+    jumps:
+      - when: 'review output shows overall: fail AND plan retryCount < 3'
+        to: plan
 ```
 
 ## Gate+Approval Pair Pattern
@@ -79,7 +145,7 @@ routing:
       target: detailed-track
       value: detailed-track
       label: 'Detailed track — engineer'
-      description: 'ADR created — full spec-to-tickets engineering pipeline'
+      description: 'ADR created — full spec-to-tickets engineering workflow'
 ```
 
 ## Approval Dependency Rule

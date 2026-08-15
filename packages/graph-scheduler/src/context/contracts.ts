@@ -74,7 +74,7 @@ function upstreamClosure(id: string, byId: Map<string, Record<string, unknown>>)
 /** sibling-output-existence guard pattern: e.g. "no <node> output present" */
 const SIBLING_OUTPUT_EXISTENCE_RE = /no\s+[\w-]+\s+output\s+present/i;
 
-/** contract checks beyond TaskflowSchema — dispatch, routing, guard hygiene */
+/** contract checks beyond WorkflowSchema — dispatch, routing, guard hygiene */
 export function validateGraphContracts(
   graph: Record<string, unknown>,
   filePath: string,
@@ -83,6 +83,26 @@ export function validateGraphContracts(
   const warnings: string[] = [];
   const phases = (graph.phases ?? []) as Array<Record<string, unknown>>;
   const byId = new Map(phases.map((p) => [str(p.id, ''), p]));
+
+  // Dependency-edge acyclicity — load-time loud failure (spec contract: cycles fail
+  // loudly at load). The former topoLayers Kahn check was deleted as a dead
+  // production export; this pass is its home (graph-schema-w6-close).
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (id: string, trail: string[]): void => {
+    if (visiting.has(id)) {
+      const cycle = [...trail.slice(trail.indexOf(id)), id].join(' → ');
+      errors.push(`${filePath}: dependency cycle detected — ${cycle}`);
+      return;
+    }
+    if (visited.has(id)) return;
+    visiting.add(id);
+    const phase = byId.get(id);
+    for (const dep of (phase?.dependsOn ?? []) as string[]) visit(dep, [...trail, id]);
+    visiting.delete(id);
+    visited.add(id);
+  };
+  for (const p of phases) visit(str(p.id, ''), []);
 
   // Graph-level context (top-level `context:`) — the global channel's
   // graph layer, ambient scope inherited by every flattened phase. Entry
@@ -129,6 +149,12 @@ export function validateGraphContracts(
     );
   }
 
+  // NOTE: graph inventory consistency is not checked in this pure pass — the
+  // contract pass runs on the FLATTENED graph (flow phases replaced by
+  // prefixed children), which would make flow inventory entries unresolvable.
+  // Inventory validation (validateGraphInventory) runs per source graph inside
+  // runContractsPass (graph-loader) — post-flatten timing, source-graph pairing.
+
   for (const phase of phases) {
     const id = str(phase.id, '?');
     const type = str(phase.type, '');
@@ -151,7 +177,7 @@ export function validateGraphContracts(
     }
 
     // 2.0 — enabled type set: unregistered type fails at load via
-    // toTaskflowGraph (resolvePhaseHandler → UnknownPhaseTypeError →
+    // toWorkflowGraph (resolvePhaseHandler → UnknownPhaseTypeError →
     // GraphDefinitionError). No separate static gate — one enforcement path.
 
     // Field-type contract enforced by PhaseSchema superRefine only
@@ -336,6 +362,98 @@ export function validateGraphContracts(
   // blocks themselves.
 
   return { errors, warnings };
+}
+
+/**
+ * Graph inventory (top-level `inventory:`) — the node overview table.
+ * Consistency with phases: every entry id must exist and type must match
+ * the referenced phase declaration. Mismatches are warnings — the table is
+ * user-maintained; loading never blocks (warning semantics per the
+ * graph-inventory standard).
+ *
+ * Entry shape is { id, type, goal, constraints? } — the legacy `skill`
+ * key is stripped at schema parse (no rejection, no migration hint) and is
+ * NOT a check axis; the phase-level `skill` field remains the single
+ * source. `goal`/`constraints` content is NEVER machine-validated (zero
+ * validation axis — no bounds check, no case check; discipline lives at
+ * generation time and review). The former `description` key is NOT
+ * accepted (schema rejects stale entries — no backward compatibility).
+ *
+ * SHALL run per source graph (against its OWN phase declarations) inside
+ * the post-flatten contract pass (runContractsPass — graph-loader): flow
+ * entries resolve against the source graph's pre-flatten phase set.
+ */
+export function validateGraphInventory(graph: Record<string, unknown>, filePath: string): string[] {
+  const warnings: string[] = [];
+  const phases = (graph.phases ?? []) as Array<Record<string, unknown>>;
+  const byId = new Map(phases.map((p) => [str(p.id, ''), p]));
+  const inventory = (graph.inventory ?? []) as Array<Record<string, unknown>>;
+  for (const entry of inventory) {
+    const entryId = str(entry.id, '');
+    const phase = byId.get(entryId);
+    if (!phase) {
+      warnings.push(`${filePath}: inventory entry "${entryId}" references no phase — entry id must exist in phases`);
+      continue;
+    }
+    const entryType = str(entry.type, '');
+    const phaseType = str(phase.type, '');
+    if (entryType !== phaseType) {
+      warnings.push(
+        `${filePath}: inventory entry "${entryId}" type mismatch — declares "${entryType}", phase declares "${phaseType}"`,
+      );
+    }
+    // No skill axis: entry shape is { id, type, goal, constraints? }; a
+    // legacy `skill` key is stripped at schema parse and ignored here;
+    // goal/constraints content is never checked.
+  }
+  return warnings;
+}
+
+/**
+ * Registry description drift — description-to-topology consistency.
+ *
+ * Checks a registry entry's `description` against the graph's phase set:
+ * a description mentioning a phase name that does not exist in the graph
+ * surfaces a warning (relocated from the retired CLI validate to the
+ * load-time contract pass). Warning-level, never blocks loading.
+ *
+ * Phase-name candidates are backtick-quoted identifiers in the
+ * description (`\`phase-id\``) — the explicit reference form the retired
+ * validate check and the delta-spec scenarios use. Bare kebab-case words
+ * are NOT candidates: prose, skill names, and graph names are also
+ * kebab-case, so matching them would fabricate drift on healthy graphs
+ * (verified: 10/11 builtin graphs would otherwise report spurious
+ * problems at every start). A candidate not in the phase set is a drift
+ * warning (the description references a phase that does not exist in the
+ * topology).
+ *
+ * Runs per source graph against its OWN phase declarations (same
+ * scoping as validateGraphInventory).
+ */
+export function validateGraphRegistryDrift(
+  graph: Record<string, unknown>,
+  registryDescription: string | undefined,
+  filePath: string,
+): string[] {
+  if (!registryDescription) return [];
+  const warnings: string[] = [];
+  const phases = (graph.phases ?? []) as Array<Record<string, unknown>>;
+  const phaseIds = new Set(phases.map((p) => str(p.id, '')).filter((id) => id !== ''));
+  if (phaseIds.size === 0) return warnings;
+
+  // Extract candidate phase-name references: backtick-quoted identifiers
+  // only (the explicit reference form — see the drift-candidate note).
+  const candidates = new Set<string>();
+  for (const m of registryDescription.matchAll(/`([a-zA-Z0-9-]+)`/g)) candidates.add(m[1]);
+
+  for (const candidate of candidates) {
+    if (!phaseIds.has(candidate)) {
+      warnings.push(
+        `${filePath}: registry description references "${candidate}" which is not a phase in this graph — description drift`,
+      );
+    }
+  }
+  return warnings;
 }
 
 // ---------------------------------------------------------------------------

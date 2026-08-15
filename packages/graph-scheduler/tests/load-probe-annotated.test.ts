@@ -10,13 +10,13 @@
  */
 import { Effect } from 'effect';
 import { describe, expect, it } from 'vitest';
-import { toTaskflowGraph } from '../src/api/graph-loader.js';
+import { toWorkflowGraph } from '../src/api/graph-loader.js';
 import { validateGraphContracts } from '../src/context/contracts.js';
-import type { Taskflow } from '../src/graph-definition.js';
+import type { Workflow } from '../src/graph-definition.js';
 
 describe('load probe — annotated convention entry (reported defect)', () => {
   it('graph load succeeds with annotated convention entry in phase channels', async () => {
-    const graph: Taskflow = {
+    const graph: Workflow = {
       name: 'probe-graph',
 
       phases: [
@@ -36,7 +36,7 @@ describe('load probe — annotated convention entry (reported defect)', () => {
       ],
     };
     // Schema/phase validation passes — the graph adapts cleanly.
-    const adapted = await Effect.runPromise(toTaskflowGraph(graph));
+    const adapted = await Effect.runPromise(toWorkflowGraph(graph));
     expect(adapted.phases.map((p) => p.id)).toEqual(['p']);
 
     // Machine checks: phase channels pass through unparsed — annotation never

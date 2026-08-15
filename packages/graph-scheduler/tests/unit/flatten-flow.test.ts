@@ -7,10 +7,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import { flattenFlowPhases } from '../../src/flow-flatten.js';
-import type { Taskflow } from '../../src/schemas/index.js';
+import type { Workflow } from '../../src/schemas/index.js';
 import type { FlowPhaseError } from '../../src/types.js';
 /** Child graph: two-node chain — scope-confirm → skill-write */
-function childGraph(): Taskflow {
+function childGraph(): Workflow {
   return {
     name: 'skill-create',
     phases: [
@@ -28,7 +28,7 @@ function childGraph(): Taskflow {
   };
 }
 /** Loader that resolves 'skill-create' → childGraph */
-function staticLoader(name: string): Taskflow | null {
+function staticLoader(name: string): Workflow | null {
   if (name === 'skill-create') return childGraph();
   return null;
 }
@@ -37,7 +37,7 @@ function staticLoader(name: string): Taskflow | null {
 // ---------------------------------------------------------------------------
 describe('flattenFlowPhases — single-level use', () => {
   it('flattens flow phase with use: "skill-create"', () => {
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'test',
       phases: [
         { id: 'plan', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
@@ -64,7 +64,7 @@ describe('flattenFlowPhases — single-level use', () => {
 });
 describe('flattenFlowPhases — route propagation', () => {
   /** Child graph mirroring spec-implement: un-routed members + own-route tracks. */
-  function routedChild(): Taskflow {
+  function routedChild(): Workflow {
     return {
       name: 'routed-child',
       phases: [
@@ -75,10 +75,10 @@ describe('flattenFlowPhases — route propagation', () => {
       ],
     };
   }
-  const routedLoader = (name: string): Taskflow | null => (name === 'routed-child' ? routedChild() : null);
+  const routedLoader = (name: string): Workflow | null => (name === 'routed-child' ? routedChild() : null);
 
   it('propagates the flow route to children without their own route; own routes win', () => {
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'test',
       phases: [
         { id: 'ops', type: 'flow', use: 'routed-child', dependsOn: [], route: 'proceed' },
@@ -100,7 +100,7 @@ describe('flattenFlowPhases — route propagation', () => {
   });
 
   it('flow without route leaves children on the implicit default route', () => {
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'test',
       phases: [{ id: 'ops', type: 'flow', use: 'routed-child', dependsOn: [] }],
     };
@@ -115,15 +115,15 @@ describe('flattenFlowPhases — route propagation', () => {
 
 describe('flattenFlowPhases — child id prefixing', () => {
   it('prefixes ALL child ids inside flows — no reserved ids exist', () => {
-    const child = (): Taskflow => ({
+    const child = (): Workflow => ({
       name: 'child-graph',
       phases: [
         { id: 'entry-node', type: 'main', mode: 'exclusive', dependsOn: [], task: 'x', operations: [] },
         { id: 'child-node', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
       ],
     });
-    const loader = (name: string): Taskflow | null => (name === 'child-graph' ? child() : null);
-    const parent: Taskflow = {
+    const loader = (name: string): Workflow | null => (name === 'child-graph' ? child() : null);
+    const parent: Workflow = {
       name: 'test',
       phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'child-graph', dependsOn: [] }],
     };
@@ -136,15 +136,15 @@ describe('flattenFlowPhases — child id prefixing', () => {
   });
 
   it('rewrites dependsOn references inside children with the prefix', () => {
-    const child = (): Taskflow => ({
+    const child = (): Workflow => ({
       name: 'child-graph',
       phases: [
         { id: 'entry-node', type: 'main', mode: 'exclusive', dependsOn: [], task: 'x', operations: [] },
         { id: 'child-node', type: 'main', mode: 'exclusive', dependsOn: ['entry-node'], operations: [] },
       ],
     });
-    const loader = (name: string): Taskflow | null => (name === 'child-graph' ? child() : null);
-    const parent: Taskflow = {
+    const loader = (name: string): Workflow | null => (name === 'child-graph' ? child() : null);
+    const parent: Workflow = {
       name: 'test',
       phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'child-graph', dependsOn: [] }],
     };
@@ -156,7 +156,7 @@ describe('flattenFlowPhases — child id prefixing', () => {
 
 describe('flattenFlowPhases — def removed', () => {
   it('flow requires use — def inline is no longer a valid source', () => {
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'test',
       phases: [{ id: 'validate', type: 'flow', mode: 'exclusive', dependsOn: [] }],
     };
@@ -166,7 +166,7 @@ describe('flattenFlowPhases — def removed', () => {
 describe('flattenFlowPhases — recursive', () => {
   it('flattens nested flow phases (2 levels)', () => {
     // Child with its own flow phase inside
-    const grandchildLoader = (name: string): Taskflow | null => {
+    const grandchildLoader = (name: string): Workflow | null => {
       if (name === 'inner-flow') {
         return {
           name: 'inner-flow',
@@ -185,7 +185,7 @@ describe('flattenFlowPhases — recursive', () => {
       }
       return null;
     };
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'root',
       phases: [
         { id: 'start', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
@@ -207,7 +207,7 @@ describe('flattenFlowPhases — recursive', () => {
 // ---------------------------------------------------------------------------
 describe('flattenFlowPhases — max depth exceeded', () => {
   it('throws FlowPhaseError at depth >= maxDepth', () => {
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'test',
       phases: [{ id: 'deep', type: 'flow', mode: 'exclusive', use: 'skill-create', dependsOn: [] }],
     };
@@ -223,7 +223,7 @@ describe('flattenFlowPhases — max depth exceeded', () => {
 });
 describe('flattenFlowPhases — dynamic expression', () => {
   it('rejects use with {…} expression', () => {
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'test',
       phases: [{ id: 'dyn', type: 'flow', mode: 'exclusive', use: '{upstream.output}', dependsOn: [] }],
     };
@@ -239,7 +239,7 @@ describe('flattenFlowPhases — dynamic expression', () => {
 });
 describe('flattenFlowPhases — name conflict', () => {
   it('throws when child ID conflicts with existing prefixed node', () => {
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'test',
       phases: [
         { id: 'skill-ops', type: 'flow', mode: 'exclusive', use: 'skill-create', dependsOn: [] },
@@ -258,7 +258,7 @@ describe('flattenFlowPhases — name conflict', () => {
 });
 describe('flattenFlowPhases — graph not found', () => {
   it('throws when use references unknown graph', () => {
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'test',
       phases: [{ id: 'missing', type: 'flow', mode: 'exclusive', use: 'nonexistent', dependsOn: [] }],
     };
@@ -276,7 +276,7 @@ describe('flattenFlowPhases — graph not found', () => {
 // Skill change workflow — orchestrated flow phases
 // ---------------------------------------------------------------------------
 /** skill-delete child graph */
-function skillDeleteGraph(): Taskflow {
+function skillDeleteGraph(): Workflow {
   return {
     name: 'skill-delete',
 
@@ -323,7 +323,7 @@ function skillDeleteGraph(): Taskflow {
   };
 }
 /** doc-sync child graph (fixture — legacy doc-update shape) */
-function docSyncGraph(): Taskflow {
+function docSyncGraph(): Workflow {
   return {
     name: 'doc-sync',
 
@@ -350,14 +350,14 @@ function docSyncGraph(): Taskflow {
   };
 }
 /** Multi-graph loader for orchestrated workflow */
-function orchestrationLoader(name: string): Taskflow | null {
+function orchestrationLoader(name: string): Workflow | null {
   if (name === 'skill-delete') return skillDeleteGraph();
   if (name === 'doc-sync') return docSyncGraph();
   return null;
 }
 describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', () => {
   it('flattens multiple flow phases with correct prefix and terminal rewiring', () => {
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'skill-change-workflow',
 
       phases: [
@@ -419,7 +419,7 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
     expect(ids).toContain('change-accept');
   });
   it('flattens a flow with static metadata on the flow phase', () => {
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'orchestrated',
 
       phases: [
@@ -449,7 +449,7 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
     expect(done?.dependsOn).not.toContain('skill-ops');
   });
   it('child dependsOn rewired with prefix inside child graph', () => {
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'orchestrated',
 
       phases: [
@@ -465,7 +465,7 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
     expect(deleteConfirm?.dependsOn).toEqual(['ops/impact-analysis']);
   });
   it('preserves non-flow phase properties through flatten', () => {
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'orchestrated',
 
       phases: [
@@ -504,7 +504,7 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
     expect(review?.channels).toEqual(['code-review']);
   });
   it('child entry inherits flow phase dependsOn — FSM can not activate before upstream', () => {
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'topo-test',
       phases: [
         { id: 'plan', type: 'main', mode: 'exclusive', dependsOn: [], task: 'plan', operations: [] },
@@ -521,18 +521,18 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
     expect(impact?.dependsOn).toEqual(['ops/skill-select']);
   });
   it('passes child task through untouched — no with substitution', () => {
-    const childWithTemplate: Taskflow = {
+    const childWithTemplate: Workflow = {
       name: 'template-test',
       phases: [
         { id: 'step1', type: 'main', mode: 'exclusive', dependsOn: [], task: 'do the work', operations: [] },
         { id: 'step2', type: 'main', mode: 'exclusive', dependsOn: ['step1'], task: 'finish', operations: [] },
       ],
     };
-    const loader = (name: string): Taskflow | null => {
+    const loader = (name: string): Workflow | null => {
       if (name === 'template-test') return childWithTemplate;
       return null;
     };
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'with-test',
       phases: [
         { id: 'plan', type: 'main', mode: 'exclusive', dependsOn: [], task: 'plan', operations: [] },
@@ -546,7 +546,7 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
     expect(step2?.task).toBe('finish');
   });
   it('passes child task/channels through untouched — no with substitution', () => {
-    const child: Taskflow = {
+    const child: Workflow = {
       name: 'pass-test',
       phases: [
         {
@@ -561,11 +561,11 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
         },
       ],
     };
-    const loader = (name: string): Taskflow | null => {
+    const loader = (name: string): Workflow | null => {
       if (name === 'pass-test') return child;
       return null;
     };
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'pass-parent',
       phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'pass-test', dependsOn: [] }],
     };
@@ -584,7 +584,7 @@ describe('flattenFlowPhases — orchestrated workflow (skill-change-workflow)', 
 // ---------------------------------------------------------------------------
 describe('flattenFlowPhases — node: channel prefixing', () => {
   it('prefixes node: channel targets pointing at child-sibling nodes', () => {
-    const child: Taskflow = {
+    const child: Workflow = {
       name: 'sub-graph',
       phases: [
         { id: 'writer', type: 'main', mode: 'exclusive', dependsOn: [], channels: [], operations: [] },
@@ -599,8 +599,8 @@ describe('flattenFlowPhases — node: channel prefixing', () => {
         },
       ],
     };
-    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
-    const parent: Taskflow = {
+    const loader = (name: string): Workflow | null => (name === 'sub-graph' ? child : null);
+    const parent: Workflow = {
       name: 'parent',
       phases: [
         { id: 'seed', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
@@ -612,14 +612,14 @@ describe('flattenFlowPhases — node: channel prefixing', () => {
     expect(reader?.channels).toEqual(['node:ops/writer']);
   });
   it('keeps node: channel targets pointing at parent-level nodes unprefixed', () => {
-    const child: Taskflow = {
+    const child: Workflow = {
       name: 'sub-graph',
       phases: [
         { id: 'writer', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['node:seed'], operations: [] },
       ],
     };
-    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
-    const parent: Taskflow = {
+    const loader = (name: string): Workflow | null => (name === 'sub-graph' ? child : null);
+    const parent: Workflow = {
       name: 'parent',
       phases: [
         { id: 'seed', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
@@ -634,7 +634,7 @@ describe('flattenFlowPhases — node: channel prefixing', () => {
 });
 describe('flattenFlowPhases — flow channels rejected (no input interface)', () => {
   it('does NOT propagate flow channels to entry children — schema rejects them at load', () => {
-    const child: Taskflow = {
+    const child: Workflow = {
       name: 'sub-graph',
       phases: [
         { id: 'a', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['./CONTEXT.md'], operations: [] },
@@ -642,8 +642,8 @@ describe('flattenFlowPhases — flow channels rejected (no input interface)', ()
         { id: 'c', type: 'main', mode: 'exclusive', dependsOn: ['a'], operations: [] },
       ],
     };
-    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
-    const parent: Taskflow = {
+    const loader = (name: string): Workflow | null => (name === 'sub-graph' ? child : null);
+    const parent: Workflow = {
       name: 'parent',
       phases: [
         {
@@ -667,14 +667,14 @@ describe('flattenFlowPhases — flow channels rejected (no input interface)', ()
     expect(c?.channels).toBeUndefined();
   });
   it('flow without channels — child behavior unchanged', () => {
-    const child: Taskflow = {
+    const child: Workflow = {
       name: 'sub-graph',
       phases: [
         { id: 'entry', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['node:seed'], operations: [] },
       ],
     };
-    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
-    const parent: Taskflow = {
+    const loader = (name: string): Workflow | null => (name === 'sub-graph' ? child : null);
+    const parent: Workflow = {
       name: 'parent',
       phases: [
         { id: 'seed', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
@@ -687,7 +687,7 @@ describe('flattenFlowPhases — flow channels rejected (no input interface)', ()
     expect(entry?.channels).toEqual(['node:seed']);
   });
   it('child node: channel to non-child id stays unprefixed — cross-flow read edge (spec-extract pattern)', () => {
-    const child: Taskflow = {
+    const child: Workflow = {
       name: 'sub-graph',
       phases: [
         {
@@ -700,22 +700,22 @@ describe('flattenFlowPhases — flow channels rejected (no input interface)', ()
         },
       ],
     };
-    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
-    const parent: Taskflow = {
+    const loader = (name: string): Workflow | null => (name === 'sub-graph' ? child : null);
+    const parent: Workflow = {
       name: 'parent',
       phases: [
         { id: 'adopt', type: 'flow', mode: 'exclusive', use: 'other-graph', dependsOn: [] },
         { id: 'ops', type: 'flow', mode: 'exclusive', use: 'sub-graph', dependsOn: [] },
       ],
     };
-    const loader2 = (name: string): Taskflow | null =>
+    const loader2 = (name: string): Workflow | null =>
       name === 'sub-graph'
         ? child
         : name === 'other-graph'
           ? ({
               name: 'other-graph',
               phases: [{ id: 'spec-propose', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] }],
-            } as Taskflow)
+            } as Workflow)
           : null;
     const result = flattenFlowPhases(parent, loader2, 1, 5);
     const entry = result.phases.find((p) => p.id === 'ops/entry');
@@ -724,15 +724,15 @@ describe('flattenFlowPhases — flow channels rejected (no input interface)', ()
     expect(entry?.channels).toEqual(['node:adopt/spec-propose']);
   });
   it('child node: channel to child-internal id prefixed', () => {
-    const child: Taskflow = {
+    const child: Workflow = {
       name: 'sub-graph',
       phases: [
         { id: 'entry', type: 'main', mode: 'exclusive', dependsOn: [], channels: ['node:sibling'], operations: [] },
         { id: 'sibling', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
       ],
     };
-    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
-    const parent: Taskflow = {
+    const loader = (name: string): Workflow | null => (name === 'sub-graph' ? child : null);
+    const parent: Workflow = {
       name: 'parent',
       phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'sub-graph', dependsOn: [] }],
     };
@@ -745,7 +745,7 @@ describe('flattenFlowPhases — flow channels rejected (no input interface)', ()
 
 describe('flattenFlowPhases — child graph-level context inheritance', () => {
   it('merges child top-level context into ALL child phases (ambient layer)', () => {
-    const child: Taskflow = {
+    const child: Workflow = {
       name: 'sub-graph',
       context: ['./CONTEXT.md', 'skill:atom-graph-spec'],
       phases: [
@@ -754,8 +754,8 @@ describe('flattenFlowPhases — child graph-level context inheritance', () => {
         { id: 'c', type: 'main', mode: 'exclusive', dependsOn: ['a'], operations: [] },
       ],
     };
-    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
-    const parent: Taskflow = {
+    const loader = (name: string): Workflow | null => (name === 'sub-graph' ? child : null);
+    const parent: Workflow = {
       name: 'parent',
       phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'sub-graph', dependsOn: [] }],
     };
@@ -771,7 +771,7 @@ describe('flattenFlowPhases — child graph-level context inheritance', () => {
   });
 
   it('merges child graph context < phase channels with dedup', () => {
-    const child: Taskflow = {
+    const child: Workflow = {
       name: 'sub-graph',
       context: ['./CONTEXT.md'],
       phases: [
@@ -785,8 +785,8 @@ describe('flattenFlowPhases — child graph-level context inheritance', () => {
         },
       ],
     };
-    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
-    const parent: Taskflow = {
+    const loader = (name: string): Workflow | null => (name === 'sub-graph' ? child : null);
+    const parent: Workflow = {
       name: 'parent',
       phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'sub-graph', dependsOn: [] }],
     };
@@ -797,13 +797,13 @@ describe('flattenFlowPhases — child graph-level context inheritance', () => {
   });
 
   it('rewrites child graph-level node: targets like phase entries (child-sibling prefixed, parent-level kept)', () => {
-    const child: Taskflow = {
+    const child: Workflow = {
       name: 'sub-graph',
       context: ['node:sibling'],
       phases: [{ id: 'sibling', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] }],
     };
-    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
-    const parent: Taskflow = {
+    const loader = (name: string): Workflow | null => (name === 'sub-graph' ? child : null);
+    const parent: Workflow = {
       name: 'parent',
       phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'sub-graph', dependsOn: [] }],
     };
@@ -813,13 +813,13 @@ describe('flattenFlowPhases — child graph-level context inheritance', () => {
   });
 
   it('fails composed load on child graph-level bare-name entry — entry rules not bypassed', () => {
-    const child: Taskflow = {
+    const child: Workflow = {
       name: 'sub-graph',
       context: ['atom-graph-spec'],
       phases: [{ id: 'sibling', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] }],
     };
-    const loader = (name: string): Taskflow | null => (name === 'sub-graph' ? child : null);
-    const parent: Taskflow = {
+    const loader = (name: string): Workflow | null => (name === 'sub-graph' ? child : null);
+    const parent: Workflow = {
       name: 'parent',
       phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'sub-graph', dependsOn: [] }],
     };
@@ -828,7 +828,7 @@ describe('flattenFlowPhases — child graph-level context inheritance', () => {
 });
 describe('flattenFlowPhases — parent routing/eval target remap', () => {
   it('remaps parent routing target naming flow id to flattened entry node', () => {
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'test',
       phases: [
         { id: 'review', type: 'flow', mode: 'exclusive', use: 'skill-create', dependsOn: [] },
@@ -848,7 +848,7 @@ describe('flattenFlowPhases — parent routing/eval target remap', () => {
     expect(accept?.routing?.actions[0].target).toBe('review/scope-confirm');
   });
   it('remaps parent gate jump target naming flow id to flattened entry node', () => {
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'test',
       phases: [
         { id: 'writer', type: 'flow', mode: 'exclusive', use: 'skill-create', dependsOn: [] },
@@ -866,7 +866,7 @@ describe('flattenFlowPhases — parent routing/eval target remap', () => {
     expect(accept?.jumps?.[0].to).toBe('writer/scope-confirm');
   });
   it('prefixes child gate jump targets/channels — child-internal refs get the flow prefix, parent refs stay', () => {
-    const child = (): Taskflow => ({
+    const child = (): Workflow => ({
       name: 'child',
       phases: [
         { id: 'write', type: 'main', mode: 'exclusive', task: 'x', dependsOn: [], operations: [] },
@@ -883,14 +883,14 @@ describe('flattenFlowPhases — parent routing/eval target remap', () => {
         },
       ],
     });
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'test',
       phases: [
         { id: 'parent-node', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
         { id: 'ops', type: 'flow', mode: 'exclusive', use: 'child', dependsOn: [] },
       ],
     };
-    const loader = (name: string): Taskflow | null => (name === 'child' ? child() : null);
+    const loader = (name: string): Workflow | null => (name === 'child' ? child() : null);
     const result = flattenFlowPhases(parent, loader, 1, 5);
     const gate = result.phases.find((p) => p.id === 'ops/gate');
     expect(gate).toBeDefined();
@@ -906,7 +906,7 @@ describe('flattenFlowPhases — parent routing/eval target remap', () => {
     }
   });
   it('keeps child routing targets prefixed — regression', () => {
-    const child = (): Taskflow => ({
+    const child = (): Workflow => ({
       name: 'child',
       phases: [
         { id: 'write', type: 'main', mode: 'exclusive', task: 'x', dependsOn: [], operations: [] },
@@ -921,11 +921,11 @@ describe('flattenFlowPhases — parent routing/eval target remap', () => {
         },
       ],
     });
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'test',
       phases: [{ id: 'ops', type: 'flow', mode: 'exclusive', use: 'child', dependsOn: [] }],
     };
-    const loader = (name: string): Taskflow | null => (name === 'child' ? child() : null);
+    const loader = (name: string): Workflow | null => (name === 'child' ? child() : null);
     const result = flattenFlowPhases(parent, loader, 1, 5);
     const gate = result.phases.find((p) => p.id === 'ops/gate');
     expect(gate?.routing?.actions[0].target).toBe('ops/write');
@@ -940,25 +940,23 @@ describe('flattenFlowPhases — composition inheritance of spec-implement', () =
   const { join } = require('node:path');
   const { parse: parseYaml } = require('yaml');
   const pkgRoot = join(__dirname, '..', '..');
-  const implementGraph = parseYaml(
-    readFileSync(join(pkgRoot, 'graphs', 'spec-implement.taskflow.yaml'), 'utf-8'),
-  ) as Taskflow;
+  const implementGraph = parseYaml(readFileSync(join(pkgRoot, 'graphs', 'spec-implement.yaml'), 'utf-8')) as Workflow;
   const graphsDir = join(pkgRoot, 'graphs');
-  const loader = (name: string): Taskflow | null => {
+  const loader = (name: string): Workflow | null => {
     if (name === 'spec-implement') return implementGraph;
     try {
-      return parseYaml(readFileSync(join(graphsDir, `${name}.taskflow.yaml`), 'utf-8')) as Taskflow;
+      return parseYaml(readFileSync(join(graphsDir, `${name}.yaml`), 'utf-8')) as Workflow;
     } catch {
       return null;
     }
   };
-  const parent: Taskflow = {
+  const parent: Workflow = {
     name: 'idea-to-ship',
     phases: [{ id: 'implement', type: 'flow', mode: 'exclusive', use: 'spec-implement', dependsOn: [] }],
   };
   const result = flattenFlowPhases(parent, loader, 1, 5);
-  it('pipeline-done channels passthrough with prefixed targets', () => {
-    const done = result.phases.find((p) => p.id === 'implement/pipeline-done');
+  it('workflow-done channels passthrough with prefixed targets', () => {
+    const done = result.phases.find((p) => p.id === 'implement/workflow-done');
     expect(done?.channels).toEqual([
       'node:implement/spec-extract',
       'node:implement/minimal-track/archive',
@@ -972,14 +970,14 @@ describe('flattenFlowPhases — composition inheritance of spec-implement', () =
   it('full child phase set inherited with flow prefix', () => {
     const ids = result.phases.map((p) => p.id);
     expect(ids).toContain('implement/spec-extract');
-    expect(ids).toContain('implement/pipeline-accept');
+    expect(ids).toContain('implement/track-accept');
     expect(ids).toContain('implement/minimal-track/apply-change');
     expect(ids).toContain('implement/detailed-track/to-spec');
-    expect(ids).toContain('implement/pipeline-done');
+    expect(ids).toContain('implement/workflow-done');
   });
   // NOTE: the historical implement graph (work-input/openspec-finalize) is
   // gone — spec-implement is the current implementation graph (spec-extract
-  // → track gate → minimal/detailed tracks → pipeline-done); the unselected
+  // → track gate → minimal/detailed tracks → workflow-done); the unselected
   // route never completes and never blocks (route-first).
 });
 // ---------------------------------------------------------------------------
@@ -990,9 +988,9 @@ describe('flattenFlowPhases — composition inheritance of spec-implement', () =
 // propagation removed (branch-routing redesign).
 // ---------------------------------------------------------------------------
 describe('flattenFlowPhases — entry-rooted flow branch prefixing and loop target rewrite', () => {
-  function loopChild(): Taskflow {
+  function loopChild(): Workflow {
     return {
-      name: 'pipeline',
+      name: 'flow',
       phases: [
         { id: 'grill', type: 'main', mode: 'exclusive', task: 'grill', dependsOn: [], operations: [] },
         { id: 'create', type: 'main', mode: 'exclusive', task: 'create', dependsOn: ['grill'], operations: [] },
@@ -1006,17 +1004,17 @@ describe('flattenFlowPhases — entry-rooted flow branch prefixing and loop targ
       ],
     };
   }
-  function loopLoader(name: string): Taskflow | null {
-    if (name === 'pipeline') return loopChild();
+  function loopLoader(name: string): Workflow | null {
+    if (name === 'flow') return loopChild();
     return null;
   }
   it('entry-rooted flow keeps empty upstream on entry child; child gate jump refs get the flow prefix', () => {
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'loop',
       phases: [
         { id: 'review', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
         { id: 'review-accept', type: 'approval', mode: 'exclusive', dependsOn: ['review'] },
-        { id: 'implement', type: 'flow', mode: 'exclusive', use: 'pipeline', dependsOn: [] },
+        { id: 'implement', type: 'flow', mode: 'exclusive', use: 'flow', dependsOn: [] },
         { id: 'verify', type: 'main', mode: 'exclusive', dependsOn: ['implement'], operations: [] },
       ],
     };
@@ -1043,12 +1041,12 @@ describe('flattenFlowPhases — entry-rooted flow branch prefixing and loop targ
     expect(verify?.dependsOn).toEqual(['implement/accept']);
   });
   it('parent routing target naming the flow rewrites to the entry node — loop retry re-runs only the segment', () => {
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'loop',
       phases: [
         { id: 'review', type: 'main', mode: 'exclusive', dependsOn: [], operations: [] },
         { id: 'review-accept', type: 'approval', mode: 'exclusive', dependsOn: ['review'] },
-        { id: 'implement', type: 'flow', mode: 'exclusive', use: 'pipeline', dependsOn: [] },
+        { id: 'implement', type: 'flow', mode: 'exclusive', use: 'flow', dependsOn: [] },
         { id: 'verify', type: 'main', mode: 'exclusive', dependsOn: ['implement'], operations: [] },
         {
           id: 'loop-accept',
@@ -1057,7 +1055,7 @@ describe('flattenFlowPhases — entry-rooted flow branch prefixing and loop targ
           dependsOn: ['verify'],
           routing: {
             actions: [
-              { action: 'retry', target: 'implement', label: 'Loop pipeline again', description: 're-run' },
+              { action: 'retry', target: 'implement', label: 'Loop flow again', description: 're-run' },
               { action: 'jump', target: 'review', label: 'Re-scope review', description: 'fresh scope' },
             ],
           },
@@ -1068,7 +1066,7 @@ describe('flattenFlowPhases — entry-rooted flow branch prefixing and loop targ
     const gate = result.phases.find((p) => p.id === 'loop-accept');
     const actions = gate?.routing?.actions ?? [];
     const retry = actions.find((a) => a.action === 'retry');
-    // Flow-id target rewritten to the flattened entry node — findUpstream(entry) = []
+    // Flow-id target rewritten to the flattened entry node — flow entry has no upstreams
     expect(retry?.target).toBe('implement/grill');
     const jump = actions.find((a) => a.action === 'jump');
     // Non-flow target untouched (parent-level node stays unprefixed)
@@ -1076,14 +1074,14 @@ describe('flattenFlowPhases — entry-rooted flow branch prefixing and loop targ
   });
   it('flow-level when is rejected at schema level — guards never flatten', () => {
     // when removed (branch-routing redesign): a flow phase declaring one fails schema parsing
-    const parent: Taskflow = {
+    const parent: Workflow = {
       name: 'loop',
       phases: [
         {
           id: 'implement',
           type: 'flow',
           mode: 'exclusive',
-          use: 'pipeline',
+          use: 'flow',
           dependsOn: [],
           when: 'flow-level guard',
         },
@@ -1097,5 +1095,69 @@ describe('flattenFlowPhases — entry-rooted flow branch prefixing and loop targ
     // no propagation, no copy — child guards stay absent
     expect(grill?.when).toBeUndefined();
     expect(create?.when).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Graph-level constraint composition (R9-F2 — subgraph constraints propagate)
+// ---------------------------------------------------------------------------
+describe('flattenFlowPhases — graph-level constraint union', () => {
+  function constrainedChild(): Workflow {
+    return {
+      name: 'constrained-child',
+      constraints: ['child rule one', 'child rule two'],
+      phases: [{ id: 'child-phase', type: 'main', dependsOn: [], task: 'x', operations: [] }],
+    };
+  }
+  const constrainedLoader = (name: string): Workflow | null =>
+    name === 'constrained-child' ? constrainedChild() : null;
+
+  it('unions root and child top-level constraints (root first, dedup preserved-order)', () => {
+    const parent: Workflow = {
+      name: 'test',
+      constraints: ['root rule'],
+      phases: [
+        { id: 'first', type: 'flow', use: 'constrained-child', dependsOn: [], task: 'x' },
+        { id: 'second', type: 'flow', use: 'constrained-child', dependsOn: [], task: 'x' },
+      ],
+    };
+    const result = flattenFlowPhases(parent, constrainedLoader, 1, 5);
+    // true union — the same subgraph composed twice contributes its rules once
+    expect(result.constraints).toEqual(['root rule', 'child rule one', 'child rule two']);
+  });
+
+  it('child without constraints contributes nothing', () => {
+    const parent: Workflow = {
+      name: 'test',
+      constraints: ['root rule'],
+      phases: [{ id: 'flow', type: 'flow', use: 'plain-child', dependsOn: [] }],
+    };
+    const loader = (name: string): Workflow | null =>
+      name === 'plain-child'
+        ? { name: 'plain-child', phases: [{ id: 'p', type: 'main', dependsOn: [], task: 'x', operations: [] }] }
+        : null;
+    const result = flattenFlowPhases(parent, loader, 1, 5);
+    expect(result.constraints).toEqual(['root rule']);
+  });
+
+  it('nested composition propagates transitively', () => {
+    const leaf: Workflow = {
+      name: 'leaf',
+      constraints: ['leaf rule'],
+      phases: [{ id: 'leaf-phase', type: 'main', dependsOn: [], task: 'x', operations: [] }],
+    };
+    const mid: Workflow = {
+      name: 'mid',
+      constraints: ['mid rule'],
+      phases: [{ id: 'mid-flow', type: 'flow', use: 'leaf', dependsOn: [] }],
+    };
+    const loader = (name: string): Workflow | null => (name === 'leaf' ? leaf : name === 'mid' ? mid : null);
+    const parent: Workflow = {
+      name: 'root',
+      constraints: ['root rule'],
+      phases: [{ id: 'root-flow', type: 'flow', use: 'mid', dependsOn: [] }],
+    };
+    const result = flattenFlowPhases(parent, loader, 1, 5);
+    expect(result.constraints).toEqual(['root rule', 'mid rule', 'leaf rule']);
   });
 });

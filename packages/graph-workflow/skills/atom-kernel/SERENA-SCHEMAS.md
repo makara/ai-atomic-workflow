@@ -79,7 +79,7 @@ Example: `{"substring_pattern": "register_edit\\(\\)", "paths_include_glob": "sr
 
 ### find_file - file mask lookup
 
-`find_file({file_mask, relative_path})` - mask with `*`/`?`; `"."` = project root. Example: `{"file_mask": "*.taskflow.yaml", "relative_path": "packages/graph-scheduler/graphs"}`
+`find_file({file_mask, relative_path})` - mask with `*`/`?`; `"."` = project root. Example: `{"file_mask": "*.yaml", "relative_path": "packages/graph-scheduler/graphs"}`
 
 ### list_dir - directory listing
 

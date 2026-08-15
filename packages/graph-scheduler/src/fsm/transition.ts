@@ -27,7 +27,7 @@ import type { FsmEffect, FsmNodeState } from './effects.js';
 import type { FsmEvent } from './events.js';
 
 /** Graph definition — name + phases, enough for topology and state init. */
-export interface TaskflowGraph {
+export interface WorkflowGraph {
   readonly name: string;
   /**
    * Purpose-focused free text describing what the graph does/produces —
@@ -35,12 +35,19 @@ export interface TaskflowGraph {
    */
   readonly description?: string;
   /**
-   * Graph-level ambient context — top-level `context` of the taskflow
+   * Graph-level ambient context — top-level `context` of the workflow
    * definition (the global channel). Merged once with the config default
    * layer at dispatch (config first, dedup) and prepended to every phase's
    * effective channels. Absent → empty graph scope.
    */
   readonly context?: readonly string[];
+  /**
+   * Graph-level constraints — top-level `constraints` of the workflow
+   * definition (graph content behavior rules). Read at dispatch and carried
+   * on every NodeDetail as `[graph]`-prefixed entries (machine dispatch
+   * fact — unbypassable). Absent → empty set.
+   */
+  readonly constraints?: readonly string[];
   readonly phases: readonly Phase[];
 }
 
@@ -103,7 +110,7 @@ export interface TransitionResult {
 /**
  * Build initial node states — all pending, first ready batch set to active.
  */
-function initPhases(graph: TaskflowGraph, startedAt: string): Record<string, FsmNodeState> {
+function initPhases(graph: WorkflowGraph, startedAt: string): Record<string, FsmNodeState> {
   const map: Record<string, FsmNodeState> = {};
   for (const p of graph.phases) {
     map[p.id] = { status: 'pending', retryCount: 0 };
@@ -138,7 +145,7 @@ function terminalIds(phases: Record<string, FsmNodeState>): Set<string> {
  */
 function activateReady(
   phases: Record<string, FsmNodeState>,
-  graph: TaskflowGraph,
+  graph: WorkflowGraph,
   now: string,
   effects: FsmEffect[],
   runId: string,
@@ -169,7 +176,7 @@ function activateReady(
  * node (route-active with satisfied deps). Unselected-route members stay
  * pending forever and never block completion.
  */
-function isDrained(phases: Record<string, FsmNodeState>, graph: TaskflowGraph, routes: RouteMap): boolean {
+function isDrained(phases: Record<string, FsmNodeState>, graph: WorkflowGraph, routes: RouteMap): boolean {
   for (const ns of Object.values(phases)) {
     if (ns.status === 'active') return false;
   }
@@ -187,7 +194,7 @@ function isDrained(phases: Record<string, FsmNodeState>, graph: TaskflowGraph, r
  */
 function applyJumpReset(
   phases: Record<string, FsmNodeState>,
-  graph: TaskflowGraph,
+  graph: WorkflowGraph,
   targetPhaseId: string,
   now: string,
   effects: FsmEffect[],
@@ -241,7 +248,7 @@ function applyJumpReset(
  * @param event  dispatch event from api/ layer
  * @param graph  graph definition (phases + metadata)
  */
-export function transition(state: FsmState, event: FsmEvent, graph: TaskflowGraph): TransitionResult {
+export function transition(state: FsmState, event: FsmEvent, graph: WorkflowGraph): TransitionResult {
   switch (event.type) {
     case 'START': {
       if (state.status !== 'idle') {

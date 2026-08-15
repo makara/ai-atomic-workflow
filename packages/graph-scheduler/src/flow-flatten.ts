@@ -10,7 +10,7 @@
  * @module
  */
 
-import type { Taskflow } from './schemas/index.js';
+import type { Workflow } from './schemas/index.js';
 import { FlowPhaseError } from './types.js';
 
 /** Dynamic expression pattern — detects {…} template expressions in string values. */
@@ -33,7 +33,7 @@ export const resolveArgs = (text: string | undefined, args: Record<string, unkno
 };
 
 /** Shallow-copy a phase so rewiring never mutates caller-owned objects. */
-function clonePhase(phase: Taskflow['phases'][number]): Taskflow['phases'][number] {
+function clonePhase(phase: Workflow['phases'][number]): Workflow['phases'][number] {
   return {
     ...phase,
     dependsOn: phase.dependsOn ? [...phase.dependsOn] : undefined,
@@ -55,15 +55,22 @@ function clonePhase(phase: Taskflow['phases'][number]): Taskflow['phases'][numbe
  * name conflicts, missing child graph.
  */
 export function flattenFlowPhases(
-  graph: Taskflow,
-  loadChild: (graphName: string) => Taskflow | null,
+  graph: Workflow,
+  loadChild: (graphName: string) => Workflow | null,
   depth: number,
   maxDepth: number = MAX_FLOW_DEPTH,
-): Taskflow {
+): Workflow {
   // Copy the input phases up front — downstream rewiring below must never
   // mutate caller-owned phase objects (pure function contract).
   const phases = graph.phases.map(clonePhase);
-  const newPhases: Taskflow['phases'] = [];
+  const newPhases: Workflow['phases'] = [];
+
+  // Subgraph constraint accumulation — composed graphs carry the union of
+  // the root's top-level constraints and every composed subgraph's
+  // constraints (composition order; symmetric with the inventory use-chain
+  // union). Recursive flattening makes this transitive by construction:
+  // each level appends its children's already-composed sets.
+  const composedConstraints: string[] = [];
 
   for (const phase of phases) {
     if (phase.type !== 'flow') {
@@ -99,13 +106,18 @@ export function flattenFlowPhases(
       throw new FlowPhaseError(
         phase.id,
         'GRAPH_NOT_FOUND',
-        `Flow phase '${phase.id}': child graph '${useName}' not found in registry or taskflow dirs`,
+        `Flow phase '${phase.id}': child graph '${useName}' not found in registry or workflow dirs`,
       );
     }
-    const childGraph: Taskflow = child;
+    const childGraph: Workflow = child;
 
     // Recursively flatten child graph
     const flatChild = flattenFlowPhases(childGraph, loadChild, depth + 1, maxDepth);
+
+    // Union the child's top-level constraints into the composed set —
+    // flatChild.constraints already includes the child's own subgraph union
+    // (transitive propagation).
+    composedConstraints.push(...(flatChild.constraints ?? []));
 
     // Collect ALL existing IDs (processed + remaining in parent) for conflict detection
     const allExistingIds = new Set<string>();
@@ -118,7 +130,7 @@ export function flattenFlowPhases(
     const childIds = new Set(flatChild.phases.map((p) => p.id));
     const entryPhaseId = flatChild.phases.find((p) => !p.dependsOn || p.dependsOn.length === 0)?.id;
     const entryNodeId = `${prefix}${entryPhaseId ?? flatChild.phases[0]?.id ?? ''}`;
-    const prefixedPhases: Taskflow['phases'] = flatChild.phases.map((cp) => {
+    const prefixedPhases: Workflow['phases'] = flatChild.phases.map((cp) => {
       const prefixedId = `${prefix}${cp.id}`;
 
       // Conflict detection — check against all IDs including unprocessed parent phases
@@ -133,7 +145,7 @@ export function flattenFlowPhases(
 
       // Rewrite dependsOn with prefix + inherit flow phase dependsOn for entry nodes
       // Entry nodes (empty dependsOn in child) get flow phase's dependsOn prepended.
-      // This preserves DAG topology + enables Scoped Context for child phases.
+      // This preserves acyclic dependency edges + enables Scoped Context for child phases.
       const isEntryInChild = !cp.dependsOn || cp.dependsOn.length === 0;
       const flowDependsOn = isEntryInChild ? (phase.dependsOn ?? []) : [];
       const childInternal = cp.dependsOn ? cp.dependsOn.map((dep) => `${prefix}${dep}`) : [];
@@ -237,7 +249,7 @@ export function flattenFlowPhases(
     //   (route-first: activating a route, not re-running a node)
     // - retry/jump targets remap to the flattened entry node — "re-run the
     //   flow from start" (JUMP resets target + downstream)
-    const rewireTargets = (target: Taskflow['phases'][number]): void => {
+    const rewireTargets = (target: Workflow['phases'][number]): void => {
       if (target.routing?.actions) {
         target.routing.actions = target.routing.actions.map((a) =>
           a.target === phase.id && a.action !== 'continue' ? { ...a, target: entryNodeId } : a,
@@ -249,7 +261,7 @@ export function flattenFlowPhases(
     };
 
     // Helper: rewire downstream dependsOn — replace flow phase ID with child terminals
-    const rewireDownstream = (target: Taskflow['phases'][number]): void => {
+    const rewireDownstream = (target: Workflow['phases'][number]): void => {
       if (target.dependsOn?.includes(phase.id)) {
         target.dependsOn = [...target.dependsOn.filter((d) => d !== phase.id), ...childTerminals];
       }
@@ -268,5 +280,12 @@ export function flattenFlowPhases(
     for (const rp of phases) rewireTargets(rp);
   }
 
-  return { ...graph, phases: newPhases };
+  // Union semantics: dedupe identical entries preserving order — a subgraph
+  // composed more than once contributes its rules exactly once (true set
+  // union, matching the spec wording and keeping the merged block clean).
+  return {
+    ...graph,
+    constraints: [...new Set([...(graph.constraints ?? []), ...composedConstraints])],
+    phases: newPhases,
+  };
 }

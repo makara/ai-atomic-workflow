@@ -1,4 +1,40 @@
 name: openspec-apply
+$schema: ../schemas/workflow.schema.json
+version: 1.0.0
+# Node overview table (atom inventory). Bounded compound goals:
+# connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS (AND/OR/IF/
+# THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR operands,
+# conditional paths ≤ 3. Entry shape { id, type, goal, constraints? } — goal
+# states the atom's intent; mechanism lives in the goal (flow entries state
+# "expands <use> subgraph"). constraints: one-sentence prose rules — general
+# boundaries + explicit non-goals, ≤ 5 per atom, never machine-validated.
+# User-maintained.
+inventory:
+  - id: apply-change
+    type: main
+    goal: Executes openspec-apply-change to implement the change tasks
+    constraints:
+      - implements tasks only — never produces specs (adopt stage owns them)
+  - id: change-review
+    type: main
+    goal: Runs code-review over the applied diff THEN reports findings
+    constraints:
+      - reports findings — never fixes inline
+  - id: change-gate
+    type: gate
+    goal: Jump back to apply-change IF review fails AND retry bound is not reached
+    constraints:
+      - machine judgment only — never decides beyond declared jump conditions
+  - id: change-accept
+    type: approval
+    goal: Accept the implementation IF review passes AND the gate is clean
+    constraints:
+      - routes only — never edits the change
+  - id: archive
+    type: main
+    goal: Executes openspec-archive-change to finalize and archive the change
+    constraints:
+      - finalize + archive only — never re-implements
 phases:
   # Apply — implement the confirmed openspec change (entry contract).
   - id: apply-change

@@ -1,9 +1,9 @@
 /**
  * adopt-with-docs graph validation tests.
  *
- * Validate adopt-with-docs.taskflow.yaml against PhaseSchema, TaskflowSchema,
+ * Validate adopt-with-docs.yaml against PhaseSchema, WorkflowSchema,
  * and topology constraints. Graph file exists — tests serve as regression
- * validation for schema compliance and DAG correctness.
+ * validation for schema compliance and dependency-edge correctness.
  *
  * Adoption topology: adopt-scope → adopting → adopt-accept → spec-propose
  * (4 phases, no gate — rework flows through approval dynamic options).
@@ -20,12 +20,12 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 
 import { PhaseSchema } from '../src/schemas/phase.js';
-import { TaskflowSchema } from '../src/schemas/taskflow.js';
-import { topoLayers } from '../src/topology.js';
+import { WorkflowSchema } from '../src/schemas/workflow.js';
+
 import type { Phase } from '../src/types.js';
 
 const PKG_ROOT = join(__dirname, '..');
-const GRAPH_PATH = join(PKG_ROOT, 'graphs', 'adopt-with-docs.taskflow.yaml');
+const GRAPH_PATH = join(PKG_ROOT, 'graphs', 'adopt-with-docs.yaml');
 
 let graph: { name: string; phases: Phase[] };
 
@@ -38,14 +38,14 @@ beforeAll(() => {
 // Schema validation
 // ---------------------------------------------------------------------------
 
-describe('adopt-with-docs.taskflow.yaml — schema validation', () => {
+describe('adopt-with-docs.yaml — schema validation', () => {
   it('file exists and is valid YAML', () => {
     const raw = readFileSync(GRAPH_PATH, 'utf-8');
     expect(() => parseYaml(raw)).not.toThrow();
   });
 
-  it('passes TaskflowSchema validation', () => {
-    expect(() => TaskflowSchema.parse(graph)).not.toThrow();
+  it('passes WorkflowSchema validation', () => {
+    expect(() => WorkflowSchema.parse(graph)).not.toThrow();
   });
 
   it('has expected top-level fields', () => {
@@ -69,7 +69,7 @@ describe('adopt-with-docs.taskflow.yaml — schema validation', () => {
 // Topology
 // ---------------------------------------------------------------------------
 
-describe('adopt-with-docs.taskflow.yaml — topology', () => {
+describe('adopt-with-docs.yaml — topology', () => {
   it('has exactly the 4 adoption phases in order', () => {
     expect(graph.phases.map((p) => p.id)).toEqual(['adopt-scope', 'adopting', 'adopt-accept', 'spec-propose']);
   });
@@ -140,14 +140,18 @@ describe('adopt-with-docs.taskflow.yaml — topology', () => {
     expect(task).toMatch(/adr_created \(echo\)/);
   });
 
-  it('topology layers are serial — one phase per layer', () => {
-    const layers = topoLayers(graph.phases);
-    expect(layers).toHaveLength(4);
-    expect(layers.map((layer) => layer.map((p) => p.id))).toEqual([
-      ['adopt-scope'],
-      ['adopting'],
-      ['adopt-accept'],
-      ['spec-propose'],
-    ]);
+  it('topology is serial — linear dependsOn chain', () => {
+    // Structural replacement for the deleted topoLayers export: the adoption
+    // stage is a serial chain — every phase except the entry depends exactly
+    // on the previous one.
+    const phases = graph.phases;
+    const chain = ['adopt-scope', 'adopting', 'adopt-accept', 'spec-propose'];
+    expect(phases.map((p) => p.id)).toEqual(chain);
+    const byId = new Map(phases.map((p) => [p.id, p]));
+    for (const [i, id] of chain.entries()) {
+      const deps = byId.get(id)?.dependsOn ?? [];
+      if (i === 0) expect(deps).toHaveLength(0);
+      else expect(deps).toEqual([chain[i - 1]]);
+    }
   });
 });

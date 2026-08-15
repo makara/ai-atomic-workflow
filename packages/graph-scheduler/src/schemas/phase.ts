@@ -3,9 +3,9 @@ import { z } from 'zod/v4';
 import { HLT_OPERATION_CLASSES } from '../hlt-classes.js';
 
 /**
- * Zod schema for a single phase/node definition within a taskflow graph.
+ * Zod schema for a single phase/node definition within a workflow graph.
  *
- * Core fields match types.ts Phase + graph-definition.ts TaskflowPhase.
+ * Core fields match types.ts Phase + graph-definition.ts WorkflowPhase.
  * join added for dependency resolution.
  *
  * Route-first redesign: judgment is decision confirmation (approval),
@@ -258,7 +258,7 @@ export const PhaseSchema = z
       ctx.addIssue({
         code: 'custom',
         path: ['constraints'],
-        message: `'constraints' is removed (activation redesign) — project constraints load at activation (pilot, compiled-artifact protocol); delete this field`,
+        message: `'constraints' is removed at phase level (activation redesign) — graph-level rules go to the top-level 'constraints' field (graph content, injected per dispatch); project discipline loads at activation from .graph-scheduler/constraints.md (pilot, compiled-artifact protocol); delete this field`,
       });
     }
     if (data.runMode !== undefined) {

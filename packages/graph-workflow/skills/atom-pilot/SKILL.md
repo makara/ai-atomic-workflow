@@ -1,6 +1,6 @@
 ---
 name: atom-pilot
-description: Graph lifecycle manager - execute->advance loop. Dispatch via atom-phase-handler (skill resolution convention) - single entry point, routes by node.type internally. Use when running taskflow graphs.
+description: Graph lifecycle manager - execute->advance loop. Dispatch via atom-phase-handler (skill resolution convention) - single entry point, routes by node.type internally. Use when running workflow graphs.
 argument-hint: '<graph-name> [--verbose] [--debug]'
 disable-model-invocation: true
 user-invocable: true
@@ -64,7 +64,7 @@ Verbosity: `--verbose` / `--debug` set tiers - see DISPLAY.md §Verbose / §Debu
 
 ## Graph-Scheduler Tool Detection
 
-Detect graph-scheduler MCP tools at runtime - 9-tool substring matching rules live in atom-kernel §Graph-Scheduler Tool Detection (platform primitives, loaded with the kernel). Tool schemas, return shapes, command->tool map: see §MCP Reference.
+Detect graph-scheduler MCP tools at runtime - 10-tool substring matching rules live in atom-kernel §Graph-Scheduler Tool Detection (platform primitives, loaded with the kernel). Tool schemas, return shapes, command->tool map: see §MCP Reference.
 
 ## MCP Reference
 
@@ -78,18 +78,19 @@ Tool names detected at runtime per §Graph-Scheduler Tool Detection. Parameter s
 |graph_advance|report result + get next node|runId, nodeId, branchTo?, endRun?|
 |graph_status|query run state|runId|
 |graph_list|list all runs|-|
+|graph_assets|list registered graph assets + per-graph problems (read-only — never creates a run)|-|
 |graph_force_end|force end run|runId|
 |graph_jump|jump to node|runId, targetPhaseId|
 |graph_init|init graph config|-|
 |graph_clean_completed|clean completed runs|before?|
 |graph_clean_all|clean all runs|-|
 
-`graph_start` returns `{ runId, node, snapshot, resolvedFrom, resolvedPath, description? }`. `graph_advance` / `graph_jump` return `{ snapshot, node }` - `node: null` = graph complete (`fsmState` `completed`). The snapshot accompanies every dispatch in delta form — `nodes` = one-line rows (`nodeId`, `status`, `retryCount`, jump-target enumeration) + `changed` = full-field rows for nodes whose state changed since the last dispatch. Run mode comes from the activation (graph_start args.mode) - no output scans, no echo scans, no backend field.
+`graph_start` returns `{ runId, node, snapshot, resolvedFrom, resolvedPath, description?, problems? }` — `problems` is the load-time machine warning array (inventory consistency, description drift; empty when clean; absent on older servers — degrade silently). `graph_advance` / `graph_jump` return `{ snapshot, node }` - `node: null` = graph complete (`fsmState` `completed`). The snapshot accompanies every dispatch in delta form — `nodes` = one-line rows (`nodeId`, `status`, `retryCount`, jump-target enumeration) + `changed` = full-field rows for nodes whose state changed since the last dispatch. Run mode comes from the activation (graph_start args.mode) - no output scans, no echo scans, no backend field.
 
 ### Return Shapes
 
 ```
-graph_start { graphName, args? } → { runId, node: NodeDetail | null, snapshot: GraphSnapshot, resolvedFrom: project|builtin|fallback, resolvedPath: string, description?: string }
+graph_start { graphName, args? } → { runId, node: NodeDetail | null, snapshot: GraphSnapshot, resolvedFrom: project|builtin|fallback, resolvedPath: string, description?: string, problems?: string[] }
 ```
 
 Scheduler resolve graph name via merged registry - project entries override builtin (project-first). Return `runId` + first `node` (NodeDetail | null) + run `snapshot` (delta form — one-line node rows + changed rows; jump navigation + progress display) + resolution identity (`resolvedFrom` + `resolvedPath` + graph `description`). NodeDetail carries channel declarations (dependsOn + `node:` entries) — upstream content is assembled from the agent session, never delivered in the payload. Agent hold `runId` for all subsequent calls.
@@ -141,6 +142,16 @@ Execute->advance cycle:
 **Advance obligation** - a node boundary is NOT a stopping point. After reporting a node, always `graph_advance` and execute the next node; the loop continues until `node: null` or an approval `end`/user `force_end`. Never yield mid-loop with work remaining.
 
 > **Note:** `output` collected in (b) for display only; `durationMs` is the handler-measured wall clock for the node report (session display only). `graph_advance` receives `{ runId, nodeId, branchTo?, endRun? }` - no output param, no duration param; the scheduler persists progress only (duration derived from timestamps). Node content and approval/gate decisions stay in the agent session (platform-persisted) — downstream gates judge from the session.
+
+## Problems Consumption (F3)
+
+At run start, `graph_start` may return `problems` (load-time machine warnings: inventory consistency, description drift). Handling:
+
+1. Non-empty `problems` → report each problem (evidence-cited, one line each) in the identity banner context; then propose running `graph-maintain` on the resolved graph (`resolvedPath` / `resolvedFrom` — same name) as a repair option. Proposal only — never execute, never auto-start a maintenance run; the user decides (approval()).
+2. Empty / absent `problems` → zero extra output; proceed with the loop.
+3. Problems NEVER block the run — warnings are non-blocking by contract; the loop continues unless the user redirects (PCL or node input).
+
+The repair proposal is the graph-file maintenance entry (graph-maintain audit → propose → approval → execute) — the pilot never fixes graph files inline.
 
 ## Node Execution
 

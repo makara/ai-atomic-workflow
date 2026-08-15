@@ -14,7 +14,7 @@ import { parse as parseYaml } from 'yaml';
 
 import { ConfigFileSchema, createMemoryRuntime, createRuntime } from '../src/scheduler-runtime.js';
 import { PhaseSchema } from '../src/schemas/phase.js';
-import { TaskflowSchema } from '../src/schemas/taskflow.js';
+import { WorkflowSchema } from '../src/schemas/workflow.js';
 
 // ---------------------------------------------------------------------------
 // Built-in asset validation
@@ -33,14 +33,14 @@ describe('built-in assets', () => {
     expect(registry.graphs.length).toBeGreaterThanOrEqual(1);
     const e2e = registry.graphs.find((e: { name: string }) => e.name === 'e2e-minimal');
     expect(e2e).toBeDefined();
-    expect(e2e.path).toBe('e2e-minimal.taskflow.yaml');
+    expect(e2e.path).toBe('e2e-minimal.yaml');
   });
 
-  it('built-in e2e-minimal.taskflow.yaml is valid YAML with expected phases', () => {
+  it('built-in e2e-minimal.yaml is valid YAML with expected phases', () => {
     const { readFileSync } = require('node:fs');
     const { join } = require('node:path');
     const pkgRoot = join(__dirname, '..');
-    const graphPath = join(pkgRoot, 'graphs', 'e2e-minimal.taskflow.yaml');
+    const graphPath = join(pkgRoot, 'graphs', 'e2e-minimal.yaml');
     const raw = readFileSync(graphPath, 'utf-8');
     const graph = parseYaml(raw);
     expect(graph.name).toBe('e2e-minimal');
@@ -54,11 +54,11 @@ describe('built-in assets', () => {
     expect(approval.routing).toBeUndefined();
   });
 
-  it('built-in graph-generate.taskflow.yaml is valid YAML with 7 phases — concrete maker graph', () => {
+  it('built-in graph-generate.yaml is valid YAML with 7 phases — concrete maker graph', () => {
     const { readFileSync } = require('node:fs');
     const { join } = require('node:path');
     const pkgRoot = join(__dirname, '..');
-    const graphPath = join(pkgRoot, 'graphs', 'graph-generate.taskflow.yaml');
+    const graphPath = join(pkgRoot, 'graphs', 'graph-generate.yaml');
     const raw = readFileSync(graphPath, 'utf-8');
     const graph = parseYaml(raw);
     expect(graph.name).toBe('graph-generate');
@@ -100,19 +100,19 @@ describe('built-in assets', () => {
     const { existsSync } = require('node:fs');
     const { join } = require('node:path');
     const pkgRoot = join(__dirname, '..');
-    expect(existsSync(join(pkgRoot, 'graphs', 'artifact-workflow.taskflow.yaml'))).toBe(false);
-    expect(existsSync(join(pkgRoot, 'graphs', 'skill-workflow.taskflow.yaml'))).toBe(false);
+    expect(existsSync(join(pkgRoot, 'graphs', 'artifact-workflow.yaml'))).toBe(false);
+    expect(existsSync(join(pkgRoot, 'graphs', 'skill-workflow.yaml'))).toBe(false);
   });
 
-  it('built-in graph-generate passes TaskflowSchema + PhaseSchema validation', () => {
+  it('built-in graph-generate passes WorkflowSchema + PhaseSchema validation', () => {
     const { readFileSync } = require('node:fs');
     const { join } = require('node:path');
     const pkgRoot = join(__dirname, '..');
-    const graphPath = join(pkgRoot, 'graphs', 'graph-generate.taskflow.yaml');
+    const graphPath = join(pkgRoot, 'graphs', 'graph-generate.yaml');
     const raw = readFileSync(graphPath, 'utf-8');
     const graph = parseYaml(raw);
-    const result = TaskflowSchema.safeParse(graph);
-    expect(result.success, `graph-generate TaskflowSchema`).toBe(true);
+    const result = WorkflowSchema.safeParse(graph);
+    expect(result.success, `graph-generate WorkflowSchema`).toBe(true);
     for (const phase of graph.phases) {
       const phaseResult = PhaseSchema.safeParse(phase);
       expect(phaseResult.success, `graph-generate/${String(phase.id)} PhaseSchema`).toBe(true);

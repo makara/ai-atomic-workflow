@@ -13,7 +13,7 @@ import { DEFAULT_CONVENTIONS, mergeChannelScopes, stripCrossRunChannels } from '
 import { debugLog } from '../debug.js';
 import { resolveArgs } from '../flow-flatten.js';
 import type { FsmNodeState } from '../fsm/effects.js';
-import type { FsmState, TaskflowGraph } from '../fsm/transition.js';
+import type { FsmState, WorkflowGraph } from '../fsm/transition.js';
 import { UnknownPhaseTypeError } from '../phase-handler/errors.js';
 import { resolvePhaseHandler } from '../phase-handler/index.js';
 import type { IBaseNodeDetail, IFsmNodeState, INodeDetail } from '../phase-handler/types.js';
@@ -99,7 +99,7 @@ export function aggregateNodeMetrics(
  */
 export function findActiveNode(
   phases: Record<string, FsmNodeState>,
-  graph: TaskflowGraph,
+  graph: WorkflowGraph,
 ): { phaseId: string; nodeState: FsmNodeState } | null {
   for (const p of graph.phases) {
     const ns = phases[p.id];
@@ -115,8 +115,10 @@ export function findActiveNode(
  *
  * Handler resolution is static by type (main/approval); the dispatch handler
  * skill is the constant atom-phase-handler (agent-side knowledge — not carried
- * in the payload). Run mode / constraints are NOT NodeDetail fields — they
- * arrive at activation (graph_start args.mode; pilot-loaded constraints).
+ * in the payload). Run mode is NOT a NodeDetail field (graph_start args.mode);
+ * graph-level constraints ARE carried (NodeDetail.constraints — `[graph]`-
+ * prefixed dispatch facts) while project-level constraints arrive via the
+ * agent-side activation session copy (pilot-loaded compiled artifact).
  * Node-scope gate: `node:` channel targets outside the run's flattened node
  * set are stripped at dispatch (shared predicate — stale-file protection).
  */
@@ -161,13 +163,18 @@ export function buildNodeDetail(input: NodeDetailInput): Effect.Effect<INodeDeta
         debugLog('runtime', { event: 'cross_run_channel_stripped', nodeId: input.phaseId, warning: w });
       }
 
-      // Base fields — common to all phase types
+      // Base fields — common to all phase types. Graph-level constraints
+      // become dispatch facts: `[graph]`-prefixed entries from the loaded
+      // definition (unbypassable — machine channel); project-level rules
+      // arrive agent-side (pilot activation session copy) and are merged
+      // into the ## Constraints block by the dispatch handler.
       const base: IBaseNodeDetail = {
         nodeId: input.phaseId,
         type: phase.type,
         dependsOn: phase.dependsOn,
         skill: phase.skill,
         operations: phase.operations,
+        constraints: (input.graph.constraints ?? []).map((c) => `[graph] ${c}`),
         retryCount: input.nodeState.retryCount,
       };
 
@@ -213,7 +220,7 @@ export function snapshotCursorCacheClear(): void {
 }
 
 /** Build a GraphSnapshot from an FsmState. */
-export function buildSnapshot(state: FsmState, graph?: TaskflowGraph): IGraphSnapshot {
+export function buildSnapshot(state: FsmState, graph?: WorkflowGraph): IGraphSnapshot {
   if (state.status === 'idle') {
     return assembleSnapshot(
       { runId: '', graphName: '', fsmState: 'idle', createdAt: '', updatedAt: new Date().toISOString() },

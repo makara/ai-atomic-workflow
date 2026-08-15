@@ -1,7 +1,7 @@
 /**
- * Unit tests for toTaskflowGraph() — phase validation, error handling.
+ * Unit tests for toWorkflowGraph() — phase validation, error handling.
  *
- * Tests direct conversion from Taskflow (schema-validated JSON) to TaskflowGraph
+ * Tests direct conversion from Workflow (schema-validated JSON) to WorkflowGraph
  * (FSM-ready phase list). Covers:
  * - valid main phase → validated
  * - empty task main phase → PhaseHandlerError
@@ -11,14 +11,14 @@
  * - dependsOn preserved in output
  * - unnamed graph → defaults to "unnamed"
  *
- * @since registry collapse — toTaskflowGraph is runtime-free (static type dispatch).
+ * @since registry collapse — toWorkflowGraph is runtime-free (static type dispatch).
  * Agent type removed — fixtures use main; normalize() removed (no retry default).
  */
 
 import { Effect } from 'effect';
 import { describe, expect, it } from 'vitest';
-import { toTaskflowGraph } from '../../src/api/graph-loader.js';
-import type { Taskflow } from '../../src/graph-definition.js';
+import { toWorkflowGraph } from '../../src/api/graph-loader.js';
+import type { Workflow } from '../../src/graph-definition.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -29,22 +29,22 @@ function mainPhase(id: string, task: string, overrides?: Record<string, unknown>
   return { id, type: 'main', task, ...overrides, operations: [] };
 }
 
-/** Build a Taskflow object from phases. */
-function mkTaskflow(name: string, phases: Array<ReturnType<typeof mainPhase>>): Taskflow {
-  return { name, phases } as Taskflow;
+/** Build a Workflow object from phases. */
+function mkWorkflow(name: string, phases: Array<ReturnType<typeof mainPhase>>): Workflow {
+  return { name, phases } as Workflow;
 }
 
-const run = (tf: Taskflow) => Effect.runPromise(toTaskflowGraph(tf));
+const run = (tf: Workflow) => Effect.runPromise(toWorkflowGraph(tf));
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('toTaskflowGraph', () => {
+describe('toWorkflowGraph', () => {
   // ── 1. Valid main phase ──────────────────────────────────────────
 
   it('validates a valid main phase', async () => {
-    const tf = mkTaskflow('simple', [mainPhase('a1', 'do something', { skill: 'atom-scope-interview' })]);
+    const tf = mkWorkflow('simple', [mainPhase('a1', 'do something', { skill: 'atom-scope-interview' })]);
 
     const result = await run(tf);
 
@@ -60,7 +60,7 @@ describe('toTaskflowGraph', () => {
       name: 'agent-graph',
 
       phases: [{ id: 'a1', type: 'agent', task: 'do something' }],
-    } as unknown as Taskflow;
+    } as unknown as Workflow;
 
     await expect(run(agentTf)).rejects.toThrow(/Unknown phase type 'agent'/);
     await expect(run(agentTf)).rejects.toThrow(/Registered types:/);
@@ -70,12 +70,12 @@ describe('toTaskflowGraph', () => {
   // ── 2. Empty task main phase → PhaseHandlerError ─────────────────
 
   it('throws PhaseHandlerError for main phase with empty task', async () => {
-    const tf = mkTaskflow('bad', [mainPhase('a1', '')]);
+    const tf = mkWorkflow('bad', [mainPhase('a1', '')]);
     await expect(run(tf)).rejects.toThrow(/task is required/);
   });
 
   it('throws PhaseHandlerError for main phase with undefined task', async () => {
-    const tf = mkTaskflow('bad', [mainPhase('a1', undefined as unknown as string)]);
+    const tf = mkWorkflow('bad', [mainPhase('a1', undefined as unknown as string)]);
     await expect(run(tf)).rejects.toThrow(/task is required/);
   });
 
@@ -83,7 +83,7 @@ describe('toTaskflowGraph', () => {
 
   it('rejects phase with unregistered type — no silent pass-through', async () => {
     const phase = { id: 'custom-1', type: 'custom-nosuch', task: 'whatever' };
-    const tf = mkTaskflow('unknown-type', [phase as ReturnType<typeof mainPhase>]);
+    const tf = mkWorkflow('unknown-type', [phase as ReturnType<typeof mainPhase>]);
 
     await expect(run(tf)).rejects.toThrow(/Unknown phase type 'custom-nosuch'/);
     await expect(run(tf)).rejects.toThrow(/Registered types:/);
@@ -93,7 +93,7 @@ describe('toTaskflowGraph', () => {
   // ── 4. Multiple phases — all validated ───────────────────────────
 
   it('validates all phases in a multi-phase graph', async () => {
-    const tf = mkTaskflow('multi', [
+    const tf = mkWorkflow('multi', [
       mainPhase('a1', 'step one', { skill: 'atom-scope-interview' }),
       mainPhase('a2', 'step two', { dependsOn: ['a1'], skill: 'atom-scope-interview' }),
       mainPhase('a3', 'step three', { dependsOn: ['a2'], skill: 'atom-scope-interview' }),
@@ -109,7 +109,7 @@ describe('toTaskflowGraph', () => {
   // ── 5. Empty phases array → valid output ──────────────────────────
 
   it('returns valid output for empty phases array', async () => {
-    const tf = mkTaskflow('empty', []);
+    const tf = mkWorkflow('empty', []);
     const result = await run(tf);
     expect(result.name).toBe('empty');
     expect(result.phases).toHaveLength(0);
@@ -118,7 +118,7 @@ describe('toTaskflowGraph', () => {
   // ── 6. dependsOn preserved in output ─────────────────────────────
 
   it('preserves dependsOn field', async () => {
-    const tf = mkTaskflow('deps', [
+    const tf = mkWorkflow('deps', [
       mainPhase('a1', 'first', { skill: 'atom-scope-interview' }),
       mainPhase('a2', 'second', { dependsOn: ['a1'], skill: 'atom-scope-interview' }),
     ]);
@@ -129,14 +129,15 @@ describe('toTaskflowGraph', () => {
     expect(result.phases[1].dependsOn).toEqual(['a1']);
   });
 
-  // ── 7. Unnamed graph defaults to "unnamed" ────────────────────────
+  // ── 7. Declared name is the identity — passes through to the graph ──
 
-  it('defaults graph name to "unnamed" when name is missing', async () => {
+  it('passes the declared name through to the FSM graph shape', async () => {
     const tf = {
+      name: 'declared-name',
       phases: [mainPhase('a1', 'task', { skill: 'atom-scope-interview' })],
-    } as unknown as Taskflow;
+    } as unknown as Workflow;
 
     const result = await run(tf);
-    expect(result.name).toBe('unnamed');
+    expect(result.name).toBe('declared-name');
   });
 });

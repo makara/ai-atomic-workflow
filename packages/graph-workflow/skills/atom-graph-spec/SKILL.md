@@ -1,17 +1,17 @@
 ---
 name: atom-graph-spec
-description: Reference for .taskflow.yaml graph format specification - PhaseSchema, topology, gate rework jumps, join modes, channels, approval decision confirmation, branch routes, Run Mode. Use when writing or reviewing taskflow graphs, mentions graph format, graph definition, PhaseSchema.
+description: Reference for workflow YAML graph format specification - PhaseSchema, topology, gate rework jumps, join modes, channels, approval decision confirmation, branch routes, Run Mode. Use when writing or reviewing workflow graphs, mentions graph format, graph definition, PhaseSchema.
 argument-hint: none (reference skill)
 user-invocable: true
-version: 1.9.0
-last_updated: '2026-08-09'
+version: 1.10.0
+last_updated: '2026-08-15'
 ---
 
 > **Runtime constraints** - load `atom-phase-handler` for PhaseSchema reference.
 
 # Atom-Graph-Spec
 
-Reference spec for the .taskflow.yaml graph format - PhaseSchema, topology, gate rework jumps, join modes, channels, approval routing, run mode.
+Reference spec for the workflow YAML graph format - PhaseSchema, topology, gate rework jumps, join modes, channels, approval routing, run mode, and the `$schema`/`version` self-description header contract (schema-determined identity, suffix-free).
 
 Intended consumers: `atom-graph-design`, `code-review`, `atom-graph-writer`.
 
@@ -25,7 +25,7 @@ Intended consumers: `atom-graph-design`, `code-review`, `atom-graph-writer`.
 
 # Graph Schema
 
-Top-level fields (`name`, `description`, `version`, `phases`), per-phase fields (`id`, `dependsOn`, `skill`, `agent`, `operations`, `use`, `task`, `channels`, `route`, `jumps`, `routing`, `join`), flow phase fields, auto-supplied fields (`handlerSkill`, `skill`, `retryCount`), route field, approval routing action fields - full tables: see PHASESCHEMA.md §Top-Level Fields, §Phase Fields, §Flow Phase Fields, §Auto-Supplied Fields, §Route Field, §Approval Routing Actions. Loaded flow example: see YAML-EXAMPLES.md §Flow Phase Example.
+Top-level fields (`name`, `description`, `version`, `inventory`, `phases`), per-phase fields (`id`, `dependsOn`, `skill`, `agent`, `operations`, `use`, `task`, `channels`, `route`, `jumps`, `routing`, `join`), flow phase fields, auto-supplied fields (`handlerSkill`, `skill`, `retryCount`), route field, approval routing action fields - full tables: see PHASESCHEMA.md §Top-Level Fields, §Phase Fields, §Flow Phase Fields, §Auto-Supplied Fields, §Route Field, §Approval Routing Actions. Loaded flow example: see YAML-EXAMPLES.md §Flow Phase Example.
 
 ---
 
@@ -33,7 +33,7 @@ Top-level fields (`name`, `description`, `version`, `phases`), per-phase fields 
 
 ## DependsOn Rules
 
-1. **Acyclic** - NO dependency cycles. `A → B → A` invalid. Cycle detection: check transitive closure.
+1. **Acyclic dependency edges** - dependsOn SHALL NOT form cycles. `A → B → A` invalid — the engine enforces this at load (a cycle fails loading loudly with the cycle path); no manual cycle check needed. Runtime rework loops (gate backward jumps, approval retry/jump) are bounded transitions, never dependency edges.
 2. **Minimal** - declare only direct dependencies. Transitive deps resolved implicitly.
 3. **Redundancy check** - `dependsOn: [A, B]` where `B` depends on `A` -> drop `A`. Only leaf deps needed. Judgment context is NOT a dependsOn concern - gate jumps and approval recommendations reference it (per §Jump Semantics), never implicit edges.
 4. **Entry nodes** - exactly one phase with `dependsOn: []`. Single entry point. Exception - orchestrators with multiple entry roots (entry-rooted flows) declare several zero-in-degree phases; dispatch follows declaration order (load-bearing).
@@ -117,7 +117,7 @@ Activation facts (run mode, constraints) live at the invocation boundary — nev
 
 |Fact|Source|Behavior|
 |-|-|-|
-|Constraints load|pilot startup|Compiled-artifact protocol - `.graph-scheduler/constraints.json` exists -> emit its `constraints` array verbatim (fast path, zero markdown I/O); missing -> caveman-compile `.graph-scheduler/constraints.md` `## Rules` into the artifact (`compiled_at` audit metadata) and emit. Existence = validity; deletion = reset; invalid JSON -> recompile. Session fact `{"constraints": [...]}`.|
+|Constraints load (project layer)|pilot startup|Compiled-artifact protocol - `.graph-scheduler/constraints.json` exists -> emit its `constraints` array verbatim (fast path, zero markdown I/O); missing -> caveman-compile `.graph-scheduler/constraints.md` `## Rules` into the artifact (`compiled_at` audit metadata) and emit. Existence = validity; deletion = reset; invalid JSON -> recompile. Session fact `{"constraints": [...]}`. Graph-layer constraints are NOT an activation fact - they arrive per dispatch as `NodeDetail.constraints` (`[graph]`-prefixed, scheduler-read from the loaded graph definition).|
 |Run mode|`graph_start` `args.mode`|`manual` \| `auto`, REQUIRED at invocation — absent -> `MODE_REQUIRED` response, no run created. The pilot asks the user before starting when no flag was passed (Manual recommended - absence NEVER auto). Session fact `{"mode": "manual"\|"auto"}`. Re-decided EVERY activation.|
 
 Mechanics:

@@ -16,7 +16,7 @@ import { parse as parseYaml } from 'yaml';
 const PKG_ROOT = join(__dirname, '..');
 
 function loadGraph(name: string) {
-  const raw = readFileSync(join(PKG_ROOT, 'graphs', `${name}.taskflow.yaml`), 'utf-8');
+  const raw = readFileSync(join(PKG_ROOT, 'graphs', `${name}.yaml`), 'utf-8');
   return parseYaml(raw) as {
     name: string;
     phases: Array<{
@@ -80,18 +80,19 @@ describe('openspec-engineer — detailed track closure', () => {
 });
 
 describe('doc-update graph removed', () => {
-  it('doc-update.taskflow.yaml no longer exists', () => {
-    expect(() => readFileSync(join(PKG_ROOT, 'graphs', 'doc-update.taskflow.yaml'))).toThrow();
+  it('doc-update.yaml no longer exists', () => {
+    expect(() => readFileSync(join(PKG_ROOT, 'graphs', 'doc-update.yaml'))).toThrow();
   });
 
-  it('registry lists 10 graphs with estate-maintain + release-prep, without doc-update', () => {
+  it('registry lists 11 graphs with estate-maintain + release-prep + graph-maintain, without doc-update', () => {
     const registry = JSON.parse(readFileSync(join(PKG_ROOT, 'graphs', 'registry.json'), 'utf-8')) as {
       graphs: Array<{ name: string }>;
     };
     const names = registry.graphs.map((g) => g.name);
-    expect(names).toHaveLength(10);
+    expect(names).toHaveLength(11);
     expect(names).toContain('release-prep');
     expect(names).toContain('estate-maintain');
+    expect(names).toContain('graph-maintain');
     expect(names).not.toContain('doc-update');
     expect(names).toContain('openspec-apply');
     expect(names).toContain('openspec-engineer');

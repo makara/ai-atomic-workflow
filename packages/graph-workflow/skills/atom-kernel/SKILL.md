@@ -33,7 +33,7 @@ Primitive contracts platform-neutral - never assumed exact; skills reference con
 
 # Graph-Scheduler Tool Detection
 
-MCP tool name detection - resolve by substring, never assumed exact. Before any graph operation, scan the tool list; find each substring -> record exact name: `graph_start` / `graph_advance` / `graph_status` / `graph_list` / `graph_force_end` / `graph_jump` / `graph_init` / `graph_clean_completed` / `graph_clean_all`. Use detected names for all subsequent calls.
+MCP tool name detection - resolve by substring, never assumed exact. Before any graph operation, scan the tool list; find each substring -> record exact name: `graph_start` / `graph_advance` / `graph_status` / `graph_list` / `graph_assets` / `graph_force_end` / `graph_jump` / `graph_init` / `graph_clean_completed` / `graph_clean_all`. Use detected names for all subsequent calls.
 
 ---
 
@@ -209,4 +209,4 @@ DISABLED — R2 cost economy suspended. Contract (MCP authoritative), class-driv
 
 ## graph-scheduler
 
-Graph lifecycle CRUD - 9 tools, names per §Graph-Scheduler Tool Detection; params/returns/examples: atom-pilot SKILL.md §MCP Reference. Output stays in session - never passed to graph_advance (main-node default; approval/gate output is parsed by the pilot and drives routing). Approval/gate decisions persist run-scoped (see atom-phase-handler).
+Graph lifecycle CRUD - 10 tools, names per §Graph-Scheduler Tool Detection; params/returns/examples: atom-pilot SKILL.md §MCP Reference. Output stays in session - never passed to graph_advance (main-node default; approval/gate output is parsed by the pilot and drives routing). Approval/gate decisions persist run-scoped (see atom-phase-handler).

@@ -9,7 +9,7 @@
 
 import type { FileSystemError } from './filesystem.js';
 import type { FsmNodeState } from './fsm/effects.js';
-import type { FsmState, TaskflowGraph } from './fsm/transition.js';
+import type { FsmState, WorkflowGraph } from './fsm/transition.js';
 import type { NodeState, RegistryEntry } from './schemas/index.js';
 
 /** run not found — askNext/getStatus/resume/abort when runId missing */
@@ -93,7 +93,7 @@ export class DispatchConfigError extends Error {
 export interface NodeDetailInput {
   readonly phaseId: string;
   readonly nodeState: FsmNodeState;
-  readonly graph: TaskflowGraph;
+  readonly graph: WorkflowGraph;
   readonly args: Record<string, unknown> | null;
   /**
    * Project-level ambient context (config.json `context`) — default layer of
@@ -107,7 +107,7 @@ export interface NodeDetailInput {
 export interface NextNodeInput {
   readonly runId: string;
   readonly state: FsmState;
-  readonly graph: TaskflowGraph;
+  readonly graph: WorkflowGraph;
   readonly args: Record<string, unknown> | null;
 }
 

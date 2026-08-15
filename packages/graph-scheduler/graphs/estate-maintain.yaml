@@ -1,4 +1,50 @@
 name: estate-maintain
+$schema: ../schemas/workflow.schema.json
+version: 1.0.0
+# Node overview table (atom inventory). Bounded compound goals:
+# connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS (AND/OR/IF/
+# THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR operands,
+# conditional paths ≤ 3. Entry shape { id, type, goal, constraints? } — goal
+# states the atom's intent; mechanism lives in the goal (flow entries state
+# "expands <use> subgraph"). constraints: one-sentence prose rules — general
+# boundaries + explicit non-goals, ≤ 5 per atom, never machine-validated.
+# User-maintained.
+inventory:
+  - id: entry
+    type: main
+    goal: Executes atom-scope-interview to classify the trigger THEN select workstreams
+    constraints:
+      - classification only — never selects workstreams beyond the declared set
+  - id: requirement
+    type: main
+    goal: Runs grilling to confirm estate requirement decisions
+    constraints:
+      - never auto-gated — cards in any mode
+  - id: domains-index
+    type: main
+    goal: Executes atom-doc-maintain to update the domain index
+    constraints:
+      - never edits deployment copies — packages/ sources only
+  - id: specs-sync
+    type: main
+    goal: Executes atom-spec-maintain to sync the spec estate
+    constraints:
+      - minimal changes only — delta specs, never wholesale rewrites
+  - id: adr-align
+    type: main
+    goal: Executes atom-adr-maintain to align the ADR estate
+    constraints:
+      - never edits archived records — live estate only
+  - id: review
+    type: main
+    goal: Reviews the maintenance pass with the consistency gate, reverse validation and mirror check
+    constraints:
+      - read-only gate — never fixes findings inline
+  - id: accept
+    type: approval
+    goal: Accept the pass OR route rework; end completes the run
+    constraints:
+      - routes only — never edits the estate
 # Estate maintenance graph — document estate upkeep with a consistency-gate
 # review. Entry classifies the trigger and selects workstreams; requirement
 # confirms user-proposed requirements (hub for every workstream); three

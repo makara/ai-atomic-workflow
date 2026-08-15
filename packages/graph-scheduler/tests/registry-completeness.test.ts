@@ -30,8 +30,10 @@ function loadRegistry(): RegistryEntry[] {
 }
 
 function graphFilesOnDisk(): string[] {
+  // Match the runtime probe surface (.yaml AND .yml) — a .yml graph must not
+  // escape the registry-vs-filesystem completeness guard.
   return readdirSync(GRAPHS_DIR)
-    .filter((file) => file.endsWith('.taskflow.yaml'))
+    .filter((file) => /\.ya?ml$/.test(file))
     .sort();
 }
 
@@ -49,7 +51,7 @@ describe('registry.json — built-in graph completeness', () => {
 
     // Every graph file must be registered under its file basename.
     for (const file of onDisk) {
-      const expectedName = file.replace(/\.taskflow\.yaml$/, '');
+      const expectedName = file.replace(/\.yaml$/, '');
       expect(registeredNames.has(expectedName), `missing registry entry for ${file}`).toBe(true);
     }
   });
@@ -88,7 +90,7 @@ describe('registry.json — built-in graph completeness', () => {
     const registry = loadRegistry();
     const entry = registry.find((item) => item.name === 'graph-generate');
     expect(entry).toBeDefined();
-    expect(entry?.path).toBe('graph-generate.taskflow.yaml');
+    expect(entry?.path).toBe('graph-generate.yaml');
     expect(entry?.description).toMatch(/maker journey|concrete/i);
     expect(entry?.description).toMatch(/\.graph-scheduler\/docs\//);
   });
@@ -123,14 +125,14 @@ describe('registry.json — built-in graph completeness', () => {
     const registry = loadRegistry();
     const entry = registry.find((item) => item.name === 'openspec-engineer');
     expect(entry).toBeDefined();
-    expect(entry?.path).toBe('openspec-engineer.taskflow.yaml');
+    expect(entry?.path).toBe('openspec-engineer.yaml');
   });
 
-  it('arch-review-loop is registered — closed-loop review pipeline', () => {
+  it('arch-review-loop is registered — closed-loop review workflow', () => {
     const registry = loadRegistry();
     const entry = registry.find((item) => item.name === 'arch-review-loop');
     expect(entry).toBeDefined();
-    expect(entry?.path).toBe('arch-review-loop.taskflow.yaml');
+    expect(entry?.path).toBe('arch-review-loop.yaml');
     expect(entry?.description).toMatch(/closed loop|Top Rec/i);
   });
 
@@ -144,7 +146,7 @@ describe('registry.json — built-in graph completeness', () => {
     const registry = loadRegistry();
     const entry = registry.find((item) => item.name === 'adopt-with-docs');
     expect(entry).toBeDefined();
-    expect(entry?.path).toBe('adopt-with-docs.taskflow.yaml');
+    expect(entry?.path).toBe('adopt-with-docs.yaml');
     expect(entry?.description).toMatch(/raw idea/i);
   });
 

@@ -4,8 +4,8 @@ description: Central dispatch handler - { node, snapshot? } schema and static di
 argument-hint: none (reference + procedure skill)
 disable-model-invocation: true
 user-invocable: false
-version: 2.21.0
-last_updated: '2026-08-11'
+version: 2.22.0
+last_updated: '2026-08-15'
 ---
 
 > **Runtime constraints** - use atom-kernel for task() dispatch and approval() decision UI + High-Level Tool Registry + tool schemas; atom-graph-spec for schema/topology authority (§Constraint Layering, §Gate Jump Conditions, §Approval Routing Actions in PHASESCHEMA.md). Graph-scheduler MCP tools are not called here - tool detection lives in atom-kernel §Graph-Scheduler Tool Detection for the entry points that do (pilot).
@@ -18,7 +18,7 @@ Handle graph-scheduler CRUD API return data - `{ node: NodeDetail | null, snapsh
 
 # Activation Consumption
 
-Run Mode + project constraints = USER-LAYER facts from the activation boundary (graph_start `args.mode` + pilot-loaded constraints) - `NodeDetail` has no `runMode`/`constraints`. Source, paths, degrade: see CONTEXT-ASSEMBLY.md §Activation Context Blocks (single home). Mode semantics: atom-kernel §approval().
+Run Mode + project constraints = USER-LAYER facts from the activation boundary (graph_start `args.mode` + pilot-loaded constraints) - `NodeDetail` has no `runMode`; graph-level constraints ARE carried as `node.constraints` dispatch facts (`[graph]`-prefixed; project layer stays a session fact). Source, paths, degrade: see CONTEXT-ASSEMBLY.md §Activation Context Blocks (single home). Mode semantics: atom-kernel §approval().
 
 ---
 
@@ -74,12 +74,12 @@ Assembly rules:
 
 # Constraints Block Format
 
-Assembly rules (bullets, `[project]` prefix, lang/git dedup, 2 KB cap) per `atom-graph-spec` §Constraint Layering. Block shape:
+Assembly rules (bullets, source prefixes, lang/git dedup, 2 KB cap) per `atom-graph-spec` §Constraint Layering. The block merges two sources: `[graph]`-prefixed entries (dispatch facts — `node.constraints`, read by the scheduler from the loaded graph definition, unbypassable) + `[project]`-prefixed entries (activation session fact — pilot-loaded compiled artifact). Layered append, conflicts preserved (never silently dropped); cap/dedup apply to the merged block. Block shape:
 
 ```
 ## Constraints
 
-- [project] <constraint 1>
+- [graph] <constraint 1>
 - [project] <constraint 2>
 
 Output must satisfy constraints above. State compliance per rule before return — see Checks block.

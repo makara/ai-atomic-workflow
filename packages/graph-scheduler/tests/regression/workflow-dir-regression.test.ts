@@ -24,7 +24,7 @@ interface Fixture {
 }
 
 function makeFixture(): Fixture {
-  const projectDir = join(tmpdir(), `taskflow-dir-regression-${Math.random().toString(36).slice(2)}`);
+  const projectDir = join(tmpdir(), `workflow-dir-regression-${Math.random().toString(36).slice(2)}`);
   mkdirSync(projectDir, { recursive: true });
   return {
     projectDir,
@@ -75,7 +75,7 @@ phases:
     dependsOn: []
     task: project-specific
 `;
-    writeFileSync(join(fix.projectDir, 'unique-project-graph.taskflow.yaml'), graphYaml);
+    writeFileSync(join(fix.projectDir, 'unique-project-graph.yaml'), graphYaml);
 
     const rt = await Effect.runPromise(
       createRuntime({

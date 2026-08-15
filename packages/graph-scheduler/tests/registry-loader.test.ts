@@ -21,6 +21,8 @@ function mockFsLayer(files: Record<string, string>): Layer.Layer<FileSystem, nev
       return Effect.fail(new FileSystemError(path, `ENOENT: file not found: ${path}`));
     },
     resolvePath: (filePath: string) => (filePath in files ? filePath : null),
+    listYamlFiles: () => Object.keys(files).filter((f) => /\.ya?ml$/.test(f)),
+    resolveSchemaUri: (uri: string, _filePath: string) => (uri in files ? uri : null),
   });
 }
 
@@ -37,29 +39,29 @@ describe('makeRegistryLoader', () => {
   it('resolveGraph finds a graph in first registry', async () => {
     const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({
-      'reg1.json': validRegistry([{ name: 'graph-a', path: 'graphs/a.taskflow.yaml' }]),
-      'reg2.json': validRegistry([{ name: 'graph-b', path: 'graphs/b.taskflow.yaml' }]),
+      'reg1.json': validRegistry([{ name: 'graph-a', path: 'graphs/a.yaml' }]),
+      'reg2.json': validRegistry([{ name: 'graph-b', path: 'graphs/b.yaml' }]),
     });
 
     const result = await runSuccess(loader.resolveGraph('graph-a').pipe(Effect.provide(layer)));
-    expect(result.path).toMatch(/graphs\/a\.taskflow\.yaml$/);
+    expect(result.path).toMatch(/graphs\/a\.yaml$/);
   });
 
   it('resolveGraph finds a graph in second registry', async () => {
     const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({
-      'reg1.json': validRegistry([{ name: 'graph-a', path: 'graphs/a.taskflow.yaml' }]),
-      'reg2.json': validRegistry([{ name: 'graph-b', path: 'graphs/b.taskflow.yaml' }]),
+      'reg1.json': validRegistry([{ name: 'graph-a', path: 'graphs/a.yaml' }]),
+      'reg2.json': validRegistry([{ name: 'graph-b', path: 'graphs/b.yaml' }]),
     });
 
     const result = await runSuccess(loader.resolveGraph('graph-b').pipe(Effect.provide(layer)));
-    expect(result.path).toMatch(/graphs\/b\.taskflow\.yaml$/);
+    expect(result.path).toMatch(/graphs\/b\.yaml$/);
   });
 
   it('resolveGraph fails for unknown graph name', async () => {
     const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({
-      'reg1.json': validRegistry([{ name: 'graph-a', path: 'graphs/a.taskflow.yaml' }]),
+      'reg1.json': validRegistry([{ name: 'graph-a', path: 'graphs/a.yaml' }]),
       'reg2.json': validRegistry([]),
     });
 
@@ -71,19 +73,19 @@ describe('makeRegistryLoader', () => {
   it('project registry (later) overrides builtin (earlier) for same-named graph — project-first precedence', async () => {
     const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({
-      'reg1.json': validRegistry([{ name: 'dup', path: 'graphs/v1.taskflow.yaml' }]),
-      'reg2.json': validRegistry([{ name: 'dup', path: 'graphs/v2.taskflow.yaml' }]),
+      'reg1.json': validRegistry([{ name: 'dup', path: 'graphs/v1.yaml' }]),
+      'reg2.json': validRegistry([{ name: 'dup', path: 'graphs/v2.yaml' }]),
     });
 
     const result = await runSuccess(loader.resolveGraph('dup').pipe(Effect.provide(layer)));
-    expect(result.path).toMatch(/graphs\/v2\.taskflow\.yaml$/);
+    expect(result.path).toMatch(/graphs\/v2\.yaml$/);
     expect(result.source).toBe('project');
   });
 
   it('resolvedFrom reports builtin when only builtin registry has the graph', async () => {
     const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({
-      'reg1.json': validRegistry([{ name: 'builtin-only', path: 'graphs/b.taskflow.yaml' }]),
+      'reg1.json': validRegistry([{ name: 'builtin-only', path: 'graphs/b.yaml' }]),
       'reg2.json': validRegistry([]),
     });
 
@@ -121,6 +123,8 @@ describe('makeRegistryLoader', () => {
     const layer = Layer.succeed(FileSystem, {
       readFile: (_path: string) => Effect.fail(new FileSystemError('reg1.json', 'Permission denied')),
       resolvePath: () => null,
+      listYamlFiles: () => [],
+      resolveSchemaUri: () => null,
     });
 
     await expect(Effect.runPromise(loader.resolveGraph('anything').pipe(Effect.provide(layer)))).rejects.toThrow(
@@ -198,6 +202,8 @@ describe('makeRegistryLoader', () => {
         return Effect.fail(new FileSystemError(path, 'ENOENT'));
       },
       resolvePath: (filePath: string) => filePath,
+      listYamlFiles: () => [],
+      resolveSchemaUri: () => null,
     });
 
     await runSuccess(loader.resolveGraph('a').pipe(Effect.provide(layer)));

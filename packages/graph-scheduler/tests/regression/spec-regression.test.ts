@@ -2,8 +2,8 @@
  * Regression tests anchored to docs/requirements.md.
  *
  * Covers three core contracts:
- *   1. Graph loading chain (name → registry → .taskflow.yaml)
- *   2. Schema validation (valid/invalid taskflow YAML)
+ *   1. Graph loading chain (name → registry → .yaml)
+ *   2. Schema validation (valid/invalid workflow YAML)
  *   3. Skill mapping merge (builtin + project override)
  */
 import { Effect } from 'effect';
@@ -37,7 +37,7 @@ function writeFixtureFile(fix: Fixture, filename: string, data: unknown): string
   return filePath;
 }
 
-/** Minimal valid taskflow graph — no end node (route-first: drain completion). */
+/** Minimal valid workflow graph — no end node (route-first: drain completion). */
 function validGraph(overrides?: Record<string, unknown>): Record<string, unknown> {
   return {
     name: 'test-graph',
@@ -75,7 +75,7 @@ async function createTestRuntime(
 // 1. Graph loading chain
 // ---------------------------------------------------------------------------
 
-describe('Graph loading chain (name → registry → .taskflow.yaml)', () => {
+describe('Graph loading chain (name → registry → .yaml)', () => {
   let fix: Fixture;
 
   beforeEach(() => {
@@ -87,10 +87,10 @@ describe('Graph loading chain (name → registry → .taskflow.yaml)', () => {
 
   it('resolves via registry entry when name is registered', async () => {
     // Write graph under a non-standard filename
-    writeFixtureFile(fix, 'custom-path.taskflow.yaml', validGraph({ name: 'registered-graph' }));
+    writeFixtureFile(fix, 'custom-path.yaml', validGraph({ name: 'registered-graph' }));
     // Write registry pointing to that file
     const registryPath = writeFixtureFile(fix, 'reg.json', {
-      graphs: [{ name: 'registered-graph', path: 'custom-path.taskflow.yaml' }],
+      graphs: [{ name: 'registered-graph', path: 'custom-path.yaml' }],
     });
 
     const rt = await createTestRuntime(fix, { registryPaths: [registryPath] });
@@ -102,12 +102,12 @@ describe('Graph loading chain (name → registry → .taskflow.yaml)', () => {
     expect(result.node?.type).toBe('main');
   });
 
-  it('falls back to {name}.taskflow.yaml when name not in registry', async () => {
+  it('falls back to {name}.yaml when name not in registry', async () => {
     // Write graph at standard filename but NOT in registry
-    writeFixtureFile(fix, 'fallback-graph.taskflow.yaml', validGraph({ name: 'fallback-graph' }));
+    writeFixtureFile(fix, 'fallback-graph.yaml', validGraph({ name: 'fallback-graph' }));
     // Write a registry that does NOT contain fallback-graph
     writeFixtureFile(fix, 'reg.json', {
-      graphs: [{ name: 'other-graph', path: 'other.taskflow.yaml' }],
+      graphs: [{ name: 'other-graph', path: 'other.yaml' }],
     });
 
     const rt = await createTestRuntime(fix, { registryPaths: [join(fix.taskflowDir, 'reg.json')] });
@@ -124,7 +124,7 @@ describe('Graph loading chain (name → registry → .taskflow.yaml)', () => {
 
   it('throws when graph is not found — with registry but no matching entry', async () => {
     writeFixtureFile(fix, 'reg.json', {
-      graphs: [{ name: 'other-graph', path: 'other.taskflow.yaml' }],
+      graphs: [{ name: 'other-graph', path: 'other.yaml' }],
     });
     const rt = await createTestRuntime(fix, { registryPaths: [join(fix.taskflowDir, 'reg.json')] });
     await expect(rt.graphStart('unknown-name', { mode: 'auto' })).rejects.toThrow();
@@ -135,7 +135,7 @@ describe('Graph loading chain (name → registry → .taskflow.yaml)', () => {
 // 2. Schema validation
 // ---------------------------------------------------------------------------
 
-describe('Schema validation (valid / invalid taskflow YAML)', () => {
+describe('Schema validation (valid / invalid workflow YAML)', () => {
   let fix: Fixture;
 
   beforeEach(() => {
@@ -145,9 +145,10 @@ describe('Schema validation (valid / invalid taskflow YAML)', () => {
     fix.cleanup();
   });
 
-  it('accepts valid graph with version:1 and correct phase types', async () => {
-    writeFixtureFile(fix, 'valid.taskflow.yaml', {
+  it('accepts valid graph with semver version and correct phase types', async () => {
+    writeFixtureFile(fix, 'valid.yaml', {
       name: 'valid',
+      version: '1.0.0',
 
       phases: [
         { id: 'a1', type: 'main', skill: 'entry-agent-skill', task: 'step 1', operations: [] },
@@ -163,15 +164,23 @@ describe('Schema validation (valid / invalid taskflow YAML)', () => {
     expect(result.node?.skill).toBe('entry-agent-skill');
   });
 
-  it('rejects a graph declaring the version field — dead field, loud rejection', async () => {
-    writeFixtureFile(fix, 'bad-version.taskflow.yaml', validGraph({ version: '1.0' }));
+  it('accepts a graph declaring a matching semver version — format self-description', async () => {
+    writeFixtureFile(fix, 'self-described.yaml', validGraph({ name: 'self-described', version: '1.2.3' }));
 
     const rt = await createTestRuntime(fix);
-    await expect(rt.graphStart('bad-version', { mode: 'auto' })).rejects.toThrow();
+    const result = await rt.graphStart('self-described', { mode: 'auto' });
+    expect(result.runId).toBeTruthy();
+  });
+
+  it('rejects a graph declaring an unsupported major version — loud rejection', async () => {
+    writeFixtureFile(fix, 'future-version.yaml', validGraph({ version: '9.0.0' }));
+
+    const rt = await createTestRuntime(fix);
+    await expect(rt.graphStart('future-version', { mode: 'auto' })).rejects.toThrow(/major/);
   });
 
   it('accepts unknown phase field (lenient — allows skill)', async () => {
-    writeFixtureFile(fix, 'bad-field.taskflow.yaml', {
+    writeFixtureFile(fix, 'bad-field.yaml', {
       name: 'bad-field',
 
       phases: [{ id: 'p1', type: 'main', skill: 'entry-agent-skill', task: 'x', garbageField: 42, operations: [] }],
@@ -184,7 +193,7 @@ describe('Schema validation (valid / invalid taskflow YAML)', () => {
   });
 
   it('rejects missing phases array', async () => {
-    writeFixtureFile(fix, 'no-phases.taskflow.yaml', {
+    writeFixtureFile(fix, 'no-phases.yaml', {
       name: 'no-phases',
     });
 
@@ -193,7 +202,7 @@ describe('Schema validation (valid / invalid taskflow YAML)', () => {
   });
 
   it('rejects non-YAML graph file', async () => {
-    const filePath = join(fix.taskflowDir, 'bad-yaml.taskflow.yaml');
+    const filePath = join(fix.taskflowDir, 'bad-yaml.yaml');
     writeFileSync(filePath, 'this is not yaml {{{');
 
     const rt = await createTestRuntime(fix);
@@ -223,7 +232,7 @@ describe('Agent registry merge (builtin + project override)', () => {
   });
 
   it('rejects removed agent type at load (GraphDefinitionError — schema enum gate)', async () => {
-    writeFixtureFile(fix, 'skills-default.taskflow.yaml', {
+    writeFixtureFile(fix, 'skills-default.yaml', {
       name: 'skills-default',
 
       phases: [{ id: 'a1', type: 'agent', task: 'run' }],
@@ -242,7 +251,7 @@ describe('Agent registry merge (builtin + project override)', () => {
   });
 
   it('applies phase skill — skill comes from phase.skill', async () => {
-    writeFixtureFile(fix, 'skills-override.taskflow.yaml', {
+    writeFixtureFile(fix, 'skills-override.yaml', {
       name: 'skills-override',
 
       phases: [{ id: 'a1', type: 'main', skill: 'my-custom-agent-skill', task: 'custom agent', operations: [] }],

@@ -30,7 +30,7 @@ function writeConfig(fix: Fixture, content: string): void {
 }
 
 function writeGraph(fix: Fixture, name: string, graph: Record<string, unknown>): void {
-  writeFileSync(join(fix.cwd, 'graphs', `${name}.taskflow.yaml`), JSON.stringify(graph, null, 2));
+  writeFileSync(join(fix.cwd, 'graphs', `${name}.yaml`), JSON.stringify(graph, null, 2));
 }
 
 async function runInit(taskflowDir: string): Promise<IGraphInitReport> {
@@ -86,6 +86,18 @@ describe('graph_init full-registry validation', () => {
     const report = await runInit(join(fix.cwd, 'graphs'));
     expect(report.validation.config.exists).toBe(false);
     expect(report.validation.errors).toHaveLength(0);
+  });
+
+  it('reports schema violations in the graph health scan (not YAML-parse only)', async () => {
+    // YAML-parseable but WorkflowSchema-invalid: non-semver version + no name
+    writeGraph(fix, 'bad-schema', { version: 'not-semver', phases: [] });
+
+    const report = await runInit(join(fix.cwd, 'graphs'));
+    const schemaError = report.validation.errors.find((e) => e.includes('schema validation failed'));
+    expect(schemaError).toBeDefined();
+    expect(schemaError).toContain('bad-schema.yaml');
+    // the builtin graphs scan cleanly (valid headers) — no YAML parse noise
+    expect(report.validation.errors.filter((e) => e.includes('YAML parse error'))).toHaveLength(0);
   });
 
   it('is idempotent — repeated runs report identical state', async () => {

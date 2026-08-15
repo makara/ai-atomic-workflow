@@ -75,7 +75,7 @@ function toMcpError(err: unknown): McpErrorInfo {
 
 export const GraphStartSchema = z
   .object({
-    graphName: z.string().min(1).describe('Graph name — matches the name field of .taskflow.yaml or a registry entry'),
+    graphName: z.string().min(1).describe('Graph name — matches the name field of .yaml or a registry entry'),
     args: z
       .record(z.string(), z.unknown())
       .optional()
@@ -136,6 +136,8 @@ const GraphCleanCompletedSchema = z.object({
 });
 
 const GraphCleanAllSchema = z.object({});
+
+const GraphAssetsSchema = z.object({});
 
 // ── MCP Server ───────────────────────────────────────────────────────
 
@@ -341,6 +343,29 @@ server.tool(
         isError: true,
         code,
         content: [{ type: 'text' as const, text: `graph_clean_all failed: ${message}` }],
+      };
+    }
+  },
+);
+
+// Tool 10: graph_assets — graph asset query (read-only, passive info channel)
+server.tool(
+  'graph_assets',
+  'Enumerate graph assets — merged registry entries (project-first) with per-graph load-time problems. Read-only — never creates a run. The passive information channel for graph-workflow: locate graph files, understand graph state and problems.',
+  GraphAssetsSchema.shape,
+  async (_args) => {
+    const rt = await getRuntime();
+    try {
+      const result = await rt.graphAssets();
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+      };
+    } catch (err) {
+      const { message, code } = toMcpError(err);
+      return {
+        isError: true,
+        code,
+        content: [{ type: 'text' as const, text: `graph_assets failed: ${message}` }],
       };
     }
   },

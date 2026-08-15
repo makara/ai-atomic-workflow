@@ -47,6 +47,8 @@ export interface IBaseNodeDetail {
   readonly skill?: string;
   /** operation classes — phase operations declaration (HLT closed set); handler injects registry entries + verifies per declared class */
   readonly operations?: string[];
+  /** graph-level constraints — `[graph]`-prefixed dispatch facts from the loaded graph definition; absent graph field → empty */
+  readonly constraints?: string[];
   readonly retryCount: number;
 }
 
@@ -77,6 +79,8 @@ export interface INodeDetail {
   readonly routingActions?: ReadonlyArray<IApprovalAction>;
   /** All types — effective channel patterns (scheduler-side scope merge: project → graph → flow → phase) */
   readonly channels?: string[];
+  /** All types — graph-level constraints as dispatch facts: `[graph]`-prefixed entries read from the loaded graph definition (unbypassable; absent graph field → empty). Project-level rules are NOT carried here — they arrive via the agent-side activation session copy and are merged into the block by the dispatch handler. */
+  readonly constraints?: string[];
   /** Gate phase — rework jumps (route-first): agent evaluates when against judgment context; hit → backward jump target */
   readonly jumps?: ReadonlyArray<IJumpCondition>;
   /** Route membership — all phase types (optional; absent = implicit default route) */

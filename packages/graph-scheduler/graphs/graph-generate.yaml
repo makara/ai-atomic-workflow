@@ -1,6 +1,53 @@
 name: graph-generate
-# Maker journey — produces .taskflow.yaml graphs (name states the operation).
-description: Maker journey — produces .taskflow.yaml graph artifacts for end-user projects.
+$schema: ../schemas/workflow.schema.json
+version: 1.0.0
+# Node overview table (atom inventory). Bounded compound goals:
+# connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS (AND/OR/IF/
+# THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR operands,
+# conditional paths ≤ 3. Entry shape { id, type, goal, constraints? } — goal
+# states the atom's intent; mechanism lives in the goal (flow entries state
+# "expands <use> subgraph"). constraints: one-sentence prose rules — general
+# boundaries + explicit non-goals, ≤ 5 per atom, never machine-validated.
+# User-maintained. Maker self-demonstration.
+inventory:
+  - id: entry
+    type: main
+    goal: Executes atom-scope-interview to confirm the graph name, topology scope and save location
+    constraints:
+      - confirms only — never decides name, scope or save location
+  - id: spec
+    type: main
+    goal: Executes atom-graph-design to design the topology THEN draft the inventory
+    constraints:
+      - designs only — never writes the graph file
+  - id: spec-accept
+    type: approval
+    goal: Accept the graph design OR route rework
+    constraints:
+      - routes only — never edits the design
+  - id: implement
+    type: main
+    goal: Executes atom-graph-writer to generate the YAML with inventory, registry entry and attached doc
+    constraints:
+      - writes the three-path bundle only — never co-produces skills
+      - creation only — never edits existing graphs
+  - id: review
+    type: main
+    goal: Runs code-review over the produced graph THEN reports findings
+    constraints:
+      - reports findings — never fixes inline
+  - id: gate
+    type: gate
+    goal: Jump back to implement IF review fails AND retry bound is not reached
+    constraints:
+      - machine judgment only — never decides beyond declared jump conditions
+  - id: accept
+    type: approval
+    goal: Accept the produced graph OR end the run
+    constraints:
+      - routes only — never edits the produced graph
+# Maker journey — produces workflow YAML graphs (name states the operation).
+description: Maker journey — produces workflow YAML graph artifacts for end-user projects.
 # Graph-level ambient context — phases consume atom-graph-spec without
 # per-node declaration. Three-tier channel model: CONTEXT.md arrives via the
 # platform convention layer (absence-tolerant — foreign projects degrade to
@@ -70,12 +117,13 @@ phases:
       produce the graph artifact per the confirmed design + atom-graph-spec.
 
       Three-path bundle (project convention, writer skill cannot know it):
-      graph file at .graph-scheduler/graphs/<name>.taskflow.yaml (default
-      save_location), registry entry in .graph-scheduler/graphs/registry.json,
+      graph file at .graph-scheduler/graphs/<name>.yaml (default
+      save_location) with the $schema + version self-description header,
+      registry entry in .graph-scheduler/graphs/registry.json,
       attached usage doc at .graph-scheduler/docs/<name>.md.
 
       Load-probe validation: graph_start the produced graph → expect a node
-      return (no contractWarnings field exists — machine validation only) → then graph_force_end the probe run.
+      return (problems field carries load-time machine warnings, if any) → then graph_force_end the probe run.
       Report the probe result; deviations from design SHALL be reported, not
       negotiated.
 

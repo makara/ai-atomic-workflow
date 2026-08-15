@@ -38,12 +38,14 @@
     "src/",
     "dist/",
     "graphs/",
+    "schemas/",
     "package.json",
     "README.md"
   ],
   "scripts": {
     "build": "tsup",
     "prepack": "yarn build && yarn test",
+    "schema:gen": "bun run scripts/schema-gen.ts",
     "start": "bun run server.ts",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -58,6 +60,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "prettier": "^3.9.6",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"

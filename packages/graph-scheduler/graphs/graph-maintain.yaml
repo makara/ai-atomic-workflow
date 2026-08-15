@@ -1,0 +1,202 @@
+name: graph-maintain
+$schema: ../schemas/workflow.schema.json
+version: 1.0.0
+# Node overview table (atom inventory). Bounded compound goals:
+# connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS (AND/OR/IF/
+# THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR operands,
+# conditional paths ≤ 3. Entry shape { id, type, goal, constraints? } — goal
+# states the atom's intent; mechanism lives in the goal (flow entries state
+# "expands <use> subgraph"). constraints: one-sentence prose rules — general
+# boundaries + explicit non-goals, ≤ 5 per atom, never machine-validated.
+# User-maintained.
+inventory:
+  - id: entry
+    type: main
+    goal: Executes atom-scope-interview to confirm the target graph AND the maintenance intent
+    constraints:
+      - target graph via graph_assets — never guesses
+  - id: audit
+    type: main
+    goal: Executes atom-graph-writer maintain mode to audit inventory compliance AND content-vs-inventory AND in-graph declarations THEN attached-doc sync
+    constraints:
+      - read-only audit — never fixes findings inline
+      - machine checks = inventory id/type only — no new axis
+  - id: propose
+    type: main
+    goal: Converts audit findings into per-finding fix proposals (target, change, rationale)
+    constraints:
+      - proposals only — never applies without approval
+      - zero findings → zero proposals — never fabricated
+  - id: approval
+    type: approval
+    goal: Accept the fix proposals OR route rework OR end the run
+    constraints:
+      - mandatory user gate — never auto-applies fixes
+  - id: execute
+    type: main
+    goal: Applies approved proposals across the three-path bundle THEN runs the load-probe
+    constraints:
+      - applies approved proposals only — never unapproved changes
+      - three-path bundle — never a partial update
+  - id: review
+    type: main
+    goal: Reviews the executed maintenance pass against the approved proposals
+    constraints:
+      - read-only — never re-applies fixes
+  - id: gate
+    type: gate
+    goal: Jump back to execute IF review fails AND retry bound is not reached
+    constraints:
+      - machine judgment only — never decides beyond declared jump conditions
+  - id: accept
+    type: approval
+    goal: Accept the maintenance pass OR end the run
+    constraints:
+      - routes only — never edits the graph file
+# Maintenance flow — audits and fixes a graph file asset (mirrors the maker journey).
+description: Maintenance flow — audits a graph's inventory compliance and content-vs-inventory consistency, proposes fixes, applies approved ones.
+context:
+  - skill:atom-graph-spec
+  - skill:atom-graph-writer
+phases:
+  # Entry — target graph + maintenance scope (passive info via asset query).
+  - id: entry
+    type: main
+    dependsOn: []
+    skill: atom-scope-interview
+    operations: []
+    task: |
+      Execute scope interview per atom-scope-interview (maintenance flow —
+      kind=graph, operation=maintain; the target graph is resolved via the
+      graph asset query surface — graph_assets — never guessed from file names).
+
+      Topics: target graph (name — resolved via graph_assets to path +
+      description + current problems), maintenance intent (audit only |
+      audit + fix).
+
+      Behavior: confirm=mandatory; output path=derived;
+      dual-name check=none; context=optional.
+
+      Output contract: target_graph, maintenance_intent, scope_complete.
+
+  # Audit — machine checks (inventory id/type, description drift, attached
+  # doc existence, in-graph declaration existence) + LLM checks
+  # (content-vs-inventory semantics, doc coverage, declaration semantics).
+  - id: audit
+    type: main
+    dependsOn: [entry]
+    skill: atom-graph-writer
+    operations: [read, locate]
+    channels:
+      - node:entry
+    task: |
+      Execute atom-graph-writer maintain mode audit per atom-graph-writer
+      skill — machine checks: inventory id/type vs phases (per load-time
+      contract-pass semantics), registry description drift (mention of a
+      non-existent phase), attached-doc existence, in-graph declaration
+      existence (comments/task-text referencing fields or mechanisms that
+      do not exist — stale declaration = finding); LLM checks: phase task
+      content vs inventory description (semantic drift), attached-doc
+      coverage of the graph's phases, in-graph declaration semantics
+      (LLM judgment — no machine axis).
+
+      Scope from entry output: target_graph — never re-detected. Report
+      findings per check with evidence, never silently patched.
+
+      Output contract: findings [{check, severity, evidence}],
+      target_graph (echo).
+
+  # Propose — findings become concrete fix proposals.
+  - id: propose
+    type: main
+    dependsOn: [audit]
+    skill: atom-graph-writer
+    operations: [read]
+    channels:
+      - node:audit
+    task: |
+      Convert audit findings into fix proposals per atom-graph-writer
+      maintain mode — one proposal per finding: target (graph YAML /
+      registry entry / attached doc), change, rationale. Zero findings →
+      report no-op scope (zero proposals) — never fabricated work.
+
+      Output contract: proposals [{target, change, rationale}],
+      target_graph (echo).
+
+  # Approval — mandatory user gate in every run mode (maintenance executes
+  # only on approval, never autonomously).
+  - id: approval
+    type: approval
+    dependsOn: [propose]
+    channels:
+      - node:propose
+    task: |
+      Accept the fix proposals?
+
+      Decision: accept when proposals are sound — execute applies them;
+      revise otherwise (rework back to audit); end completes the run
+      (no fixes applied).
+
+  # Execute — three-path bundle apply + load-probe (mirrors the maker
+  # journey's produce-time validation).
+  - id: execute
+    type: main
+    dependsOn: [approval]
+    skill: atom-graph-writer
+    operations: [read, write, run, verify]
+    channels:
+      - node:entry
+      - node:propose
+    task: |
+      Execute atom-graph-writer maintain mode execute per atom-graph-writer
+      skill — apply the approved proposals across the three-path bundle
+      (graph YAML + registry entry + attached doc) in one pass, never a
+      partial bundle update.
+
+      Load-probe validation: graph_start the maintained graph → expect a
+      node return → then graph_force_end the probe run. Report the probe
+      result; deviations from proposals SHALL be reported, not negotiated.
+
+      Output contract: applied [{path, change}], validation
+      (passed | failed + details), target_graph (echo), summary.
+
+  # Review — executed changes vs approved proposals.
+  - id: review
+    type: main
+    dependsOn: [execute]
+    skill: code-review
+    operations: [locate, read, review]
+    agent: [reviewer, explore, task, general]
+    channels:
+      - node:entry
+      - node:propose
+    task: |
+      Review the executed maintenance pass per code-review (use ## Agent
+      hints for axis sub-agents; forward the injected ## Reference blocks —
+      axis agents SHALL NOT re-discover atom-graph-spec). Standards:
+      atom-graph-spec (graph definitions) + repo-documented coding
+      standards. Spec: executed changes match the approved proposals
+      (three-path bundle consistent).
+
+      Output contract: report (machine-parseable YAML, overall:
+      pass | fail).
+
+  # Gate — bounded rework on FAIL (backward jump to execute).
+  - id: gate
+    type: gate
+    dependsOn: [review]
+    jumps:
+      - when: 'review output shows overall: fail AND execute retryCount < 2'
+        to: execute
+
+  # Accept — final maintenance-pass approval.
+  - id: accept
+    type: approval
+    dependsOn: [gate]
+    channels:
+      - node:review
+    task: |
+      Accept the maintenance pass?
+
+      Decision: accept when the pass is consistent; rework otherwise
+      (back to audit); end completes the run.

@@ -1,8 +1,56 @@
 name: openspec-engineer
+$schema: ../schemas/workflow.schema.json
+version: 1.0.0
+# Node overview table (atom inventory). Bounded compound goals:
+# connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS (AND/OR/IF/
+# THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR operands,
+# conditional paths ≤ 3. Entry shape { id, type, goal, constraints? } — goal
+# states the atom's intent; mechanism lives in the goal (flow entries state
+# "expands <use> subgraph"). constraints: one-sentence prose rules — general
+# boundaries + explicit non-goals, ≤ 5 per atom, never machine-validated.
+# User-maintained.
+inventory:
+  - id: to-spec
+    type: main
+    goal: Executes to-spec to synthesize the delta spec from the ADR decision and change context
+    constraints:
+      - never asks the change name — resolves from args or the active list
+      - synthesizes only — never implements
+  - id: to-tickets
+    type: main
+    goal: Executes to-tickets to split the spec into tracer-bullet tickets
+    constraints:
+      - splits only — never implements slices
+  - id: implement
+    type: main
+    goal: Runs implement to deliver the ticket slices test-first THEN verifies the suite
+    constraints:
+      - test-first — never ships without verification
+  - id: implement-review
+    type: main
+    goal: Runs code-review over the implementation THEN reports findings
+    constraints:
+      - reports findings — never fixes inline
+  - id: implement-gate
+    type: gate
+    goal: Jump back to implement IF review fails AND retry bound is not reached
+    constraints:
+      - machine judgment only — never decides beyond declared jump conditions
+  - id: implement-accept
+    type: approval
+    goal: Accept the implementation IF review passes
+    constraints:
+      - routes only — never edits the implementation
+  - id: openspec-archive
+    type: main
+    goal: Executes atom-doc-lifecycle to close the workflow and archive the change
+    constraints:
+      - closes the workflow — never reopens settled records
 phases:
   # Spec — synthesize from the recorded ADR decision + change context.
   - id: to-spec
     type: main
+    skill: to-spec
     dependsOn: []
     operations: [read, write, run]
     task: |
@@ -20,6 +68,7 @@ phases:
   # Tickets — split the spec into tracer-bullet slices.
   - id: to-tickets
     type: main
+    skill: to-tickets
     dependsOn: [to-spec]
     operations: [read, write, run]
     task: |

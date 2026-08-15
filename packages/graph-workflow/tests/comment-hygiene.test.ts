@@ -67,7 +67,7 @@ const SCAN_ROOTS: ScanRoot[] = [
   },
   {
     root: 'packages/graph-scheduler/graphs',
-    extensions: ['.taskflow.yaml', '.json'],
+    extensions: ['.yaml', '.json'],
     patterns: [ADR_PATTERN, CJK_PATTERN],
   },
 ];

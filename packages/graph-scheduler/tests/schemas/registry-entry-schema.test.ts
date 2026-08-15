@@ -15,7 +15,7 @@ describe('RegistryEntrySchema — happy path', () => {
   it('parses entry with name + path + description', () => {
     const raw = {
       name: 'my-workflow',
-      path: './graphs/my-workflow.taskflow.yaml',
+      path: './graphs/my-workflow.yaml',
       description: 'A sample workflow for testing',
     };
 
@@ -23,7 +23,7 @@ describe('RegistryEntrySchema — happy path', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.name).toBe('my-workflow');
-      expect(result.data.path).toBe('./graphs/my-workflow.taskflow.yaml');
+      expect(result.data.path).toBe('./graphs/my-workflow.yaml');
       expect(result.data.description).toBe('A sample workflow for testing');
     }
   });
@@ -31,14 +31,14 @@ describe('RegistryEntrySchema — happy path', () => {
   it('parses entry without description', () => {
     const raw = {
       name: 'simple-graph',
-      path: '/absolute/path/to/graph.taskflow.yaml',
+      path: '/absolute/path/to/graph.yaml',
     };
 
     const result = RegistryEntrySchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.name).toBe('simple-graph');
-      expect(result.data.path).toBe('/absolute/path/to/graph.taskflow.yaml');
+      expect(result.data.path).toBe('/absolute/path/to/graph.yaml');
       expect(result.data.description).toBeUndefined();
     }
   });
@@ -46,7 +46,7 @@ describe('RegistryEntrySchema — happy path', () => {
   it('parses entry with relative path', () => {
     const raw = {
       name: 'nested-workflow',
-      path: './nested/workflow.taskflow.yaml',
+      path: './nested/workflow.yaml',
       description: 'Nested directory workflow',
     };
 
@@ -61,7 +61,7 @@ describe('RegistryEntrySchema — happy path', () => {
 
 describe('RegistryEntrySchema — invalid input', () => {
   it('rejects missing name', () => {
-    const result = RegistryEntrySchema.safeParse({ path: './graph.taskflow.yaml' });
+    const result = RegistryEntrySchema.safeParse({ path: './graph.yaml' });
     expect(result.success).toBe(false);
   });
 
@@ -71,7 +71,7 @@ describe('RegistryEntrySchema — invalid input', () => {
   });
 
   it('rejects name that is not a string', () => {
-    const result = RegistryEntrySchema.safeParse({ name: 123, path: './graph.taskflow.yaml' });
+    const result = RegistryEntrySchema.safeParse({ name: 123, path: './graph.yaml' });
     expect(result.success).toBe(false);
   });
 
@@ -88,7 +88,7 @@ describe('RegistryEntrySchema — invalid input', () => {
   it('rejects description that is not a string', () => {
     const result = RegistryEntrySchema.safeParse({
       name: 'test',
-      path: './graph.taskflow.yaml',
+      path: './graph.yaml',
       description: 42,
     });
     expect(result.success).toBe(false);
@@ -108,7 +108,7 @@ describe('RegistryEntrySchema — boundary', () => {
   it('accepts empty description string', () => {
     const result = RegistryEntrySchema.safeParse({
       name: 'test',
-      path: './graph.taskflow.yaml',
+      path: './graph.yaml',
       description: '',
     });
     expect(result.success).toBe(true);

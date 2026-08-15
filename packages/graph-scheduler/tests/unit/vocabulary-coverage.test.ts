@@ -47,10 +47,10 @@ describe('uniform user-supplement validation surface (run path)', () => {
 
       phases: [{ id: 'p', type: 'main', dependsOn: [], task: 'x', operations: [] }],
     };
-    writeFileSync(join(fixture.dir, 'g.taskflow.yaml'), JSON.stringify(graph, null, 2));
+    writeFileSync(join(fixture.dir, 'g.yaml'), JSON.stringify(graph, null, 2));
     writeFileSync(
       join(fixture.dir, 'registry.json'),
-      JSON.stringify({ graphs: [{ name: 'g', path: 'g.taskflow.yaml' }] }, null, 2),
+      JSON.stringify({ graphs: [{ name: 'g', path: 'g.yaml' }] }, null, 2),
     );
   }
 

@@ -17,13 +17,13 @@ interface Fixture {
 }
 
 function writeGraph(fixture: Fixture, name: string, graph: Record<string, unknown>): void {
-  writeFileSync(join(fixture.taskflowDir, `${name}.taskflow.yaml`), JSON.stringify(graph, null, 2));
+  writeFileSync(join(fixture.taskflowDir, `${name}.yaml`), JSON.stringify(graph, null, 2));
 }
 
 function writeRegistry(fixture: Fixture, names: string[]): void {
   writeFileSync(
     join(fixture.taskflowDir, 'registry.json'),
-    JSON.stringify({ graphs: names.map((n) => ({ name: n, path: `${n}.taskflow.yaml` })) }, null, 2),
+    JSON.stringify({ graphs: names.map((n) => ({ name: n, path: `${n}.yaml` })) }, null, 2),
   );
 }
 
@@ -98,7 +98,7 @@ describe('subgraph load error propagation', () => {
       const raw = (res.left as { error?: unknown }).error ?? res.left;
       const err = raw as { _tag?: string; message?: string };
       expect(err._tag).toBe('FlowPhaseError');
-      expect(err.message).toContain("child graph 'ghost-child' not found in registry or taskflow dirs");
+      expect(err.message).toContain("child graph 'ghost-child' not found in registry or workflow dirs");
     }
   });
 
@@ -115,13 +115,13 @@ describe('subgraph load error propagation', () => {
     };
     writeGraph(fixture, 'parent', parent);
     writeGraph(fixture, 'real-child', child);
-    // registry maps aliased-child → real-child.taskflow.yaml — override must win
+    // registry maps aliased-child → real-child.yaml — override must win
     writeFileSync(
       join(fixture.taskflowDir, 'registry.json'),
       JSON.stringify({
         graphs: [
-          { name: 'parent', path: 'parent.taskflow.yaml' },
-          { name: 'aliased-child', path: 'real-child.taskflow.yaml' },
+          { name: 'parent', path: 'parent.yaml' },
+          { name: 'aliased-child', path: 'real-child.yaml' },
         ],
       }),
     );

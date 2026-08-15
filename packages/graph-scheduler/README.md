@@ -31,9 +31,9 @@
 
 Graph-Engineering for Real Engineers: Graphs define workflows; workflows build graphs. Based on mattpocock/skills.
 
-DAG execution engine as a standalone **MCP Server** (stdio transport) — 9 MCP tools, no network port.
+Graph execution engine as a standalone **MCP Server** (stdio transport) — 9 MCP tools, no network port.
 
-graph-scheduler is the infrastructure half of Atomic Workflow. It loads `.taskflow.yaml` graph definitions, schedules phases in topological order, manages approval decisions, and persists run state. The agent does all the actual work; the scheduler only issues work orders and tracks progress.
+graph-scheduler is the infrastructure half of Atomic Workflow. It loads workflow YAML graph definitions (`.yaml` — schema-determined identity), schedules phases in topological order, manages approval decisions, and persists run state. The agent does all the actual work; the scheduler only issues work orders and tracks progress.
 
 **Stack**: bun · Effect-TS · zod v4 (validation) · libsql (persistence) · MCP SDK
 
@@ -134,7 +134,7 @@ Use setup-atomic-workflow to initialize this project
 The skill runs a four-step flow (explore → present → confirm → write) and scaffolds `.graph-scheduler/`:
 
 - `config.json` — dbPath, taskflowDir, registryPaths; optional `context:` = USER-supplement layer (user-owned ambient files, existence-validated — never required; platform estate is organically discovered, no declaration needed)
-- `graphs/` — where your custom `.taskflow.yaml` files live
+- `graphs/` — where your custom workflow YAML graph files live (any `.yaml` passing schema validation)
 - `docs/` — attached-doc home for the maker journey (`.graph-scheduler/docs/<name>.md`)
 - `constraints.md` — rules enforced on every graph run
 
@@ -142,10 +142,12 @@ Idempotent: never overwrites existing files. Re-running writes nothing.
 
 ## Graph Format
 
-A `.taskflow.yaml` graph declares phases and their dependencies:
+A workflow YAML graph declares phases and their dependencies — any `.yaml` file that passes schema validation is a graph (suffix-free, self-describing via `$schema` + `version` headers):
 
 ```yaml
 name: e2e-minimal
+$schema: workflow.schema.json
+version: 1.0.0
 phases:
   - id: agent-echo
     type: main
@@ -182,17 +184,18 @@ phases:
 
 ## MCP Tools
 
-9 tools, one action per tool, each with its own JSON Schema:
+10 tools, one action per tool, each with its own JSON Schema (MCP tool parameter schemas — distinct from the graph-format JSON Schema at `schemas/workflow.schema.json`):
 
 |Tool|Parameters|What it does|
 |-|-|-|
-|`graph_start`|`graphName: string`, `args?: object`|Create a run, return the first ready node (NextNode)|
+|`graph_start`|`graphName: string`, `args?: object`|Create a run, return the first ready node (NextNode) — plus resolution identity (`resolvedFrom` / `resolvedPath` / `description`) and load-time machine `problems` (inventory consistency, description drift; empty when clean)|
 |`graph_advance`|`runId`, `nodeId`, `branchTo?`, `endRun?`|Report a node complete — notify + ask next in one step. `branchTo` passes a routing target (gate rework target / approval branch-route target); `endRun: true` completes the run immediately (approval end action). Output and duration are not passed in — content lives in the agent session, duration is derived from timestamps|
 |`graph_jump`|`runId`, `targetPhaseId`|Jump to a specific phase — re-run it after an approval REWORK decision|
 |`graph_force_end`|`runId`|Force-terminate a run — unfinished nodes marked aborted, run marked terminated. **Irreversible**|
 |`graph_status`|`runId`|Full run snapshot — per-phase status, retry counts, timestamps|
 |`graph_list`|—|All run summaries (runId, graphName, fsmState, createdAt, updatedAt), newest first|
-|`graph_init`|—|Initialize the database (create tables + run migration) plus a machine health check (graph YAML parse + config health report). Idempotent|
+|`graph_assets`|—|All registered graph assets (merged registries, project-first): name, path, description, per-graph load-time problems, resolvedFrom. Read-only — never creates a run. The passive information channel for graph-workflow (locate graph files, understand state and problems)|
+|`graph_init`|—|Initialize the database (create tables + run migration) plus a full machine health check (schema + contract/inventory pass per graph, per-graph problems, config health report). Idempotent|
 |`graph_clean_completed`|`before?: string`|Delete completed run records, optionally before an ISO 8601 date|
 |`graph_clean_all`|—|Delete ALL run records — running/blocked/terminated. **Dangerous**|
 
@@ -228,9 +231,9 @@ graph_start({ graphName: "e2e-minimal" })
 |**e2e-minimal**|Minimal E2E: main → approval loop|
 |**arch-review**|Requirement production graph, standalone: scope-entry interview (entry node — scope + output path + report input fresh\|existing) → arch-review report (improve-codebase-architecture — producer) → review-accept (Continue = requirement ready / Loop again / End). Independently executable requirement production; the loop composes it as its requirement stage (adopt + implement follow in arch-review-loop).|
 |**adopt-with-docs**|Requirement adoption (adopt stage) + spec production: adopt-scope (interview: idea/goal or input document) → adopting (grilling conversation, inline domain-modeling side effects) → adopt-accept (adoption approval) → spec-propose (openspec-propose — adopted requirements materialize as the OpenSpec change). Standalone raw idea entry; composed as the loop's adopt stage — receives the produced report as input document and appends its record as a dated appendix section.|
-|**graph-generate**|Graph production — the maker journey: entry (atom-scope-interview) → spec (atom-graph-design per atom-graph-spec) → spec-accept → implement (atom-graph-writer: writes .taskflow.yaml + registry entry + attached doc .graph-scheduler/docs/<name>.md, load-probe validated) → review → gate → accept. Single kind (graph), single operation (create)|
-|**spec-implement**|Implementation graph: spec-extract (produced change — upstream channel when composed / {args.changeName} standalone) → track gate (minimal/detailed) → track-owned closure (plain archive / atom-doc-lifecycle) → pipeline-done. Pure implementation of an existing change — no spec generation; rework is the loop in arch-review-loop.|
-|**openspec-apply**|OpenSpec apply pipeline: apply change → dual review → bounded auto-rework gate → plain archive (openspec-archive-change)|
+|**graph-generate**|Graph production — the maker journey: entry (atom-scope-interview) → spec (atom-graph-design per atom-graph-spec) → spec-accept → implement (atom-graph-writer: writes .yaml + registry entry + attached doc .graph-scheduler/docs/<name>.md, load-probe validated) → review → gate → accept. Single kind (graph), single operation (create)|
+|**spec-implement**|Implementation graph: spec-extract (produced change — upstream channel when composed / {args.changeName} standalone) → track gate (minimal/detailed) → track-owned closure (plain archive / atom-doc-lifecycle) → workflow-done. Pure implementation of an existing change — no spec generation; rework is the loop in arch-review-loop.|
+|**openspec-apply**|OpenSpec apply workflow: apply change → dual review → bounded auto-rework gate → plain archive (openspec-archive-change)|
 |**openspec-engineer**|OpenSpec detailed implementation: spec synthesis → tickets → tdd implementation → dual review → bounded gate → approval → lifecycle closure (reverse-validated archive + ADR fold + index)|
 |**arch-review-loop**|Three-stage composition with a single loop: requirement production (arch-review — scope → report → accept) → round-continue content gate (branch-route: continue activates the proceed route / end when no Top Recommendation remains) → adopt (adopt-with-docs — confirms the report, appends dated appendix, produces the OpenSpec change) → implementation (spec-implement — consumes the change → track machinery → archive) → loop-gate (auto jump to requirement/scope-entry while Top Rec remains, bounded) → loop-accept (Loop again default, Complete = user ends)|
 |**estate-maintain**|Estate maintenance graph: entry (trigger classification — domain-change/skill-change/proactive + workstream selection) → domains-index (atom-doc-maintain per atom-domain-spec) / specs-sync (atom-spec-maintain) / adr-align (atom-adr-maintain) → review (consistency gate + reverse-validation + read-only deployment-mirror check) → accept.|
@@ -258,7 +261,7 @@ The entry classifies the trigger (domain-change / skill-change / proactive / use
 
 ## arch-review-loop — one loop, one problem
 
-The flagship graph: each loop round takes the biggest remaining architectural problem from review to shipped change. The loop at a glance — implementation runs on two tracks (minimal apply / detailed engineer), pipeline gates merged into one display:
+The flagship graph: each loop round takes the biggest remaining architectural problem from review to shipped change. The loop at a glance — implementation runs on two tracks (minimal apply / detailed engineer), stage gates merged into one display:
 
 ```mermaid
 graph LR
@@ -286,7 +289,7 @@ Phases (after composition):
 |`adopt/adopting`|main|Adoption conversation (`grilling` skill) — challenges and confirms the produced requirements, appends the adoption record as a dated appendix to the report, may offer an ADR|
 |`adopt/spec-propose`|main|Openspec-propose (upstream) — the adopted requirements materialize as the OpenSpec change|
 |`implement/spec-extract`|main|Extracts the implementation scope from the produced change (no interview, no generation)|
-|`implement/pipeline-accept`|approval|Track gate — minimal (apply directly) / detailed (engineer); recommendation follows the echoed ADR judgment|
+|`implement/track-accept`|approval|Track gate — minimal (apply directly) / detailed (engineer); recommendation follows the echoed ADR judgment|
 |`loop-gate`|gate|THE loop — backward jump to `requirement/scope-entry` when: run mode is auto AND `requirement/arch-review` output shows `top_rec_remaining: true` AND `requirement/scope-entry` retryCount < 8. No match → pass through|
 |`loop-accept`|approval|Round-end card — Loop again (default) or Complete (end action). Recommendation follows the report state and the loop bound; when nothing remains, ending IS the recommendation|
 
@@ -301,7 +304,7 @@ Key semantics:
 
 Atomic Workflow bootstraps itself — the maker journey for authoring graphs is a built-in graph:
 
-**Generate a graph** — `graph-generate` is the maker journey graph: a concrete 7-phase pipeline (entry → spec → spec-accept → implement → review → gate → accept; the name states the operation). Entry (atom-scope-interview) confirms the graph name, topology scope, and save location (default `.graph-scheduler/graphs/`) — no CONTEXT.md dependency. Spec designs the phase topology against atom-graph-spec; implement writes the `.taskflow.yaml` + registry entry + attached doc (`.graph-scheduler/docs/<name>.md`); review validates per code-review with atom-graph-spec; gate applies bounded rework; a single accept closes. Single kind (graph), single operation (create) — no skill co-production:
+**Generate a graph** — `graph-generate` is the maker journey graph: a concrete 7-phase workflow (entry → spec → spec-accept → implement → review → gate → accept; the name states the operation). Entry (atom-scope-interview) confirms the graph name, topology scope, and save location (default `.graph-scheduler/graphs/`) — no CONTEXT.md dependency. Spec designs the phase topology against atom-graph-spec; implement writes the `.yaml` + registry entry + attached doc (`.graph-scheduler/docs/<name>.md`); review validates per code-review with atom-graph-spec; gate applies bounded rework; a single accept closes. Single kind (graph), single operation (create) — no skill co-production:
 
 ```text
 Use atom-pilot to run graph-generate: generate a workflow for release notes from merged PRs.

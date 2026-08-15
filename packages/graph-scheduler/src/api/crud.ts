@@ -17,10 +17,10 @@ import {
   InvalidStateTransitionError,
   transition,
   type FsmState,
-  type TaskflowGraph,
   type TransitionResult,
+  type WorkflowGraph,
 } from '../fsm/transition.js';
-import type { Taskflow } from '../graph-definition.js';
+import type { Workflow } from '../graph-definition.js';
 import { GraphRepository, type GraphRun } from '../lib/db/repository.js';
 import type { INodeDetail } from '../phase-handler/types.js';
 import { RegistryLoader } from '../registry-loader.js';
@@ -36,9 +36,8 @@ import type {
 
 import { ConfigService } from '../config-service.js';
 import { executeEffects, reconstructFsmState } from './fsm-reconstruct.js';
-import { loadGraphForRun, loadGraphWithRegistry, toTaskflowGraph } from './graph-loader.js';
-import { dropRunCaches, graphLoadCache } from './run-caches.js';
-import { buildNodeDetail, buildSnapshot, findActiveNode, type IGraphSnapshot } from './snapshot.js';
+import { loadGraphForRun, loadGraphWithRegistry, toWorkflowGraph, type GraphLoadMeta } from './graph-loader.js';
+import { buildNodeDetail, buildSnapshot, dropSnapshotCursor, findActiveNode, type IGraphSnapshot } from './snapshot.js';
 
 /** Next node detail — returned alongside snapshot for agent dispatch. */
 export type NodeDetail = INodeDetail;
@@ -48,12 +47,12 @@ type RunState = Extract<FsmState, { phases: Record<string, FsmNodeState> }>;
 
 /**
  * Shared skeleton for advance/jump/force-end: load persisted run + node states,
- * reconstruct FSM state, load graph (cache-aware).
+ * reconstruct FSM state, load graph (direct fresh load).
  */
 function loadRunContext(
   runId: string,
 ): Effect.Effect<
-  { run: GraphRun; currentState: RunState; graph: TaskflowGraph; tf: Taskflow },
+  { run: GraphRun; currentState: RunState; graph: WorkflowGraph; tf: Workflow & GraphLoadMeta },
   SchedulerError,
   GraphRepository | FileSystem | RegistryLoader | ConfigService
 > {
@@ -63,8 +62,8 @@ function loadRunContext(
     const nodeStates = yield* repo.getNodeStates(runId);
     const currentState = (yield* reconstructFsmState(run, nodeStates)) as RunState;
     const config = yield* ConfigService;
-    const tf = yield* loadGraphForRun(runId, run.graphName, config.context);
-    const graph = yield* toTaskflowGraph(tf);
+    const tf = yield* loadGraphForRun(run.graphName, config.context);
+    const graph = yield* toWorkflowGraph(tf);
     return { run, currentState, graph, tf };
   });
 }
@@ -76,7 +75,7 @@ function loadRunContext(
 function dispatchEvent(
   runId: string,
   currentState: RunState | undefined,
-  graph: TaskflowGraph,
+  graph: WorkflowGraph,
   event: FsmEvent,
 ): Effect.Effect<TransitionResult, InvalidStateError> {
   return Effect.suspend(() => {
@@ -131,7 +130,7 @@ function invalidState(runId: string, currentStatus: string, attemptedAction: str
  * Loads the graph definition, creates a state machine, dispatches START,
  * persists the new run and node states, and returns the run ID + first node.
  *
- * @param graphName — graph name (resolved via registry or `${graphName}.taskflow.yaml`)
+ * @param graphName — graph name (resolved via registry or schema probe)
  * @param args      — optional invocation arguments (accessible via {args.X} in templates);
  *                    `args.mode` (manual | auto) is the activation mode — REQUIRED (absent → ModeRequiredError)
  */
@@ -148,6 +147,8 @@ export function graphStart(
     resolvedPath: string;
     /** Graph top-level description — purpose-focused identity text; absent when undeclared. */
     description?: string;
+    /** Load-time machine warnings (inventory consistency, description drift) — empty when clean. */
+    problems: string[];
     /** Run snapshot — same shape as advance/jump; entry dispatch carries it (jump nav + progress display). */
     snapshot: IGraphSnapshot;
   },
@@ -172,7 +173,7 @@ export function graphStart(
     const repo = yield* GraphRepository;
     const config = yield* ConfigService;
     const tf = yield* loadGraphWithRegistry(graphName, config.context);
-    const graph = yield* toTaskflowGraph(tf);
+    const graph = yield* toWorkflowGraph(tf);
 
     // Dispatch START
     const result = yield* dispatchEvent('', undefined, graph, { type: 'START', graphName, args });
@@ -189,8 +190,6 @@ export function graphStart(
     }
 
     const runId = nextState.runId;
-    // Cache graph definition for subsequent advance/jump within this run
-    graphLoadCache.set(runId, tf);
 
     // Create run row + node state rows in DB (author nodes only)
     yield* repo.createRun(runId, graphName, args);
@@ -208,6 +207,7 @@ export function graphStart(
       resolvedFrom: tf.resolvedFrom,
       resolvedPath: tf.resolvedPath,
       description: tf.description,
+      problems: tf.problems,
       snapshot: buildSnapshot(nextState, graph),
     };
   });
@@ -331,8 +331,8 @@ export function graphForceEnd(
     const repo = yield* GraphRepository;
     yield* executeEffects(result.effects, repo, graph);
 
-    // Terminal state — drop per-run caches, run will never dispatch again
-    dropRunCaches(runId);
+    // Terminal state — drop snapshot cursor, run will never dispatch again
+    dropSnapshotCursor(runId);
 
     return buildSnapshot(result.nextState, graph);
   });

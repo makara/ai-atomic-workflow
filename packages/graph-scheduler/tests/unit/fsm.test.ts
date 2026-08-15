@@ -19,8 +19,8 @@ import {
   InvalidStateTransitionError,
   transition,
   type FsmState,
-  type TaskflowGraph,
   type TransitionResult,
+  type WorkflowGraph,
 } from '../../src/fsm/transition.js';
 import type { Phase } from '../../src/schemas/index.js';
 
@@ -33,17 +33,17 @@ function ph(id: string, overrides: Partial<Phase> = {}): Phase {
   return { id, type: 'main', mode: 'exclusive', ...overrides, operations: [] };
 }
 
-function graph(name: string, phases: readonly Phase[]): TaskflowGraph {
+function graph(name: string, phases: readonly Phase[]): WorkflowGraph {
   return { name, phases };
 }
 
 /** Main-only entry graph — START/FORCE_END tests (drains after n1 completes). */
-function entryOnlyGraph(name?: string): TaskflowGraph {
+function entryOnlyGraph(name?: string): WorkflowGraph {
   return graph(name ?? 'test-graph', [ph('n1')]);
 }
 
 /** Linear chain — n1 → n2 (drains to completed after n2). */
-function linearEndGraph(): TaskflowGraph {
+function linearEndGraph(): WorkflowGraph {
   return graph('linear-end', [ph('n1'), ph('n2', { dependsOn: ['n1'] })]);
 }
 
@@ -53,7 +53,7 @@ function linearEndGraph(): TaskflowGraph {
  * stays pending forever.
  *   a → accept (approval, branchTo t1|t2) ; b (route t1) ; x (route other)
  */
-function branchForwardGraph(): TaskflowGraph {
+function branchForwardGraph(): WorkflowGraph {
   return graph('branch-forward', [
     ph('a'),
     ph('accept', {
@@ -70,7 +70,7 @@ function branchForwardGraph(): TaskflowGraph {
  * writer → review → gate. branchTo=writer triggers JUMP reset
  * (writer + review + gate → pending, retryCount + 1; upstream kept).
  */
-function branchJumpGraph(): TaskflowGraph {
+function branchJumpGraph(): WorkflowGraph {
   return graph('branch-jump', [
     ph('writer'),
     ph('review', { dependsOn: ['writer'] }),
@@ -90,7 +90,7 @@ function branchJumpGraph(): TaskflowGraph {
  *   a → accept (approval, branchTo t1|t2) ; b (route t1) ; c (route t2) ;
  *   gate (dep b, jumps to accept)
  */
-function routeClearGraph(): TaskflowGraph {
+function routeClearGraph(): WorkflowGraph {
   return graph('route-clear', [
     ph('a'),
     ph('accept', { type: 'approval', dependsOn: ['a'] }),
@@ -105,7 +105,7 @@ function routeClearGraph(): TaskflowGraph {
  * while the unselected route `t2` stays pending forever.
  *   a → accept (approval, branchTo t1|t2 routes) ; t1, t2 (routes, depend on accept)
  */
-function endCompletionGraph(): TaskflowGraph {
+function endCompletionGraph(): WorkflowGraph {
   return graph('end-completion', [
     ph('a'),
     ph('accept', {
@@ -124,7 +124,7 @@ function endCompletionGraph(): TaskflowGraph {
  * guard) instead of silently draining with the route members never activating.
  *   a → accept (approval, routing continue→proceed / end) ; b (route proceed)
  */
-function declaredRouteGraph(): TaskflowGraph {
+function declaredRouteGraph(): WorkflowGraph {
   return graph('declared-route', [
     ph('a'),
     ph('accept', {
@@ -181,7 +181,7 @@ function narrowTerminated(state: FsmState) {
 // ══════════════════════════════════════════════════════════════════════════
 
 // Test-local pure dispatch — legality check + transition, no stateful handle.
-function dispatchState(state: FsmState, event: FsmEvent, g: TaskflowGraph): TransitionResult {
+function dispatchState(state: FsmState, event: FsmEvent, g: WorkflowGraph): TransitionResult {
   assertLegalTransition(state.status, event.type);
   return transition(state, event, g);
 }
@@ -430,7 +430,7 @@ describe('isLegalTransition / dispatch', () => {
   });
 
   describe('JUMP retryCount semantics', () => {
-    function runToPartialDone(g: TaskflowGraph): FsmState {
+    function runToPartialDone(g: WorkflowGraph): FsmState {
       let state: FsmState = { status: 'idle' };
       state = transition(state, startEvent(), g).nextState;
       // Complete first node only — keep run in running state (later nodes active/pending)
@@ -942,7 +942,7 @@ describe('transition()', () => {
 
 describe('author activation', () => {
   /** entry → review chain. */
-  function entryProGraph(): TaskflowGraph {
+  function entryProGraph(): WorkflowGraph {
     return graph('entry-pro', [ph('entry'), ph('review', { dependsOn: ['entry'] })]);
   }
 

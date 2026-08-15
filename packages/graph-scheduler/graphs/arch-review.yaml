@@ -1,4 +1,42 @@
 name: arch-review
+$schema: ../schemas/workflow.schema.json
+version: 1.0.0
+# Node overview table (atom inventory). Bounded compound goals:
+# connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS (AND/OR/IF/
+# THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR operands,
+# conditional paths ≤ 3. Entry shape { id, type, goal, constraints? } — goal
+# states the atom's intent; mechanism lives in the goal (flow entries state
+# "expands <use> subgraph"). constraints: one-sentence prose rules — general
+# boundaries + explicit non-goals, ≤ 5 per atom, never machine-validated.
+# User-maintained.
+inventory:
+  - id: scope-entry
+    type: main
+    goal: Executes atom-scope-interview to confirm the review scope, report input and output path
+    constraints:
+      - never re-detects scope — scope comes from the activation
+      - report path user-owned — confirm, never guess
+  - id: explore
+    type: main
+    goal: Runs improve-codebase-architecture Step 1 to walk the codebase THEN collect friction evidence
+    constraints:
+      - read-only walk — no edits, no git ops
+  - id: first-principles
+    type: main
+    goal: Runs first-principles analysis over the explore digest THEN emits the rebuilt design
+    constraints:
+      - pure analysis — no interview, no user questions
+  - id: present-candidates
+    type: main
+    goal: Executes improve-codebase-architecture Step 2 to compose findings THEN update the report in place
+    constraints:
+      - report updated in place — no path re-confirmation
+      - never fabricates findings — evidence-backed only
+  - id: review-accept
+    type: approval
+    goal: Accept the requirement IF the report is complete AND evidence-backed, ELSE route rework
+    constraints:
+      - routes only — never edits the report
 # Graph-level ambient context — design vocabulary serves every main phase.
 # Three-tier channel model: conventions (CONTEXT.md, docs/domains.md) are
 # platform-shipped and absence-tolerant; project layout (ADR records) arrives

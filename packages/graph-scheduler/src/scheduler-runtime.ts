@@ -10,7 +10,7 @@
 
 import { Cause, Effect, Layer, ManagedRuntime } from 'effect';
 import Database from 'libsql';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, statSync, type Dirent } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** built-in registry.json path — low-priority default registry entry */
 export const BUILTIN_REGISTRY_PATH = path.resolve(PKG_ROOT, 'graphs', 'registry.json');
-/** built-in taskflow graph directory — fallback when no project taskflowDir configured */
+/** built-in workflow graph directory — fallback when no project taskflowDir configured */
 export const BUILTIN_TASKFLOW_DIR = path.resolve(PKG_ROOT, 'graphs');
 /** runtime database fallback when no dbPath configured anywhere */
 export const BUILTIN_DB_PATH = ':memory:';
@@ -60,7 +60,7 @@ import { makeRegistryLoader, RegistryLoader } from './registry-loader.js';
 import { z } from 'zod/v4';
 import { graphAdvance, graphForceEnd, graphJump, graphStart, type NodeDetail } from './api/crud.js';
 import { cleanAll, cleanCompleted, graphInit, type IGraphInitReport, type IGraphInitScan } from './api/maintenance.js';
-import { graphList, graphStatus } from './api/query.js';
+import { graphAssets, graphList, graphStatus, type GraphAsset } from './api/query.js';
 import type { IGraphSnapshot } from './api/snapshot.js';
 
 import type { ConfigError } from './types.js';
@@ -89,6 +89,8 @@ export interface SchedulerRuntime {
     readonly resolvedPath: string;
     /** graph top-level description — purpose-focused identity text; absent when undeclared */
     readonly description?: string;
+    /** load-time machine warnings (inventory consistency, description drift) — empty when clean */
+    readonly problems: string[];
     /** run snapshot — entry dispatch carries it (jump nav + progress display) */
     readonly snapshot: IGraphSnapshot;
   }>;
@@ -123,6 +125,9 @@ export interface SchedulerRuntime {
 
   /** List all runs — newest first, summary only. */
   readonly graphList: () => Promise<RunSummary[]>;
+
+  /** Enumerate graph assets — merged registries with per-graph problems; read-only, never creates a run. */
+  readonly graphAssets: () => Promise<ReadonlyArray<GraphAsset>>;
 
   /** Initialize database schema + full-registry health check — idempotent. */
   readonly graphInit: () => Promise<IGraphInitReport>;
@@ -231,25 +236,57 @@ function resolveConfig(override?: Partial<SchedulerConfig>): ResolvedConfig {
 }
 
 /**
- * Create a FileSystem Layer that searches multiple taskflow directories.
+ * Create a FileSystem Layer that searches multiple workflow directories.
  *
  * Relative file paths are tried against each directory in order;
  * the first existing file wins. Absolute paths bypass directory search.
  * Directories searched: project dir first, built-in dir last (fallback).
  */
-function makeTaskflowFileSystemLayer(taskflowDirs: readonly string[]): Layer.Layer<FileSystem, never, never> {
+function makeWorkflowFileSystemLayer(taskflowDirs: readonly string[]): Layer.Layer<FileSystem, never, never> {
   const resolvePath = (filePath: string): string | null => {
     if (path.isAbsolute(filePath)) return filePath;
     for (const dir of taskflowDirs) {
       const candidate = `${dir}/${filePath}`;
       try {
-        readFileSync(candidate, 'utf-8');
-        return candidate;
+        // Existence probe only — the load chain re-reads the file anyway;
+        // a full readFileSync here would double-read every fast-path candidate.
+        if (statSync(candidate).isFile()) return candidate;
       } catch {
         // try next dir
       }
     }
     return null;
+  };
+
+  const resolveSchemaUri = (uri: string, filePath: string): string | null => {
+    // Dual-base resolution: file-relative first (the declaring document's
+    // directory), then the package schemas dir (the derived artifact's home).
+    const bases = [path.dirname(filePath), path.join(PKG_ROOT, 'schemas')];
+    for (const base of bases) {
+      const candidate = path.resolve(base, uri);
+      try {
+        if (statSync(candidate).isFile()) return candidate;
+      } catch {
+        // try next base
+      }
+    }
+    return null;
+  };
+
+  const listYamlFiles = (): string[] => {
+    const out: string[] = [];
+    for (const dir of taskflowDirs) {
+      let entries: Dirent[];
+      try {
+        entries = readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const e of entries) {
+        if (e.isFile() && /\.ya?ml$/.test(e.name)) out.push(`${dir}/${e.name}`);
+      }
+    }
+    return out;
   };
 
   return Layer.succeed(FileSystem, {
@@ -260,7 +297,7 @@ function makeTaskflowFileSystemLayer(taskflowDirs: readonly string[]): Layer.Lay
           if (path.isAbsolute(filePath)) {
             return readFileSync(filePath, 'utf-8');
           }
-          // Relative paths — try each taskflow dir in order
+          // Relative paths — try each workflow dir in order
           const errors: string[] = [];
           for (const dir of taskflowDirs) {
             const candidate = `${dir}/${filePath}`;
@@ -270,12 +307,14 @@ function makeTaskflowFileSystemLayer(taskflowDirs: readonly string[]): Layer.Lay
               errors.push(`${candidate}: ${String(e)}`);
             }
           }
-          throw new Error(`Not found in any taskflow dir: ${errors.join('; ')}`);
+          throw new Error(`Not found in any workflow dir: ${errors.join('; ')}`);
         },
         catch: (cause): FileSystemError =>
           new FileSystemError(filePath, `File not found or unreadable: ${String(cause)}`, cause),
       }),
     resolvePath,
+    listYamlFiles,
+    resolveSchemaUri,
   });
 }
 
@@ -332,8 +371,8 @@ export function createRuntime(config?: Partial<SchedulerConfig>): Effect.Effect<
 
     debugLog('load', { event: 'ddl_complete' });
 
-    // Layer 2: filesystem (multi-dir taskflow resolution — project + builtin)
-    const fileSystemLayer = makeTaskflowFileSystemLayer(taskflowDirs);
+    // Layer 2: filesystem (multi-dir workflow resolution — project + builtin)
+    const fileSystemLayer = makeWorkflowFileSystemLayer(taskflowDirs);
 
     // Layer 2b: registry loader
     const registryLoaderService = makeRegistryLoader(registryPaths, BUILTIN_REGISTRY_PATH);
@@ -399,6 +438,8 @@ export function createRuntime(config?: Partial<SchedulerConfig>): Effect.Effect<
           }),
         ),
 
+      graphAssets: () => run(graphAssets()),
+
       graphInit: () => {
         const scan: IGraphInitScan = {
           cwd: process.cwd(),
@@ -436,7 +477,7 @@ export function createRuntime(config?: Partial<SchedulerConfig>): Effect.Effect<
 }
 
 /**
- * Convenience wrapper: in-memory SQLite + optional test taskflow directory.
+ * Convenience wrapper: in-memory SQLite + optional test workflow directory.
  *
  * Defaults taskflowDir to "test-graphs" for use in test suites.
  */

@@ -7,13 +7,13 @@
 Activation facts are session facts of the activation (per-activation decisions — never echoed from a previous activation):
 
 - `mode` -> session `{"mode": "manual"|"auto"}` — passed to `graph_start` as `args.mode` (the pilot asks before starting when no flag was passed; the engine returns MODE_REQUIRED otherwise — absence never auto).
-- `constraints` -> session `{"constraints": ["<rule>", ...]}` (compiled-artifact protocol — the pilot emits the cached `.graph-scheduler/constraints.json` array verbatim when the artifact exists, else compiles `## Rules` into it; existence = validity, deletion = reset — round-level freeze holds in-session).
+- `constraints` (project layer) -> session `{"constraints": ["<rule>", ...]}` (compiled-artifact protocol — the pilot emits the cached `.graph-scheduler/constraints.json` array verbatim when the artifact exists, else compiles `## Rules` into it; existence = validity, deletion = reset — round-level freeze holds in-session). The graph layer is NOT an activation fact — it arrives per dispatch as `node.constraints` (`[graph]`-prefixed entries read by the scheduler from the loaded graph definition).
 
 Missing/unrecallable activation facts -> degrade, never block: mode -> `manual` + warning; constraints -> empty block + warning (absence never auto).
 
 # Activation Context Blocks
 
-Every node dispatch (main/approval/gate): assemble activation blocks from the agent session `## Run Mode: <mode>` + `## Constraints` (per SKILL.md §Constraints Block Format) — sourced from the session the pilot loaded at activation (zero file reads). Gate jump evaluation context includes them - jump conditions can reference the mode (`run mode is auto …`). Blocks arrive regardless of node type - no graph declares them, no task text repeats them. The `## Run Mode:` block is ALSO the mode source for approval() (atom-kernel §approval()) - absent block -> manual branch (absence never auto).
+Every node dispatch (main/approval/gate): assemble activation blocks from the agent session `## Run Mode: <mode>` + `## Constraints` (per SKILL.md §Constraints Block Format) — the constraints block merges the project layer (session fact, pilot-loaded at activation, zero file reads) with the graph layer (`node.constraints` dispatch facts). Gate jump evaluation context includes them - jump conditions can reference the mode (`run mode is auto …`) and graph-level rules. Blocks arrive regardless of node type - no graph declares them, no task text repeats them. The `## Run Mode:` block is ALSO the mode source for approval() (atom-kernel §approval()) - absent block -> manual branch (absence never auto).
 
 # Main Inline Context Assembly
 
