@@ -1,110 +1,120 @@
+/**
+ * Discipline consumer wiring pins (sdk-hooks-middleware) — the
+ * graph-fidelity content consumed through the module's wired hooks:
+ * the display function (SCENARIO_HINT_BLOCKS + inline tool-name sets,
+ * hints-structure-simplify — no PROMOTED_TOOL_MAP, no fn.toolMap) runs
+ * classify → display-decision → append on the `tool_result` chain, with
+ * proactive notify feedback on attachment. Classification behavior
+ * itself is SDK-pinned (platform-hooks-sdk suite). Pure — no I/O.
+ *
+ * @module
+ */
+
 import { describe, expect, it } from 'vitest';
-import { applyDisciplineEcho, SEAM_MARKER, stripSeamLines } from '../src/core/discipline.js';
 
-const LINE = '[seam] node requirement/arch-review · 2 req · 4.2k in';
-const messages = (): Array<{ role: string; text: string }> => [
-  { role: 'system', text: 'platform' },
-  { role: 'user', text: '开始图运行' },
-  { role: 'assistant', text: 'node work' },
-  { role: 'user', text: 'scope 确认' },
-];
+import { SCENARIO_HINT_BLOCKS, SCENARIO_TOOL_NAMES } from '../src/hints.js';
+import { createFidelityModule } from '../src/index.js';
+import { dispatchChainSync } from './chain-dispatch.js';
 
-describe('applyDisciplineEcho', () => {
-  it('appends the rendered line to the most recent user message', () => {
-    const out = applyDisciplineEcho(messages(), LINE);
-    expect(out?.[3]?.text).toBe(`scope 确认\n${LINE}`);
-    expect(out?.[1]?.text).toBe('开始图运行'); // other messages untouched
+/**
+ * Discipline input — SDK-owned type (core/classify.ts; barrel-internal
+ * since sdk-slim-round5). The structural shape suffices here: tool name +
+ * optional args, consumed by the wired classify chain.
+ */
+interface DisciplineInput {
+  readonly toolName: string;
+  readonly args?: Readonly<Record<string, unknown>>;
+}
+
+/** Scenario id → block convenience lookup over the single-source array. */
+const blockOf = (id: string) => SCENARIO_HINT_BLOCKS.find((block) => block.id === id)!;
+
+/** One module instance — the wired hooks (capability config captured at bind time). */
+const { hooks } = createFidelityModule();
+
+/** Dispatch a tool_result through the module's wired tool_result chain; returns the appended hint text (undefined = no hint). */
+function appendedText(input: DisciplineInput): string | undefined {
+  const result = dispatchChainSync(hooks, 'tool_result', {
+    toolName: input.toolName,
+    args: input.args ?? {},
+    errorShaped: false,
+    content: [{ type: 'text', text: 'ORIGINAL' }],
+  });
+  if (result === null || typeof result !== 'object' || !('content' in result)) return undefined;
+  const content = result.content;
+  if (!Array.isArray(content) || content.length === 0) return undefined;
+  const last = content[content.length - 1];
+  if (last === null || typeof last !== 'object' || !('text' in last)) return undefined;
+  return typeof last.text === 'string' ? last.text : undefined;
+}
+
+describe('discipline wiring — hints capability consumption', () => {
+  it('wires the hints display middleware on the tool_result chain', () => {
+    expect(hooks.tool_result.chain.length).toBeGreaterThan(0);
   });
 
-  it('skips when the user message already carries the exact canonical line', () => {
-    const msgs = messages();
-    msgs[3] = { role: 'user', text: `scope 确认\n${LINE}` };
-    expect(applyDisciplineEcho(msgs, LINE)).toBeUndefined();
+  it('a serena write is silent — no hint attaches (consumer-promoted tool, no map → no SDK coverage)', () => {
+    const text = appendedText({ toolName: 'mcp__serena_replace_content', args: { path: 'src/a.ts' } });
+    expect(text).toBeUndefined();
+    // the write block still carries the register obligation (single home)
+    expect(blockOf('write').body).toContain('register_edit');
   });
 
-  it('replaces a stale seam line in place (in-place refresh — one line only)', () => {
-    const msgs = messages();
-    msgs[3] = { role: 'user', text: `scope 确认\n${SEAM_MARKER} node requirement/arch-review` };
-    const out = applyDisciplineEcho(msgs, LINE);
-    const text = out?.[3]?.text ?? '';
-    expect(text).toContain(LINE);
-    expect(text.match(/\[seam\] node /g)).toHaveLength(1);
-    expect(text).not.toContain('⚠');
+  it('native write attaches the rendered write scenario hint (DO-NOT form)', () => {
+    const text = appendedText({ toolName: 'edit', args: { path: 'src/a.ts' } });
+    expect(text).toContain(
+      'Hint: DO NOT use write/edit; use 1) get_blast_radius {repo: "owner/name", symbol: "parse_config", depth: 1}',
+    );
+    expect(text).toContain('replace_content {relative_path: "src/foo.ts"');
+    expect(text).toContain('register_edit {repo: "owner/name", file_paths: ["src/foo.ts"]}');
   });
 
-  it('replaces a non-canonical seam line (self-heal)', () => {
-    const msgs = messages();
-    msgs[3] = { role: 'user', text: 'scope 确认\n[seam] node garbage declares junk — corrupted doc-text render' };
-    const out = applyDisciplineEcho(msgs, LINE);
-    expect(out?.[3]?.text).toBe(`scope 确认\n${LINE}`);
+  it('no scenario coverage → no hint', () => {
+    expect(appendedText({ toolName: 'task' })).toBeUndefined();
   });
 
-  it('returns undefined when there is no user message', () => {
-    expect(applyDisciplineEcho([{ role: 'system', text: LINE }], LINE)).toBeUndefined();
-  });
-});
-
-describe('stripSeamLines', () => {
-  it('removes seam-prefixed lines, keeping other content', () => {
-    expect(stripSeamLines(`a\n${SEAM_MARKER} node x\nb\n[seam] node y`)).toBe('a\nb');
-  });
-});
-
-describe('user-like role anchors (D12-1)', () => {
-  it('appends the echo to a developer-role message (OMP custom_message delivery shape)', () => {
-    const msgs = [
-      { role: 'developer', text: 'skill prompt + user invocation' },
-      { role: 'assistant', text: 'node work' },
-    ];
-    const out = applyDisciplineEcho(msgs, LINE);
-    expect(out?.[0]?.text).toBe(`skill prompt + user invocation\n${LINE}`);
-    expect(out?.[1]?.text).toBe('node work'); // other messages untouched
+  it('hint texts carry no deny/block wording and no retired-registry acronym', () => {
+    for (const block of SCENARIO_HINT_BLOCKS) {
+      const text = block.body;
+      expect(text).not.toMatch(/block|deny|exit 2|hard/i);
+      expect(text).not.toMatch(/HLT/);
+    }
   });
 
-  it('appends the echo to a custom-role message', () => {
-    const msgs = [{ role: 'custom', text: 'user input carrier' }];
-    const out = applyDisciplineEcho(msgs, LINE);
-    expect(out?.[0]?.text).toBe(`user input carrier\n${LINE}`);
+  it('the closed set holds exactly the five tool-triggered scenarios (review excluded)', () => {
+    expect(SCENARIO_HINT_BLOCKS.map((b) => b.id)).toEqual(['find', 'read', 'write', 'verify', 'run']);
   });
 
-  it('degrades silently when no user-like message exists (fail-open)', () => {
-    const msgs = [
-      { role: 'system', text: 'platform' },
-      { role: 'assistant', text: 'work' },
-      { role: 'toolResult', text: 'result' },
-    ];
-    expect(applyDisciplineEcho(msgs, LINE)).toBeUndefined();
-  });
-});
-
-describe('echo fallback anchor (frame-only transcripts)', () => {
-  const FRAME_TEXT = '## Run Frame\nRun 1e0716d6-19c3-4ad3-8279-e37571b3e1fc · node requirement/arch-review';
-
-  it('appends the echo to the latest anchored frame message when no user-like message exists', () => {
-    const msgs = [
-      { role: 'system', text: 'platform' },
-      { role: 'assistant', text: 'node work' },
-      { role: 'assistant', text: FRAME_TEXT },
-    ];
-    const out = applyDisciplineEcho(msgs, LINE);
-    expect(out?.[2]?.text).toBe(`${FRAME_TEXT}\n${LINE}`);
+  it('state-changing setup tools carry no read scenario coverage (fail-open)', () => {
+    // activate_project / onboarding / open_dashboard are setup/state-change
+    // tools — NOT reads; the inline read set must not cover them and
+    // classification must fall through to no scenario (no read hint).
+    for (const name of ['activate_project', 'onboarding', 'open_dashboard']) {
+      expect(SCENARIO_TOOL_NAMES.read).not.toContain(`serena_${name}`);
+      expect(SCENARIO_TOOL_NAMES.read).not.toContain(`mcp__serena_${name}`);
+      expect(appendedText({ toolName: `mcp__serena_${name}`, args: {} })).toBeUndefined();
+    }
   });
 
-  it('still degrades silently when no user-like message and no frame exist (fail-open)', () => {
-    const msgs = [
-      { role: 'system', text: 'platform' },
-      { role: 'assistant', text: 'work' },
-      { role: 'toolResult', text: 'result' },
-    ];
-    expect(applyDisciplineEcho(msgs, LINE)).toBeUndefined();
+  it('find_implementations has a single home in the query-plane find class (dedup, ADR 0208)', () => {
+    expect(SCENARIO_TOOL_NAMES.find).toContain('mcp__jcodemunch_find_implementations');
+    // removed from the serena read class — no double enumeration
+    expect(SCENARIO_TOOL_NAMES.read).not.toContain('serena_find_implementations');
+    expect(SCENARIO_TOOL_NAMES.read).not.toContain('mcp__serena_find_implementations');
   });
 
-  it('prefers the most recent user-like message over the frame fallback', () => {
-    const msgs = [
-      { role: 'user', text: 'scope 确认' },
-      { role: 'assistant', text: FRAME_TEXT },
-    ];
-    const out = applyDisciplineEcho(msgs, LINE);
-    expect(out?.[0]?.text).toBe(`scope 确认\n${LINE}`);
+  it('diagnostic tools live in the verify scenario set (coverage, ADR 0208)', () => {
+    for (const name of ['find_dead_code', 'get_untested_symbols', 'check_references']) {
+      expect(SCENARIO_TOOL_NAMES.verify).toContain(`mcp__jcodemunch_${name}`);
+      // a verify tool is consumer-promoted — silent via no SDK coverage
+      expect(appendedText({ toolName: `mcp__jcodemunch_${name}`, args: {} })).toBeUndefined();
+    }
+  });
+
+  it('bash non-locate commands attach the rendered run hint (DO-NOT wrapper form)', () => {
+    const text = appendedText({ toolName: 'bash', args: { command: 'yarn test' } });
+    expect(text).toContain('Hint: DO NOT use bash (raw); use rtk prefix');
+    expect(text).toContain('rtk prefix');
+    expect(text).toContain('npm/yarn/pnpm');
   });
 });

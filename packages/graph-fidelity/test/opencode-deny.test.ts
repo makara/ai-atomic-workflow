@@ -13,12 +13,12 @@
  * @module
  */
 
+import type { CanonicalToolApprovalRequested, ToolDeny, WriteInvocation } from '@ai-atomic-workflow/platform-hooks-sdk';
 import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import opencodeModule, { type OpencodePermission } from '../src/adapters/opencode.js';
-import type { ToolDeny, WriteInvocation } from '../src/interfaces/tool-deny.js';
+import opencodeModule from '../src/adapter-opencode.js';
 
 let ROOT: string;
 let WRITABLE: string;
@@ -45,29 +45,24 @@ function pluginInput(): never {
   } as never;
 }
 
-/** Platform-faithful permission request builder (SDK Permission structural subset). */
-function permission(overrides?: Partial<OpencodePermission>): OpencodePermission {
+/** Platform-faithful permission request builder (canonical `tool_approval_requested` shape — the SDK adapter picks the known fields). */
+function permission(overrides?: Partial<CanonicalToolApprovalRequested>): CanonicalToolApprovalRequested {
   return {
-    id: 'p1',
     type: 'edit',
     sessionID: 's1',
-    messageID: 'm1',
-    title: 'edit',
-    metadata: {},
-    time: { created: 0 },
     ...overrides,
   };
 }
 
 /** Hook surface produced by the server factory (deny seam). */
 type Hooks = {
-  'permission.ask': (i: OpencodePermission, o: { status: 'ask' | 'deny' | 'allow' }) => Promise<void>;
+  'permission.ask': (i: CanonicalToolApprovalRequested, o: { status: 'ask' | 'deny' | 'allow' }) => Promise<void>;
 };
 
 /** Build the hooks with an injected deny, then invoke the permission.ask handler. */
 async function ask(
   deny: ToolDeny | undefined,
-  input: OpencodePermission,
+  input: CanonicalToolApprovalRequested,
 ): Promise<{ status: 'ask' | 'deny' | 'allow' }> {
   const hooks = (await opencodeModule.server(pluginInput(), { deny })) as unknown as Hooks;
   const output = { status: 'ask' as const };

@@ -7,17 +7,24 @@
  * fail-open (odd shapes pass through unchanged; nothing throws into the
  * platform loop). Error results attach nothing.
  *
- * Platform-evidenced event shape (hooks.md:152-156; agent-loop.ts:
- * 2118-2122): `{ type: 'tool_result', toolName, toolCallId, input,
- * content: (Text|Image)[], isError }` — the call identity rides on the
- * EVENT, not on message blocks (the OMP message model stores results as
- * top-level `role: "toolResult"` messages).
+ * Canonical payload (ADR 0193): the SDK normalizes the platform event to
+ * `{ toolName, content, isError }` with invocation args riding the
+ * canonical payload on both faces (round-2 review fix) — classification
+ * reads args where present, so the bash CLI first-token class fires on
+ * this face too (see the bash CLI locate test below).
  *
  * @module
  */
 
 import { describe, expect, it } from 'vitest';
-import ompExtension from '../src/adapters/omp.js';
+import ompExtension from '../src/adapter-omp.js';
+import { SCENARIO_HINT_BLOCKS } from '../src/hints.js';
+
+/** Scenario id → block convenience lookup over the single-source array. */
+const blockById = Object.fromEntries(SCENARIO_HINT_BLOCKS.map((block) => [block.id, block])) as Record<
+  string,
+  (typeof SCENARIO_HINT_BLOCKS)[number]
+>;
 
 /** Platform-faithful tool_result event (structural subset). */
 interface ToolResultEventShape {
@@ -27,6 +34,8 @@ interface ToolResultEventShape {
   input: Record<string, unknown>;
   content: Array<{ type: string; text?: string }>;
   isError?: boolean;
+  /** Canonical error verdict — platform isError folds in at adapter normalization. */
+  errorShaped?: boolean;
 }
 
 /** Stub platform api — the narrow ExtensionAPI surface the factory uses. */
@@ -47,13 +56,13 @@ function resultEvent(toolName: string, input: Record<string, unknown>, text = 'O
 }
 
 /** Run the registered tool_result handler; returns the content override (undefined = pass through). */
-function runToolResult(
+async function runToolResult(
   handlers: Map<string, (event: never) => unknown>,
   event: ToolResultEventShape,
-): Array<{ type: string; text?: string }> | undefined {
+): Promise<Array<{ type: string; text?: string }> | undefined> {
   const handler = handlers.get('tool_result');
   if (handler === undefined) throw new Error('tool_result handler not registered');
-  const out = handler(event as never) as { content?: Array<{ type: string; text?: string }> } | undefined;
+  const out = (await handler(event as never)) as { content?: Array<{ type: string; text?: string }> } | undefined;
   return out?.content;
 }
 
@@ -62,49 +71,80 @@ function textOf(content: Array<{ type: string; text?: string }>): string {
 }
 
 describe('OMP hints — tool_result hook attachment (platform-evidenced shape)', () => {
-  it('write result carries the serena hint as an appended text block; original preserved', () => {
+  it('write result carries the rendered write scenario hint as an appended text block; original preserved', async () => {
     const { api, handlers } = stubApi();
     ompExtension(api);
-    const content = runToolResult(handlers, resultEvent('write', { path: 'src/a.ts' }));
+    const content = await runToolResult(handlers, resultEvent('write', { path: 'src/a.ts' }));
     expect(content).toBeDefined();
+    // original + one write scenario block (single block per scenario)
     expect(content?.length).toBe(2);
     expect(content?.[0]).toEqual({ type: 'text', text: 'ORIGINAL' });
-    expect(textOf(content!)).toContain('serena');
+    const text = textOf(content!);
+    expect(text).toContain('replace_content {relative_path: "src/foo.ts"');
+    expect(text).toContain('register_edit {repo: "owner/name", file_paths: ["src/foo.ts"]}');
+    expect(text).toContain('DO NOT use write/edit');
   });
 
-  it('content-read result carries the serena hint', () => {
+  it('dual-form serena write results are compliant — no hint attaches (hint-tool-context)', async () => {
     const { api, handlers } = stubApi();
     ompExtension(api);
-    const content = runToolResult(handlers, resultEvent('read', { path: 'src/a.ts' }));
+    for (const toolName of ['serena_replace_content', 'mcp__serena_replace_content']) {
+      const content = await runToolResult(handlers, resultEvent(toolName, { filePath: 'src/a.ts' }));
+      expect(content).toBeUndefined();
+    }
+  });
+
+  it('native write result carries the rendered write scenario hint', async () => {
+    const { api, handlers } = stubApi();
+    ompExtension(api);
+    const content = await runToolResult(handlers, resultEvent('edit', { path: 'src/a.ts' }));
     expect(content).toBeDefined();
-    expect(textOf(content!)).toContain('serena');
+    const text = textOf(content!);
+    expect(text).toContain('replace_content {relative_path: "src/foo.ts"');
+    expect(text).toContain('register_edit {repo: "owner/name", file_paths: ["src/foo.ts"]}');
   });
 
-  it('locate result carries the jcodemunch hint', () => {
+  it('content-read result carries the rendered read hint (DO-NOT read-surface form)', async () => {
     const { api, handlers } = stubApi();
     ompExtension(api);
-    const content = runToolResult(handlers, resultEvent('glob', { pattern: '**/*.ts' }));
+    const content = await runToolResult(handlers, resultEvent('read', { path: 'src/a.ts' }));
     expect(content).toBeDefined();
-    expect(textOf(content!)).toContain('jcodemunch');
+    const text = textOf(content!);
+    expect(text).toContain('get_file_outline {repo: "owner/name", file_path: "src/app.py"}');
+    expect(text).toContain('DO NOT use read');
   });
 
-  it('bash locate command result carries the jcodemunch hint', () => {
+  it('locate result carries the rendered find hint (DO-NOT locate form)', async () => {
     const { api, handlers } = stubApi();
     ompExtension(api);
-    const content = runToolResult(handlers, resultEvent('bash', { command: 'find . -name "*.ts"' }));
+    const content = await runToolResult(handlers, resultEvent('glob', { pattern: '**/*.ts' }));
     expect(content).toBeDefined();
-    expect(textOf(content!)).toContain('jcodemunch');
+    const text = textOf(content!);
+    expect(text).toContain('search_text {repo: "owner/name", query: "TODO|FIXME"');
+    expect(text).toContain('DO NOT use grep/glob');
   });
 
-  it('non-classified tool result passes through unchanged', () => {
+  it('bash CLI locate commands attach the hint on OMP — invocation args ride the canonical payload', async () => {
     const { api, handlers } = stubApi();
     ompExtension(api);
-    expect(runToolResult(handlers, resultEvent('task', { task: 'x' }))).toBeUndefined();
+    // The canonical tool_result payload carries the invocation args on
+    // both faces (ADR 0193 round-2 review fix); the CLI-locate class
+    // fires from the first command token.
+    expect(await runToolResult(handlers, resultEvent('bash', { command: 'find . -name "*.ts"' }))).toBeDefined();
   });
 
-  it('failed execution (isError) attaches nothing', () => {
+  it('non-classified tool result passes through unchanged', async () => {
     const { api, handlers } = stubApi();
     ompExtension(api);
+    expect(await runToolResult(handlers, resultEvent('task', { task: 'x' }))).toBeUndefined();
+  });
+
+  it('failed execution (isError) attaches nothing — verdict folds at normalization', async () => {
+    const { api, handlers } = stubApi();
+    ompExtension(api);
+    // Platform shape: the OMP event carries isError; the adapter folds it
+    // into the canonical errorShaped verdict — the single-verdict guard
+    // covers both (no separate isError check at the attachment site).
     const event: ToolResultEventShape = {
       type: 'tool_result',
       toolName: 'read',
@@ -113,10 +153,10 @@ describe('OMP hints — tool_result hook attachment (platform-evidenced shape)',
       content: [{ type: 'text', text: 'ERROR' }],
       isError: true,
     };
-    expect(runToolResult(handlers, event)).toBeUndefined();
+    expect(await runToolResult(handlers, event)).toBeUndefined();
   });
 
-  it('content-embedded error results attach nothing', () => {
+  it('content-embedded error results attach nothing', async () => {
     const { api, handlers } = stubApi();
     ompExtension(api);
     const event: ToolResultEventShape = {
@@ -127,10 +167,10 @@ describe('OMP hints — tool_result hook attachment (platform-evidenced shape)',
       content: [{ type: 'text', text: 'Invalid args for xd://mcp__serena_search_for_pattern: Validation failed' }],
       isError: false,
     };
-    expect(runToolResult(handlers, event)).toBeUndefined();
+    expect(await runToolResult(handlers, event)).toBeUndefined();
   });
 
-  it('stdout-first exit-line results attach nothing (bash failure)', () => {
+  it('stdout-first exit-line results attach nothing (bash failure)', async () => {
     const { api, handlers } = stubApi();
     ompExtension(api);
     const event: ToolResultEventShape = {
@@ -146,27 +186,30 @@ describe('OMP hints — tool_result hook attachment (platform-evidenced shape)',
       ],
       isError: false,
     };
-    expect(runToolResult(handlers, event)).toBeUndefined();
+    expect(await runToolResult(handlers, event)).toBeUndefined();
   });
 
-  it('xd:// proxy route results attach nothing', () => {
+  it('xd:// proxy route results skip on OMP — args restored, the internal-URI skip fires', async () => {
     const { api, handlers } = stubApi();
     ompExtension(api);
+    // The internal-URI skip reads args.path/filePath; the canonical
+    // tool_result payload carries the invocation args on BOTH faces
+    // (ADR 0193 round-2 review fix), so xd:// routes are protected here.
     expect(
-      runToolResult(handlers, resultEvent('write', { path: 'xd://mcp__graph_scheduler_graph_advance' })),
+      await runToolResult(handlers, resultEvent('write', { path: 'xd://mcp__graph_scheduler_graph_advance' })),
     ).toBeUndefined();
-    expect(runToolResult(handlers, resultEvent('read', { path: 'xd://mcp__serena_read_file' }))).toBeUndefined();
+    expect(await runToolResult(handlers, resultEvent('read', { path: 'xd://mcp__serena_read_file' }))).toBeUndefined();
   });
 
-  it('rtk-prefixed bash locate results carry the jcodemunch hint', () => {
+  it('rtk-wrapped locate commands attach the hint on OMP (wrapper strip fires)', async () => {
     const { api, handlers } = stubApi();
     ompExtension(api);
-    const content = runToolResult(handlers, resultEvent('bash', { command: 'rtk ls src' }));
-    expect(content).toBeDefined();
-    expect(textOf(content!)).toContain('jcodemunch');
+    // firstTokenOf strips the rtk/proxy wrapper — the effective command
+    // token drives the CLI-locate class (same behavior as opencode).
+    expect(await runToolResult(handlers, resultEvent('bash', { command: 'rtk ls src' }))).toBeDefined();
   });
 
-  it('odd shapes (non-array content) never throw and pass through', () => {
+  it('odd shapes (non-array content) never throw and pass through', async () => {
     const { api, handlers } = stubApi();
     ompExtension(api);
     const handler = handlers.get('tool_result');
@@ -175,12 +218,12 @@ describe('OMP hints — tool_result hook attachment (platform-evidenced shape)',
     expect(() => handler?.(odd)).not.toThrow();
   });
 
-  it('attachment is per-execution and stateless — replaying an event yields the same single append', () => {
+  it('attachment is per-execution and stateless — replaying an event yields the same single append', async () => {
     const { api, handlers } = stubApi();
     ompExtension(api);
     const event = resultEvent('read', { path: 'a.ts' });
-    const first = runToolResult(handlers, event);
-    const second = runToolResult(handlers, event);
+    const first = await runToolResult(handlers, event);
+    const second = await runToolResult(handlers, event);
     expect(first?.length).toBe(2);
     expect(second).toEqual(first);
   });

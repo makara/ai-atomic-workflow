@@ -1,25 +1,30 @@
 import { defineConfig } from 'tsup';
 
-export default defineConfig({
-  entry: {
-    omp: 'src/adapters/omp.ts',
-    opencode: 'src/adapters/opencode.ts',
-  },
-  target: ['node22'],
-  format: ['esm'],
-  // clean: false — the interfaces type declarations (tsc output) live under
-  // dist/interfaces/; a bundler clean would wipe them, leaving a partial
-  // dist (exports["./interfaces"].types dangling). The build script removes
-  // ONLY the bundle outputs before tsup runs; the type-emission directory
-  // is never touched by the bundler (dist content contract test guards).
-  clean: false,
+const shared = {
+  target: ['node22'] as const,
+  format: ['esm'] as const,
+  // clean: true — a stale bundle from a renamed/removed entry is wiped
+  // before tsup runs. The dist-content contract test guards the
+  // post-build state (no interfaces declaration tree — the ./interfaces
+  // export is removed, sdk-surface-convergence).
+  clean: true,
   splitting: false,
   sourcemap: false,
   minify: true,
   dts: false,
   treeshake: true,
   // tsup externalizes `dependencies` by default — the SDK must be INLINE
-  // (deployments are bare folder copies with no node_modules).
-  noExternal: ['@modelcontextprotocol/sdk'],
-  tsconfig: './tsconfig.json',
+  // (deployments are bare folder copies with no node_modules; the R1
+  // chain ships inside the SDK per ADR 0195).
+  noExternal: ['effect', '@ai-atomic-workflow/platform-hooks-sdk'],
+} as const;
+
+/**
+ * Adapter bundles only (ADR 0195 — the shared lifecycle module is gone;
+ * the R1 chain is inlined via the SDK dependency, no external/rewrite
+ * normalization exists).
+ */
+export default defineConfig({
+  ...shared,
+  entry: { omp: 'src/adapter-omp.ts', opencode: 'src/adapter-opencode.ts' },
 });

@@ -1,0 +1,64 @@
+{
+  "name": "@ai-atomic-workflow/platform-hooks-sdk",
+  "version": "0.1.0",
+  "description": "Unified platform-hooks SDK — middleware system over canonical hooks: hooks.<hook>.use(...) chains (Effect-transformer Middleware, single execution face, Layer-composed DeliveryContext/config services) with OMP / opencode adapter translation tables. Standalone: installable, testable, publishable; never installed directly into a platform.",
+  "keywords": [
+    "hooks",
+    "omp",
+    "opencode",
+    "platform",
+    "sdk",
+    "adapter"
+  ],
+  "homepage": "https://github.com/makara/ai-atomic-workflow#readme",
+  "bugs": {
+    "url": "https://github.com/makara/ai-atomic-workflow/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/makara/ai-atomic-workflow.git",
+    "directory": "packages/platform-hooks-sdk"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "makarawang",
+    "email": "makara15@gmail.com"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./adapters": {
+      "types": "./dist/adapters/index.d.ts",
+      "import": "./dist/adapters/index.js"
+    },
+    "./utils": {
+      "types": "./dist/utils/index.d.ts",
+      "import": "./dist/utils/index.js"
+    }
+  },
+  "files": [
+    "src/",
+    "dist/"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsup && yarn build:types",
+    "build:types": "tsc -p tsconfig.build.json",
+    "prepack": "yarn build && yarn test",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "effect": "3.22.1"
+  },
+  "devDependencies": {
+    "@oh-my-pi/pi-coding-agent": "17.3.5",
+    "@opencode-ai/plugin": "1.18.18",
+    "@types/node": "^26.2.0",
+    "tsup": "^8.5.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}

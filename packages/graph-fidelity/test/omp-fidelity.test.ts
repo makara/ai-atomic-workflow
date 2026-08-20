@@ -7,7 +7,7 @@
  * tool-result content.
  */
 import { describe, expect, test } from 'vitest';
-import ompExtension from '../src/adapters/omp.js';
+import ompExtension from '../src/adapter-omp.js';
 
 const callBlock = (id: string, name: string, input: unknown, extra: Record<string, unknown> = {}) => ({
   type: 'tool-call',
@@ -40,7 +40,7 @@ function stubApi() {
 }
 
 describe('OMP context seam — echo-only chain in one pass', () => {
-  test('no anchored frame → transcript forwarded unchanged (no dedup, no reduction)', () => {
+  test('no anchored frame → transcript forwarded unchanged (no dedup, no reduction)', async () => {
     const { api, handlers } = stubApi();
     ompExtension(api);
     const messages = [
@@ -49,16 +49,16 @@ describe('OMP context seam — echo-only chain in one pass', () => {
       { role: 'assistant', content: [callBlock('c2', 'read', { path: 'x' })] },
       { role: 'user', content: [resultBlock('c2', 'fresh content')] },
     ];
-    const result = (handlers.get('context') as (e: never) => unknown)({
+    const result = (await (handlers.get('context') as (e: never) => unknown)({
       type: 'context',
       messages,
-    } as never) as { messages: typeof messages } | undefined;
+    } as never)) as { messages: typeof messages } | undefined;
     // Identical calls are NOT deduped and results are never reduced — the
     // seam reports no change (platform owns supersede semantics).
     expect(result).toBeUndefined();
   });
 
-  test('kebab-case result key `tool-call-id` passes through untouched (no frame)', () => {
+  test('kebab-case result key `tool-call-id` passes through untouched (no frame)', async () => {
     const { api, handlers } = stubApi();
     ompExtension(api);
     const messages = [
@@ -67,43 +67,43 @@ describe('OMP context seam — echo-only chain in one pass', () => {
       { role: 'assistant', content: [callBlock('c2', 'read', { path: 'x' })] },
       { role: 'user', content: [{ type: 'tool-result', 'tool-call-id': 'c2', content: 'new' }] },
     ];
-    const out = (handlers.get('context') as (e: never) => unknown)({
+    const out = await (handlers.get('context') as (e: never) => unknown)({
       type: 'context',
       messages,
     } as never);
     expect(out).toBeUndefined();
   });
 
-  test('non-string tool-call ids are ignored — passthrough, no crash', () => {
+  test('non-string tool-call ids are ignored — passthrough, no crash', async () => {
     const { api, handlers } = stubApi();
     ompExtension(api);
     const messages = [
       { role: 'assistant', content: [callBlock('c1', 'read', { path: 'x' })] },
       { role: 'user', content: [{ type: 'tool-result', toolCallId: 42, content: 'x' }] },
     ];
-    const out = (handlers.get('context') as (e: never) => unknown)({ type: 'context', messages } as never);
+    const out = await (handlers.get('context') as (e: never) => unknown)({ type: 'context', messages } as never);
     expect(out).toBeUndefined();
   });
 
-  test('text blocks and unmatched results pass through untouched (no frame)', () => {
+  test('text blocks and unmatched results pass through untouched (no frame)', async () => {
     const { api, handlers } = stubApi();
     ompExtension(api);
     const messages = [
       { role: 'assistant', content: [callBlock('c1', 'read', { path: 'x' })] },
       { role: 'user', content: [{ type: 'text', text: 'plain' }, resultBlock('c9', 'kept')] },
     ];
-    const out = (handlers.get('context') as (e: never) => unknown)({ type: 'context', messages } as never);
+    const out = await (handlers.get('context') as (e: never) => unknown)({ type: 'context', messages } as never);
     expect(out).toBeUndefined();
   });
 
-  test('errored tool results are NOT reduced on the echo-only path — content verbatim (R2 fidelity removed)', () => {
+  test('errored tool results are NOT reduced on the echo-only path — content verbatim (R2 fidelity removed)', async () => {
     const { api, handlers } = stubApi();
     ompExtension(api);
     const messages = [
       { role: 'assistant', content: [callBlock('c1', 'read', { path: 'x' })] },
       { role: 'user', content: [resultBlock('c1', 'boom', { isError: true })] },
     ];
-    const result = (handlers.get('context') as (e: never) => unknown)({
+    const result = await (handlers.get('context') as (e: never) => unknown)({
       type: 'context',
       messages,
     } as never);
@@ -111,7 +111,7 @@ describe('OMP context seam — echo-only chain in one pass', () => {
     expect(result).toBeUndefined();
   });
 
-  test('OMP context seam runs the echo stage at extension level', () => {
+  test('OMP context seam runs the echo stage at extension level', async () => {
     const { api, handlers } = stubApi();
     ompExtension(api);
     const messages = [
@@ -124,10 +124,10 @@ describe('OMP context seam — echo-only chain in one pass', () => {
     ];
     const handler = handlers.get('context');
     expect(handler).toBeTypeOf('function');
-    const result = (handler as (e: { type: string; messages: typeof messages }) => unknown)({
+    const result = (await (handler as (e: { type: string; messages: typeof messages }) => unknown)({
       type: 'context',
       messages,
-    }) as { messages: typeof messages };
+    })) as { messages: typeof messages };
     const serialized = JSON.stringify(result);
     // Echo only: the identity pointer lands on the last user-like message;
     // no reduction markers anywhere.
