@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "ai-atomic-workflow",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Graph-Engineering for Real Engineers: Graphs define workflows; workflows build graphs. Based on mattpocock/skills.",
   "owner": {
     "name": "makarawang",
@@ -29,6 +29,7 @@
         "./skills/atom-scope-interview",
         "./skills/atom-skill-spec",
         "./skills/atom-spec-maintain",
+        "./skills/first-principles",
         "./skills/setup-atomic-workflow"
       ]
     },
@@ -36,15 +37,12 @@
       "name": "graph-workflow-extra",
       "source": "./packages/graph-workflow",
       "description": "Optional release-prep pipeline — analyze proposes the next version and changelog inventory from git history; apply performs the confirmed release writes. Not required for normal operation.",
-      "skills": [
-        "./skills/release-prep-analyze",
-        "./skills/release-prep-apply"
-      ]
+      "skills": ["./skills/release-prep-analyze", "./skills/release-prep-apply"]
     },
     {
       "name": "graph-fidelity",
       "source": "./packages/graph-fidelity",
-      "description": "Platform-seam signal discipline — single-line per-call discipline echo (identity + progress only), system-resident prompts (PCL + HLT core requirement), PCL input marking; R2 cost economy (compression/metering/settlement) suspended pending redesign (ADR 0175) — delivered as one module for OMP (ExtensionAPI) and opencode (Plugin)."
+      "description": "Platform-seam signal discipline — single-line per-call discipline echo (identity + progress only), system-resident prompts (PCL + five-scenario enumeration + jcodemunch entry, attached via the SDK attach seam), PCL input marking; R2 context management active via @ai-atomic-workflow/graph-fidelity-context (ADR 0186) — delivered as one module for OMP (ExtensionAPI) and opencode (Plugin)."
     }
   ],
   "skills": []

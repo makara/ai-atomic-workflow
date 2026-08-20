@@ -219,12 +219,25 @@ The lattice SHALL map every (class, seam) coordinate to exactly one implementati
 
 ### Requirement: Seam mapping table
 
-The standard SHALL carry a mapping table — every (class, seam) coordinate maps to exactly one implementation owner, with its verifying probe group and backlog status. The table is the seam-mapping clause's operative form: absence of an implementation SHALL be recorded as a backlog row, never as a platform capability boundary.
+The standard SHALL carry a mapping table — every (class, seam) coordinate maps to exactly one implementation owner, with its verifying probe group and backlog status. The table is the seam-mapping clause's operative form: absence of an implementation SHALL be recorded as a backlog row, never as a platform capability boundary. The table SHALL additionally carry the class–tag mapping for context management per graph-fidelity-context-classification:
+
+|Class|Seam|Implementation owner|Probe group|Backlog|Context-management mapping|
+|-|-|-|-|-|-|
+|C1 control|steer / input-seam marking|platform native + pilot|—|—|**protected — leave** (static control-plane list: `mcp__graph_scheduler_*`, task/ask/approval family)|
+|C2 frame|handler assembly + context-seam echo|graph-fidelity (agent-side)|—|—|**protected — leave**|
+|C3 instruction|user channel|platform native|—|—|**protected — leave**|
+|C4 context|assembly + fidelity seams|graph-fidelity-context|—|—|**four-dimension tag decision** (producer / processing state / usage timing / content level)|
+|Observability (message_end / tool_execution_* / auto_compaction_end / ttsr_triggered)|post-hoc events|platform native + graph-fidelity (telemetry)|—|—|— (audit/telemetry only; no context-management action)|
 
 #### Scenario: mapping table verifiable
 
 - **WHEN** the standard's mapping table is read for any (class, seam) coordinate
 - **THEN** it lists exactly one implementation owner, the verifying probe group, and backlog status — never a boundary clause
+
+#### Scenario: class–tag mapping rows present
+
+- **WHEN** the mapping table is read for the context-management consumption of the lattice
+- **THEN** one row per class coordinate (C1–C4) states the tag-system mapping: C1/C2/C3 protected (leave), C4 tag-driven — consistent with the first-principles comparison table A
 
 #### Scenario: observability seam covers tool execution
 
@@ -244,22 +257,3 @@ Deploy copies for platform-seam extensions are retired. `scripts/gen-manifests.m
 
 - **WHEN** `yarn manifests` runs
 - **THEN** only `.claude-plugin/marketplace.json` and `skills.sh.json` are (re)written, and no `.omp/extensions/` file is produced
-
-### Requirement: P0 frequency membership includes HLT core requirement
-
-The prompt frequency standard (P0–P3) SHALL extend P0 system-resident membership to the HLT core requirement: the distilled essence (six lines) is per-call resident while the full HLT surface (hot section + registry) stays P3 cold-read. The membership statement SHALL be recorded in the prompt-frequency standard (Token lifecycle glossary entry) as one sentence (zero new glossary terms) and in ADR 0162, which revises the ADR 0158 §5 judgment (HLT non-resident) — the prior judgment priced the full hot surface; the essence's lower cost and correctness value class change the calculus.
-
-#### Scenario: Glossary states membership
-
-- **WHEN** the prompt-frequency glossary entry is read
-- **THEN** it lists the HLT core requirement among P0 members (alongside style discipline and PCL vocabulary), in one sentence, without introducing a new glossary term
-
-#### Scenario: ADR 0162 records the revision
-
-- **WHEN** ADR 0162 is read
-- **THEN** it states that HLT essence is P0 resident, the full HLT surface remains P3, and it explicitly revises ADR 0158 §5 with a rationale (cost difference + correctness value class)
-
-#### Scenario: Full surface stays cold
-
-- **WHEN** the resident block renders
-- **THEN** it contains only the six-line essence, never the adapter table, obligations, protocol, or headroom sections of HLT-REGISTRY.md

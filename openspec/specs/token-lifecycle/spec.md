@@ -8,12 +8,12 @@ token-lifecycle governs the token economy across the full lifecycle — prompt f
 
 ### Requirement: Three-face lifecycle model
 
-The standard SHALL govern token economy across the full lifecycle — prompt face (birth: what content in what style enters), context face (life/death: selection, position, fidelity L0–L3, prune, archive), feedback face (measurement: usage facts, audit, nudge, reward) — closed by the feedback loop (measured usage facts → budget/nudge → policy). Each face SHALL have a prose tier (degraded baseline, always present — L0–L3 laws, Checks self-report, manual headroom) and a mechanical tier (graph-fidelity seams only). Pluggability contract: without graph-fidelity the mechanical tier is absent and behavior correctness is unchanged (zero deny); with graph-fidelity the mechanical tier executes and built-in metering replaces agent estimates.
+MODIFIED: the standard SHALL govern token economy across the full lifecycle — prompt face (birth: what content in what style enters), context face (life/death: selection, position, fidelity L0–L3, prune, archive), feedback face (measurement: usage facts, audit, nudge, reward) — closed by the feedback loop (measured usage facts → budget/nudge → policy). Each face SHALL have a prose tier (degraded baseline, always present — L0–L3 laws, Checks self-report) and a mechanical tier (graph-fidelity seams only). "Manual headroom" is removed from the prose tier — compression is the graph-fidelity-context module's internal mechanism, not a lifecycle-tier feature. Pluggability contract: without graph-fidelity the mechanical tier is absent and behavior correctness is unchanged (zero deny); with graph-fidelity the mechanical tier executes and built-in metering replaces agent estimates.
 
 #### Scenario: No-plugin degrade
 
 - **WHEN** graph-fidelity is not installed
-- **THEN** prose discipline (L0–L3 laws, Checks self-report, manual headroom) remains fully functional and no mechanical savings apply
+- **THEN** prose discipline (L0–L3 laws, Checks self-report) remains fully functional and no mechanical savings apply
 
 #### Scenario: Plugin upgrade
 
@@ -33,12 +33,3 @@ Prompts are classified by usage frequency into four classes: P0 system-resident 
 
 - **WHEN** a prompt is classified P0
 - **THEN** its essence renders verbatim every call and its full text is cold-readable on demand
-
-### Requirement: HLT non-resident judgment
-
-The HLT registry hot surface is explicitly judged NOT system-resident: it is covered at graph-run time by atom-kernel skill loading and in plain sessions by native MCP tooling; resident injection would add fixed tax above marginal value. The judgment is recorded in the ADR so future reviews do not re-suggest it.
-
-#### Scenario: Review reference
-
-- **WHEN** a future review evaluates HLT residency
-- **THEN** the ADR records the judgment and rationale, preventing silent re-suggestion

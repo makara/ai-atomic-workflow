@@ -28,12 +28,12 @@ The setup-atomic-workflow skill SHALL create a `constraints.md` seed under `.gra
 
 ### Requirement: Reject removed constraint declaration fields
 
-The phase schema SHALL reject any YAML phase declaring `constraints` or `runMode`, reporting a validation error that names the removed field and directs authors to `.graph-scheduler/constraints.md` as the single constraint injection source.
+The phase schema SHALL reject any YAML phase declaring `constraints` or `runMode`, reporting a validation error that names the removed field and directs authors to the constraint sources: graph-level top-level `constraints` (graph content) and `.graph-scheduler/constraints.md` (project discipline, compiled-artifact protocol) — the "single constraint injection source" wording SHALL be replaced by the two-source statement.
 
 #### Scenario: Phase declares constraints field
 
 - **WHEN** a graph phase declares `constraints` in YAML
-- **THEN** schema validation fails with an error naming the `constraints` field
+- **THEN** schema validation fails with an error naming the `constraints` field and pointing to the graph-level and project-level sources
 
 #### Scenario: Phase declares runMode field
 
@@ -43,36 +43,46 @@ The phase schema SHALL reject any YAML phase declaring `constraints` or `runMode
 #### Scenario: Project constraints file still injects
 
 - **WHEN** a graph run starts with a `.graph-scheduler/constraints.md` containing a `## Rules` section
-- **THEN** every dispatched node carries the parsed rules in `NodeDetail.constraints`, unchanged
+- **THEN** every dispatched node carries the parsed rules in `NodeDetail.constraints`, unchanged (`[project]` prefix)
+
+#### Scenario: Graph-level and project constraints both inject
+
+- **WHEN** a graph run starts with a graph-level `constraints` field and a `.graph-scheduler/constraints.md` containing a `## Rules` section
+- **THEN** every dispatched node carries `[graph]`-prefixed entries in `NodeDetail.constraints` and the handler block merges both `[graph]`- and `[project]`-prefixed rules (project layer from the session copy), unchanged
 
 ### Requirement: Constraint injection surface documentation matches implementation
 
-The project constraints file header SHALL state that rules inject into every graph node type (main/approval/gate), matching the implementation.
+The project constraints file header SHALL state that rules inject into every main graph node, matching the implementation (dispatch is exactly `{main}`; agent/approval node types no longer exist, ADR 0215/0216).
 
 #### Scenario: Reading the constraints file header
 
 - **WHEN** an operator reads `.graph-scheduler/constraints.md`
-- **THEN** the header states injection covers main, approval, and gate node types
+- **THEN** the header states injection covers main node types only (no approval/gate node types exist)
 
 ### Requirement: Layered append without overwrite
 
-Constraints from multiple sources MUST be injected by layered accumulation: platform injection < node-level task/context < skill-level `## Rules`; lower-layer constraints MUST append only and MUST NOT overwrite upper layers; when entries for the same dimension (e.g., language) conflict, the conflicting entries MUST be preserved for the executor to judge, and no entry MAY be silently dropped. The YAML phase `constraints` field (formerly the "project graph constraints" layer) SHALL have been removed — graph authors no longer declare node-level constraint fields; the project constraint injection path via `.graph-scheduler/constraints.md` → `NodeDetail.constraints` is retained.
+Constraints from multiple sources MUST be injected by layered accumulation: project layer (`[project]` — environment discipline) < graph layer (`[graph]` — graph content rules) < node-level task/context < skill-level `## Rules`; lower-layer constraints MUST append only and MUST NOT overwrite upper layers; when entries for the same dimension (e.g., language) conflict, the conflicting entries MUST be preserved for the executor to judge, and no entry MAY be silently dropped. The YAML phase `constraints` field SHALL remain removed (rejection per the removed-field requirement). Inventory entry-level `constraints[]` SHALL remain doc-only — never injected, never part of the dispatch block (two-carrier principle: task text is the precise instruction).
 
 #### Scenario: Conflicting entries preserved
 
-- **WHEN** project constraints require "content in pure English" and skill-level rules require documents to use Chinese
-- **THEN** the injected constraint block contains both conflicting entries, and neither is dropped
+- **WHEN** project constraints require "content in pure English", graph constraints require reports in Chinese, and skill-level rules require documents to use Chinese
+- **THEN** the injected constraint block contains all conflicting entries, each with its source prefix, and neither is dropped
 
 #### Scenario: Layered accumulation
 
-- **WHEN** project constraints, node-level task constraints, and skill-level rules exist simultaneously
-- **THEN** the constraint block received by the executor contains entries from all three layers, each distinguishable by its source prefix
+- **WHEN** project constraints, graph constraints, node-level task constraints, and skill-level rules exist simultaneously
+- **THEN** the constraint block received by the executor contains entries from all layers, each distinguishable by its source prefix
 
 #### Scenario: NodeDetail constraints from project file only
 
 - **WHEN** any node is dispatched
 - **THEN** `NodeDetail.constraints` SHALL carry the project constraints from `.graph-scheduler/constraints.md` (with the `[project]` prefix)
-- **AND** a `constraints` field declared in graph YAML SHALL be rejected by the schema (the field has been removed)
+- **AND** a `constraints` field declared at phase level in graph YAML SHALL be rejected by the schema (phase-level field removed; top-level graph `constraints` is the graph-content carrier)
+
+#### Scenario: Entry-level constraints stay out of dispatch
+
+- **WHEN** an inventory entry declares `constraints` and its phase is dispatched
+- **THEN** the constraint block does not contain the entry-level entries (doc-only review surface; consumed by writer maintain audit only)
 
 ### Requirement: Structured field semantic deduplication
 
@@ -94,12 +104,12 @@ When the total length of the constraint block content exceeds the limit, an expl
 
 ### Requirement: Unified constraint block format
 
-When constraints are injected into the execution context, a unified block format MUST be used: the block title is `## Constraints`, each constraint is one bullet line, and entries carry the `[project]` source prefix; the end of the block MUST append a fixed sentence requiring a per-entry compliance declaration before output.
+When constraints are injected into the execution context, a unified block format MUST be used: the block title is `## Constraints`, each constraint is one bullet line, and entries carry their source prefix (`[project]` for project rules, `[graph]` for graph rules); the end of the block MUST append a fixed sentence requiring a per-entry compliance declaration before output. The 2 KB cap and lang/git semantic deduplication SHALL apply to the merged block.
 
 #### Scenario: Injection block format is consistent
 
-- **WHEN** project constraints are injected for any node type
-- **THEN** the injected content is the `## Constraints` title plus per-entry bullets (each starting with the `[project]` prefix) plus the fixed declaration sentence at the end
+- **WHEN** project and graph constraints are injected for any node type
+- **THEN** the injected content is the `## Constraints` title plus per-entry bullets (each starting with `[project]` or `[graph]`) plus the fixed declaration sentence at the end
 
 ### Requirement: main node constraint injection
 
@@ -109,34 +119,6 @@ Before executing an inline task, a main-type node MUST place the constraint bloc
 
 - **WHEN** a main-type node is dispatched and project constraints are non-empty
 - **THEN** the task text received by the executing agent contains the constraint block at the top, positioned before the task instructions
-
-### Requirement: agent node constraint injection
-
-When an agent-type node dispatches a sub-agent, the constraint block MUST be injected into the dispatch prompt: positioned after the file content blocks and before `## Task`; in addition, the dispatch context MUST carry the constraints in a `# Constraints` section.
-
-#### Scenario: Dispatch prompt contains constraint block
-
-- **WHEN** an agent-type node is dispatched and project constraints are non-empty
-- **THEN** the constraint block in the prompt received by the sub-agent is located after the file blocks and before the task text
-
-#### Scenario: Dispatch context contains constraints section
-
-- **WHEN** an agent-type node dispatches a sub-agent
-- **THEN** the dispatch context contains a `# Constraints` section whose content is the project constraint list
-
-### Requirement: approval node constraint injection
-
-Before an approval-type node displays the decision card, the constraint block MUST be merged into the pre-call text; the judgment context of automatic evaluation conditions (eval) MUST include the constraint content.
-
-#### Scenario: Decision card shows project constraints
-
-- **WHEN** an approval node is reached and project constraints are non-empty
-- **THEN** the pre-call text of the decision card seen by the user contains the project constraint block
-
-#### Scenario: Automatic evaluation context contains constraints
-
-- **WHEN** an approval node has an eval condition and automatic evaluation is executed
-- **THEN** the evaluation prompt's context contains the project constraint content
 
 ### Requirement: Constraint injection rule test assertions single-sourced
 
@@ -183,11 +165,11 @@ After a node finishes execution, the compliance declarations MUST be merged into
 
 ### Requirement: Violation signal visible for decisions
 
-When a node's compliance declarations contain `unsatisfied`, an explicit violation marker MUST be carried in the output; that marker MUST be visible to downstream approval decisions (presented in the decision card's pre-call).
+When a node's compliance declarations contain `unsatisfied`, an explicit violation marker MUST be carried in the output; that marker MUST be visible to downstream decision points (presented in the decision card's pre-call). "Approval decisions" wording removed — decisions are main-node inline confirmations.
 
 #### Scenario: Violation marker enters decision card
 
-- **WHEN** an upstream node's compliance declarations contain `unsatisfied` and a subsequent approval node exists
+- **WHEN** an upstream node's compliance declarations contain `unsatisfied` and a downstream main confirmation node exists
 - **THEN** the decision card's pre-call text presents the violation marker, and the user can choose continue or retry based on it
 
 ### Requirement: Project constraint file definition and discovery
@@ -211,7 +193,7 @@ A project SHALL carry project-level constraints in the `.graph-scheduler/constra
 
 ### Requirement: Project constraints dispatched with nodes
 
-Every node in a graph run MUST carry the project constraint set at dispatch time, and all three node types — main, agent, and approval — MUST carry it; the constraints carried by a node MUST be the result parsed at the start of that run.
+Every node in a graph run MUST carry the project constraint set at dispatch time; the constraints carried by a node MUST be the result parsed at the start of that run. The node-type enumeration is dropped — all dispatched nodes are main nodes.
 
 #### Scenario: First node returned at startup carries constraints
 
@@ -236,38 +218,6 @@ The constraint parsing logic MUST be a pure function — it takes markdown text 
 
 - **WHEN** the input is non-markdown text or any text without a Rules section
 - **THEN** an empty array is returned and no error is thrown
-
-### Requirement: Termination path clears cache
-
-When a run is force-terminated (force-end), the system MUST delete that run's `graphLoadCache` graph definition cache entry. Constraints have no process cache and no run record column — the pilot loads them once per activation into the session, so there is no entry to clean.
-
-#### Scenario: Cache deleted after force-end
-
-- **WHEN** an active run performs force-end
-- **THEN** the run's graph definition cache entry is deleted and subsequent queries leave no residue of that run's data; constraints are not in the run record (loaded per activation into the session)
-
-### Requirement: Cleanup commands delete corresponding cache
-
-When `clean_completed` and `clean_all` delete DB run records, the graph definition cache entries of the corresponding runs MUST be deleted in sync.
-
-#### Scenario: clean_completed cleans in sync
-
-- **WHEN** clean_completed is executed to delete M completed runs
-- **THEN** the graph definition cache entries of these M runs are deleted together, and the caches of the remaining runs are retained
-
-#### Scenario: clean_all clears all cache
-
-- **WHEN** clean_all is executed
-- **THEN** the graph definition cache Map is cleared, consistent with deleting everything from the DB
-
-### Requirement: Active run cache retained
-
-Non-terminating operations (jump redirection, normal advance) MUST NOT delete graph definition cache entries — the run is still active and subsequent node dispatch depends on the cache; constraints are read via the load node output on each activation (no process cache, no run record involvement).
-
-#### Scenario: Cache retained after jump
-
-- **WHEN** an active run performs a graph_jump redirection
-- **THEN** the run's graph definition cache entry is retained and node dispatch works normally after the redirection; dispatched nodes consume this round's load output (the load has re-run when the target is the entry)
 
 ### Requirement: Warning when file exists but parses empty
 
@@ -361,3 +311,68 @@ When `.graph-scheduler/constraints.json` exists, the pilot SHALL emit the verbat
 
 - **WHEN** constraints.json exists and a run activates
 - **THEN** the loaded array is verbatim identical to the JSON content, and constraints.md was not read
+
+### Requirement: Graph-level constraints field
+
+A graph definition SHALL accept a top-level `constraints` field — `z.array(z.string()).optional()` at the same schema level as `inventory`. Each entry SHALL be a one-sentence prose rule (general boundaries + explicit non-goals, "does not X" / "avoids Y"); ≤10 entries per graph (convention bound, user-calibratable — localized from the OMP constraint guidance like the entry-level ≤5 bound); content carries zero machine validation axis (discipline = generation-time + L-REV review). The field is graph content — it travels with the graph file (self-containment), unlike project-level rules. A top-level `constraints` key SHALL NOT be silently ignored by schema parsing (declared member).
+
+#### Scenario: Graph declares constraints
+
+- **WHEN** a graph YAML declares top-level `constraints: ["rule 1", "rule 2"]`
+- **THEN** the graph validates and the loader reads the array into the parsed definition
+
+#### Scenario: Graph without constraints
+
+- **WHEN** a graph YAML omits top-level `constraints`
+- **THEN** the graph validates with an empty constraint set — no error, no warning (optional field)
+
+### Requirement: Graph constraints machine injection
+
+At every node dispatch, `NodeDetail.constraints` SHALL carry the graph-level constraint set from the loaded graph definition — each entry `[graph]`-prefixed — a dispatch fact, not an agent-side load, so graph constraints apply even when the run is driven without a pilot (direct MCP callers). Project-level rules (`[project]`-prefixed) are NOT carried in the payload — they arrive via the agent-side activation session copy (pilot, compiled-artifact protocol, existing pipeline) and the dispatch handler merges both sources into the `## Constraints` block (layered append, conflicts preserved, 2 KB cap + lang/git dedup on the merged set).
+
+#### Scenario: Graph constraints on dispatch
+
+- **WHEN** a graph declares 2 constraints and a node is dispatched
+- **THEN** `NodeDetail.constraints` carries 2 `[graph]`-prefixed entries, and the handler block merges them with the session project rules
+
+#### Scenario: Pilot-less run still carries graph constraints
+
+- **WHEN** a run is driven directly via MCP (no pilot activation) and the graph declares constraints
+- **THEN** every dispatched node carries the `[graph]`-prefixed entries (project entries may be absent — degrade to empty, warning)
+
+### Requirement: Graph layer spans composed subgraphs
+
+The graph layer of the three-layer constraint chain SHALL cover the composed graph surface: when a graph composes subgraphs via flow phases (`use`), the graph layer SHALL include the subgraphs' top-level constraints (union — see graph-definition "Subgraph constraints propagate through composition"). The layered-append ordering SHALL hold across the composed set: root entries first, subgraph entries in composition order, all `[graph]`-prefixed, none silently dropped.
+
+#### Scenario: Composed graph layer includes subgraph rules
+
+- **WHEN** a composed graph run injects the constraint block
+- **THEN** the `[graph]` entries include the root constraints and every composed subgraph's constraints — the graph layer is the union over the composition tree
+
+#### Scenario: Composition union never duplicates the project layer
+
+- **WHEN** a subgraph constraint text duplicates a project-layer rule semantically
+- **THEN** the existing lang/git semantic deduplication applies to the merged block — no duplicate injection, both layers preserved for the executor to judge when not semantically duplicate
+
+### Requirement: Graph-layer constraints are a dispatch-time snapshot
+
+Graph-layer constraints SHALL be read from the current graph definition at each dispatch (fresh load per dispatch — advance/jump/force-end re-load the graph file). Editing the graph file mid-run SHALL change the `[graph]` entries of subsequent dispatches; the project layer SHALL remain frozen at activation (pilot loads it once into the session). This dispatch-time snapshot semantics SHALL be documented (atom-graph-spec ROUTING §Constraint Layering) — no run-record freezing in this requirement.
+
+#### Scenario: Mid-run graph edit changes subsequent injections
+
+- **WHEN** a run is active and the graph file's top-level `constraints` is edited
+- **THEN** subsequent NodeDetail dispatches carry the edited entries, while earlier dispatches of the same run carried the pre-edit entries
+
+#### Scenario: Project layer stays frozen
+
+- **WHEN** the same mid-run graph edit happens
+- **THEN** the `[project]` entries of every dispatch in the run remain the activation-loaded set — the two channels have documented, asymmetric snapshot semantics
+
+### Requirement: Composed subgraph constraints SHALL union into every member dispatch
+
+The graph-layer constraint injection SHALL union composed subgraph constraints into the compiled graph's constraint set — child graph constraints and parent constraints merge (no overwrite), and every assembled child node SHALL receive the merged `[graph]`-prefixed constraint facts. The union SHALL be delivered on the dispatch payload (NodeDetail.constraints) for composed members — every member dispatches through the same advance loop as peer nodes (no delegated-batch execution exists, ADR 0233).
+
+#### Scenario: Child constraints delivered to composed members
+
+- **WHEN** a composed subgraph declares graph-level constraints and its member node is dispatched
+- **THEN** the node's `[graph]` constraint facts SHALL include the merged child + parent constraint set (root-only delivery is removed)

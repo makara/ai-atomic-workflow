@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Apply change → dual-axis review → bounded rework → archive. Asset: `packages/graph-scheduler/graphs/openspec-apply.taskflow.yaml`.
+Apply change → dual-axis review → bounded rework → archive. Asset: `packages/graph-scheduler/graphs/openspec-apply.yaml`.
 
 ## Requirements
 
@@ -35,17 +35,17 @@ Apply change → dual-axis review → bounded rework → archive. Asset: `packag
 
 #### Scenario: No static atom-graph-spec channel
 
-- **WHEN** a validator scans openspec-apply.taskflow.yaml
+- **WHEN** a validator scans openspec-apply.yaml
 - **THEN** no phase SHALL declare `skill:atom-graph-spec` in channels
 
 ### Requirement: Pipeline Topology
 
-The graph SHALL be ordered as `apply-change → change-review → change-accept → archive`, with dependency edges forming a unidirectional chain: change-review depends on apply-change, change-accept depends on change-review, and archive depends on change-accept. change-accept SHALL be an approval-type node depending solely on the single change-review node.
+The graph SHALL be ordered as `apply-change → change-review → change-gate → change-accept → archive`, with dependency edges forming a unidirectional chain: change-review depends on apply-change, change-gate depends on change-review, change-accept depends on change-gate, and archive depends on change-accept. change-gate SHALL be a main rework-decision node carrying the bounded rework condition; change-accept SHALL be a main confirmation node.
 
 #### Scenario: Full-chain sequential execution
 
 - **WHEN** the user starts the graph with `graph_start { graphName: "openspec-apply", args: { changeName: "<name>" } }`
-- **THEN** apply-change executes first, followed by change-review, change-accept, and archive activating in sequence
+- **THEN** apply-change executes first, followed by change-review, change-gate, change-accept, and archive activating in sequence
 - **THEN** failure of any node does not block subsequent advance; the failure state propagates along the graph until completion
 
 #### Scenario: Graph terminates after archiving
@@ -93,24 +93,24 @@ apply-change SHALL output a machine-parseable structured block: `change_name`, `
 
 ### Requirement: Bounded automatic rework gate
 
-change-accept SHALL decide automatically via an eval condition: `when: 'change-review output shows overall: fail AND retryAttempt < 2'` → retry to apply-change; when the condition does not match (DEBT, no issues, or retryAttempt at the bound) it SHALL fall through to the human approval() card. The automatic rework condition SHALL reference the atom-dual-review output contract field `overall: fail` and set an upper bound on retryAttempt — it SHALL NOT use non-contract wording such as "FAIL verdict" and SHALL NOT loop unboundedly.
+`change-gate` (main) SHALL express the bounded rework condition in its task text: `when change-review output shows overall: fail AND apply-change retryCount < 2 → rework decision targeting apply-change`; when the condition does not match (DEBT, no issues, or retryCount at the bound) the decision is a plain continue (no target, pass-through). The rework condition SHALL reference the atom-dual-review output contract field `overall: fail` and set an upper bound on retryCount — it SHALL NOT use non-contract wording such as "FAIL verdict" and SHALL NOT loop unboundedly. No gate type or jump-condition evaluation exists — the condition is evaluated inline by the executing agent per the task text, and the decision output carries the target.
 
 #### Scenario: FAIL automatic rework
 
-- **WHEN** change-review outputs `overall: fail` and the current apply-change retryAttempt < 2
-- **THEN** change-accept automatically produces a retry decision targeting apply-change without showing the decision UI
+- **WHEN** change-review outputs `overall: fail` and the current apply-change retryCount < 2
+- **THEN** change-gate's rework decision targets apply-change (no decision UI shown — the condition is task-text automatic)
 - **THEN** the retry annotation carries a summary of the change-review findings and is injected into the apply-change context with the jump
 
 #### Scenario: At the bound, fall through to human
 
-- **WHEN** change-review outputs `overall: fail` but retryAttempt has reached the upper bound (≥2)
-- **THEN** the automatic decision does not trigger and the decision UI is presented to the user (continue/retry/jump options)
+- **WHEN** change-review outputs `overall: fail` but retryCount has reached the upper bound (≥2)
+- **THEN** the automatic rework condition does not hold and the decision UI is presented to the user (continue/retry/jump options)
 - **THEN** the user can manually choose continue, retry, or jump; the graph does not hang
 
 #### Scenario: DEBT or no issues go to human approval
 
 - **WHEN** change-review outputs `overall: pass` (with or without warnings)
-- **THEN** no eval condition matches and the decision UI is presented to the user
+- **THEN** the rework condition does not hold and the decision UI is presented to the user
 - **THEN** after the user approves (continue), the run proceeds to archive; warnings do not trigger automatic rework
 
 ### Requirement: Rework feedback injection

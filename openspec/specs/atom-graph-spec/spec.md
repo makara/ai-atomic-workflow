@@ -2,70 +2,36 @@
 
 ## Purpose
 
-Reference for the `.taskflow.yaml` format. Assets: `packages/graph-workflow/skills/atom-graph-spec/SKILL.md`.
+Reference for the workflow graph format (`.yaml`). Assets: `packages/graph-workflow/skills/atom-graph-spec/SKILL.md`.
 
 ## Requirements
 
-### Requirement: atom-graph-spec — taskflow.yaml format reference
+### Requirement: atom-graph-spec — workflow graph format reference
 
-`atom-graph-spec` SHALL define the authoritative reference for the `.taskflow.yaml` graph format. It SHALL specify the `PhaseSchema`, topology rules (dependsOn, gate jumps, join modes), channel declarations, and approval routing configuration. Approval routing SHALL document that approval phases depend on a single review-convergence node, and that retry/jump actions declare explicit targets. The reference SHALL document the scoped-context terminology: context contract (skill `## Context Requirements`), context channels (graph `channels` field), and injected context (assembled prompt blocks) — and SHALL instruct graph authors to derive `channels` from the dispatched skill's contract. The reference SHALL NOT list the removed `preText`/`reads` fields (schema field convergence — loud rejection with migration hints). Main phases MAY declare an optional `operations:` field — closed-set members of the High-Level Tool Registry (atom-mcp-contract §HLT Registry) — overriding/complementing the dispatched skill's `Operation classes` default; unknown class names SHALL fail graph load with loud rejection; absent field SHALL mean "use the skill's default classes".
+MODIFIED: the PhaseSchema field table restores the `agent` row (peer-level advisory sub-agent type preferences on main phases — priority-ordered, fallback platform default); `execution` remains absent from the field table; the dispatch NodeDetail surface documents the restored `agent` field and still documents no `position` / `executionMode`; the composition clause documents `use` as compile-time nesting with namespaced member dispatch (no execution-mode options) and states composing phases SHALL NOT declare `agent`. PHASESCHEMA/ROUTING section content synced to the restored surface.
 
-#### Scenario: Spec defines PhaseSchema fields
+#### Scenario: Field table excludes removed keys
 
-- **WHEN** an agent loads `atom-graph-spec`
-- **THEN** it SHALL receive the complete field reference: `id`, `type`, `dependsOn`, `route`, `agent`, `skill`, `channels`, `task`, `routing`, `jumps`, `join`, `use`, `operations`
-- **THEN** it SHALL receive field descriptions, types, defaults, and constraints
-- **THEN** it SHALL NOT list `preText` or `reads` as declarable fields (removed — loud rejection with migration hints)
-- **THEN** it SHALL document that `join` accepts only the literal `any` (absent = all; explicit `all` rejected)
-- **THEN** it SHALL document that gate/approval `channels` accept only `node:` entries and that approval `task` is the full card prompt
+- **WHEN** the PhaseSchema field table is read
+- **THEN** `execution` SHALL be absent, and the dispatch surface SHALL not document `position` / `executionMode`
+- **AND** `agent` SHALL be present — documented as advisory priority-ordered sub-agent type preferences for main phases (fallback platform default)
 
-#### Scenario: Spec defines topology rules
+#### Scenario: Use composition documented natively
 
-- **WHEN** agent references topology rules
-- **THEN** `dependsOn` SHALL describe upstream phase IDs this phase waits for (scheduling only — direct dependsOn outputs auto-inject)
-- **THEN** `join` SHALL define dependency resolution: absent = all (every dep), `any` (one dep sufficient — branch-route convergence only, upstreams span ≥2 routes)
-- **THEN** `channels` SHALL define context delivery for all phase types — main resolved against the dispatched skill's `## Context Requirements` contract and injected into the prompt; gate/approval `node:`-only judgment context
+- **WHEN** the composition clause is read
+- **THEN** `use` SHALL be documented as compile-time subgraph nesting (namespaced member ids, same-loop dispatch) with no execution-mode options
+- **AND** composing (`use`) phases SHALL be documented as not declaring `agent`
 
-#### Scenario: Spec defines channel declaration rules
+#### Scenario: PHASESCHEMA documents the template field
 
-- **WHEN** agent authors a main phase's `channels`
-- **THEN** the spec SHALL instruct deriving entries from the dispatched skill's contract: From upstream node IDs (via `node:` prefix when not a direct dependency), Reference skill names (via `skill:` prefix or bare contract name), and Files globs
-- **THEN** the spec SHALL state that a channel duplicating a `dependsOn` node is redundant and will warn
-- **WHEN** agent authors a gate/approval phase's `channels`
-- **THEN** the spec SHALL instruct `node:`-only entries (judgment context = node outputs)
+- **WHEN** the PhaseSchema field table is read
+- **THEN** the `template` row SHALL be present — closed enum (`startup`), mutually exclusive with `use` and `task`, requires empty `dependsOn` (template nodes are graph entries)
 
-#### Scenario: Spec defines approval routing config
+#### Scenario: Startup-template usage documented
 
-- **WHEN** agent references approval routing
-- **THEN** `routing.actions` SHALL define decision options: `action` (continue|retry|jump|end), `label`, `description`, and `target`
-- **THEN** `target` SHALL be required for `retry` and `jump` actions — routing targets SHALL be explicit, never inferred from `dependsOn` order (deprecated fallback)
-
-#### Scenario: Spec documents approval dependency rule
-
-- **WHEN** agent authors an approval phase
-- **THEN** the spec SHALL instruct that `dependsOn` contains exactly the review-convergence node, never the writer phases the review already joins over
-
-#### Scenario: Phase declares operations
-
-- **WHEN** a main phase declares `operations: [locate, edit, verify]`
-- **THEN** the field SHALL be valid in the schema
-- **AND** the dispatched NodeDetail SHALL carry the declaration for the handler
-
-#### Scenario: Operations absent uses skill default
-
-- **WHEN** a main phase declares no `operations:`
-- **THEN** the dispatched node's class set SHALL default to the skill's `Operation classes` subsection
-- **AND** the phase SHALL NOT be a validation error
-
-#### Scenario: Unknown class rejected at load
-
-- **WHEN** a phase declares an `operations:` value outside the closed set
-- **THEN** graph load SHALL fail with an error naming the phase and the unknown class
-
-#### Scenario: Operations is main-type only
-
-- **WHEN** a non-main phase (approval/gate/flow) declares `operations:`
-- **THEN** graph load SHALL reject it — operation classes declare the phase's HLT Registry classes, a main-type execution concern
+- **WHEN** a reader consults atom-graph-spec for graph startup behavior
+- **THEN** the reference SHALL document that a graph declaring `template: startup` on its entry runs the heavy startup steps (constraints session load, serena activation, jcodemunch indexing) as its first node
+- **AND** graphs without it start bare — the pilot never runs the heavy steps on its own (subgraph agent deletion retained)
 
 ### Requirement: Task content rules (Task Content Spec)
 
@@ -84,17 +50,22 @@ atom-graph-spec §Language Constraints SHALL be extended with a full §Task Cont
 
 ### Requirement: Graph top-level description field
 
-The graph schema SHALL accept a top-level `description` free-text field. Its content SHALL focus on the graph's purpose/effect — one line stating what the graph does/produces. It SHALL be optional, non-enumerated, and carry no behavior branching: it is identity metadata for display, never a machine-consumed directive.
+MODIFIED: the graph schema SHALL accept a top-level `description` free-text field. Its content SHALL focus on the graph's purpose/effect — one line stating what the graph does/produces; it is the catalog single source (ADR 0235). It SHALL be optional, non-enumerated, and carry no behavior branching: it is identity metadata for display, never a machine-consumed directive. The reference SHALL direct authors to keep the description to a concise intent statement — the graph topology is declared in `phases` + `flow` + `inventory`, not restated in the description (F2 self-description dedup, ADR 0244). Header comments and per-phase comments duplicating the description SHALL NOT be written.
 
 #### Scenario: Description field parses
 
-- **WHEN** a graph declares `description: "Maker journey — produces .taskflow.yaml graphs"`
+- **WHEN** a graph declares `description: "Maker journey — produces workflow YAML graphs"`
 - **THEN** the graph SHALL load and the description SHALL be carried in graph_start responses
 
 #### Scenario: Missing description is legal
 
 - **WHEN** a graph omits `description`
 - **THEN** the graph SHALL load normally
+
+#### Scenario: Description guidance concise
+
+- **WHEN** a graph author reads the description field documentation
+- **THEN** it SHALL direct a concise intent statement (catalog single source) and state that topology restatement belongs in `phases` / `flow` / `inventory` — no duplicate self-description
 
 ### Requirement: Skill contract drives spec-channel derivation
 
@@ -137,11 +108,12 @@ When a main phase dispatches sub-agents (e.g. code-review axis agents), the inje
 
 ### Requirement: Duplicate YAML example single-sited
 
-The Gate+Approval YAML example SHALL exist exactly once, in §Gate+Approval Pair Pattern.
+The gate/approval YAML example no longer exists — both node types were removed (ADR 0215/0216). YAML examples cover main/flow phases and decision nodes only; each example SHALL exist exactly once.
 
 #### Scenario: single YAML example
 
-Given the atom-graph-spec skill file When a reviewer searches for the Gate+Approval YAML example Then it appears exactly once, in §Gate+Approval Pair Pattern, and §Auto-Rework rules reference it by pointer
+- **WHEN** a reviewer searches for a YAML example in the atom-graph-spec skill file
+- **THEN** each example appears exactly once, in its single home section, and other sections reference it by pointer
 
 ### Requirement: Loop-router sections merged
 
@@ -161,7 +133,7 @@ Given packages/graph-workflow/skills/atom-graph-spec/SKILL.md When searching for
 
 ### Requirement: body thesis sentence
 
-The atom-graph-spec SKILL.md body SHALL open with a one-sentence thesis after the `# Atom-Graph-Spec` heading, before consumer/priority/invocation content. The thesis states the skill's purpose — reference for the .taskflow.yaml graph format (PhaseSchema, topology, gates, joins, channels, approval routing, run mode).
+The atom-graph-spec SKILL.md body SHALL open with a one-sentence thesis after the `# Atom-Graph-Spec` heading, before consumer/priority/invocation content. The thesis states the skill's purpose — reference for the workflow YAML graph format (PhaseSchema, topology, joins, channels, `$schema`/`version` self-description headers, main/flow phase types — gate/approval/run-mode removed, ADR 0215/0216).
 
 #### Scenario: graph-spec opens with thesis
 
@@ -171,26 +143,26 @@ The atom-graph-spec SKILL.md body SHALL open with a one-sentence thesis after th
 
 #### Scenario: no length-band regression
 
-- **WHEN** the thesis sentence is added
-- **THEN** the atom-graph-spec SKILL.md body word count SHALL stay ≤1,500 (reference band ≤1,000 when applied)
+- **WHEN** the thesis sentence is adjusted
+- **THEN** the atom-graph-spec SKILL.md body word count SHALL stay within the reference band
 
 ### Requirement: Language Convention Deferral
 
-atom-graph-spec §Language Constraints SHALL NOT mandate a specific language for graph YAML values, task content, or gate jump conditions / approval recommendation criteria. Language choice SHALL defer to the consuming project's language conventions (project instructions / constraints). Structural rules remain in force: lowercase field names, kebab-case phase IDs, plain skill names, no hardcoded output paths, references to observable facts.
+atom-graph-spec §Language Constraints SHALL NOT mandate a specific language for graph YAML values, task content, or rework condition criteria (the gate jump conditions / approval recommendation criteria wording is removed — gate/approval types are deleted, ADR 0215/0216). Language choice SHALL defer to the consuming project's language conventions (project instructions / constraints). Structural rules remain in force: lowercase field names, kebab-case phase IDs, plain skill names, no hardcoded output paths, references to observable facts.
 
 #### Scenario: No language mandate
 
-- **WHEN** an agent consults graph-spec language constraints
-- **THEN** no specific language is mandated - the consuming project's conventions decide
+- **WHEN** a graph YAML or task content uses a language different from English
+- **THEN** atom-graph-spec SHALL NOT reject it — language choice defers to the project's conventions
 
 #### Scenario: Structural rules retained
 
-- **WHEN** writing graph YAML or task text
-- **THEN** lowercase field names, kebab-case phase IDs, plain skill names, no hardcoded paths, and observable-fact references remain required
+- **WHEN** any graph YAML is authored
+- **THEN** structural rules remain in force (lowercase field names, kebab-case phase IDs, plain skill names, no hardcoded output paths) regardless of language
 
 ### Requirement: Channel declaration tiers — graph file globs restricted
 
-The `atom-graph-spec` format reference SHALL state the three-tier channel declaration rule: graph top-level `context:` and phase `channels:` SHALL carry `node:` stream references, `skill:` references, and file globs under workflow runtime artifacts (`.graph-scheduler/`, `.taskflow/`) only. Convention files (`CONTEXT.md`, `docs/domains.md`) are supplied by the platform convention layer (default-loaded, absence-tolerant) — graphs SHALL NOT declare them. Project-owned file globs (`docs/adr/*.md`, `openspec/specs/**`, `openspec/changes/**`, `docs/domains.md`, `CONTEXT.md` when the project declares it) SHALL be declared in `.graph-scheduler/config.json` `context:` (project layer), never in shipped graphs. The format reference SHALL document the tier rule and the config-layer escape hatch so graph authors declare project layout where it belongs.
+MODIFIED: the `atom-graph-spec` format reference SHALL state the three-tier channel declaration rule: graph top-level `context:` and phase `channels:` SHALL carry `node:` stream references, `skill:` references, and file globs under workflow runtime artifacts (`.graph-scheduler/`, `.taskflow/`) only. Convention files (`CONTEXT.md`, `docs/domains.md`) are supplied by the platform convention layer (default-loaded, absence-tolerant) — graphs SHALL NOT declare them. Project-owned file globs (`docs/adr/*.md`, `openspec/specs/**`, `openspec/changes/**`, `docs/domains.md`, `CONTEXT.md` when the project declares it) SHALL be declared in `.graph-scheduler/config.json` `context:` (project layer), never in shipped graphs. **The workflow-artifact glob example in the PHASESCHEMA Files contract table updates from `.graph-scheduler/docs/x.md` to a two-path surface (e.g. `.graph-scheduler/graphs/x.yaml`)** — the attached-doc mechanism is deleted (ADR 0244 D3), `.graph-scheduler/docs/` no longer exists; the glob namespace rule itself is unchanged (`.graph-scheduler/` remains a valid workflow-artifact root).
 
 #### Scenario: Format reference documents tiers
 
@@ -201,6 +173,11 @@ The `atom-graph-spec` format reference SHALL state the three-tier channel declar
 
 - **WHEN** a graph author considers adding `./CONTEXT.md` to graph context
 - **THEN** the reference SHALL direct them to the convention layer (no declaration needed)
+
+#### Scenario: Workflow-artifact glob example two-path
+
+- **WHEN** the PHASESCHEMA Files contract table is read
+- **THEN** the workflow-artifact glob example SHALL reference a two-path surface (e.g. `.graph-scheduler/graphs/x.yaml`) — no `.graph-scheduler/docs/` example remains
 
 ### Requirement: PHASESCHEMA holds declaration content only
 
@@ -213,21 +190,21 @@ PHASESCHEMA.md SHALL define YAML schema fields, YAML rules, task content spec, a
 
 ### Requirement: ROUTING holds semantics without user-layer restatements
 
-ROUTING.md SHALL define topology, jumps, completion, routes, and approval policy; it SHALL NOT restate run-mode semantics (origin: §Activation Prologue; execution: atom-kernel approval()) or default decision-card composition (owned by atom-phase-handler DECISION-CARDS.md).
+ROUTING.md SHALL define topology, rework decisions, completion, routes, and decision policy; it SHALL NOT restate run-mode semantics (removed, ADR 0215) or default decision-card composition (owned by atom-phase-handler DECISION-CARDS.md).
 
 #### Scenario: Run mode defined at two fixed sites
 
-- **WHEN** a consumer needs run-mode semantics
-- **THEN** the origin resolves to atom-graph-spec §Activation Prologue and the execution semantics to atom-kernel §approval(); no third site restates them
+- **WHEN** a consumer reads ROUTING.md for run-mode semantics
+- **THEN** it finds none — run mode is removed (ADR 0215); no site defines run-mode semantics, and ROUTING SHALL NOT restate them
 
 ### Requirement: retryCount single counter name
 
-The node retry counter SHALL be named `retryCount` throughout the schema (auto-supplied field, jump rules, gate conditions); `retryAttempt` SHALL NOT be used as a second name for the same counter.
+The node retry counter SHALL be named `retryCount` throughout the schema (auto-supplied field, jump rules, rework conditions); `retryAttempt` SHALL NOT be used as a second name for the same counter.
 
 #### Scenario: Counter name consistent
 
-- **WHEN** a graph author or gate condition references the retry counter
-- **THEN** the name `retryCount` resolves consistently across PHASESCHEMA, ROUTING, and NODE-SCHEMA
+- **WHEN** scanning NODE-SCHEMA.md §Base Fields and atom-graph-spec for the field
+- **THEN** every site names `retryCount` (snapshot `retryCount` remains the rework-bound counter)
 
 ### Requirement: Contract entry annotation grammar documented
 
@@ -290,3 +267,104 @@ Upstream reports (direct dependsOn + `node:` channels) SHALL be delivered to the
 - **WHEN** a node is dispatched with completed upstreams
 - **THEN** the dispatch SHALL carry the channel/dependsOn declarations
 - **AND** the handler SHALL assemble `## Upstream:` blocks from the agent session — no payload content, no file reads
+
+### Requirement: Inventory field in format reference
+
+The workflow graph format reference (atom-graph-spec) SHALL document the top-level `inventory` field: the dedicated schema key for the node overview table (the term "atom" SHALL NOT name the key), the entry shape `{ id, type, goal, constraints? }` (no `skill` field — the phase-level `skill` field is the single source; a legacy `skill` key is ignored), the bounded-compound goal syntax (connectors AND / THEN / IF-ELSE / OR — structural keywords SHALL be ALL-CAPS (`AND`, `OR`, `IF`, `THEN`, `ELSE`), distinct from ordinary prose `and`/`or`; conditional phrases use IF; ordinary nodes ≤ 5 steps; gates ≤ 3 AND/OR operands, retryCount bound not counted; conditional paths ≤ 3; bounds are convention, user-calibratable) with **mechanism-in-goal** guidance (skill-bound main nodes name the executing skill in verb form, flow entries state "expands <use> subgraph", approval/gate entries carry decision semantics), the optional `constraints` array (one-sentence prose rules; ≤ 5 entries per atom, convention bound; general rules prefer positive framing, explicit non-goals state the negation directly; prose only — no structural keywords, no new word-list members), the zero-validation-axis clause for `goal`/`constraints` content, validation-warning semantics (id-exists + type-match only), flow rule, and ownership rule.
+
+#### Scenario: Format reference covers inventory
+
+- **WHEN** a reader consults the format reference for the `inventory` key
+- **THEN** entry shape `{ id, type, goal, constraints? }`, bound syntax, case discipline, mechanism-in-goal guidance, constraints semantics (rules + explicit non-goals, ≤ 5 bound, prose-only), validation-warning semantics, flow rule, and ownership rule are all documented
+
+#### Scenario: No skill field documented
+
+- **WHEN** a reader consults the format reference for the inventory entry fields
+- **THEN** the `skill` field is not documented as an entry field; the phase-level `skill` field is named as the single source and a legacy `skill` key is stated as ignored
+
+#### Scenario: Structural keywords ALL-CAPS
+
+- **WHEN** the format reference states the bounded-compound goal syntax
+- **THEN** structural keywords are written ALL-CAPS (AND / OR / IF / THEN / ELSE), conditional phrases use IF, and prose `and`/`or` are distinguished as lowercase; the LLM-produced compliance obligation and the user-hand-written exemption are stated
+
+#### Scenario: Constraints documented as prose
+
+- **WHEN** the format reference documents the `constraints` array
+- **THEN** it states one-sentence prose rules, the ≤ 5 entry bound, positive framing preference, direct negation for explicit non-goals, and that no structural keyword or machine validation applies
+
+### Requirement: Graph-level constraints in format reference
+
+The workflow graph format reference (atom-graph-spec) SHALL document the top-level `constraints` field: optional string array at the same level as `inventory`, prose one-sentence rules (general boundaries + explicit non-goals), ≤10 entries per graph (convention bound, calibratable), zero machine validation axis. PHASESCHEMA SHALL carry the field row; ROUTING §Constraint Layering SHALL state the three-layer constraint chain (project `[project]` environment layer / graph `[graph]` content layer — both injected, merged block format with 2 KB cap and lang/git dedup / inventory entry-level doc-only, never injected) as the single home for the layering semantics; the phase-level removed-field wording SHALL name both graph-level and project-level sources.
+
+#### Scenario: PHASESCHEMA documents the field
+
+- **WHEN** a graph author reads PHASESCHEMA for the top-level field set
+- **THEN** `constraints` appears with its shape, bound convention, and zero-axis clause
+
+#### Scenario: ROUTING single home for layering
+
+- **WHEN** a reader consults ROUTING §Constraint Layering
+- **THEN** the three-layer chain (project/graph/entry-level) with prefixes, merged block format, cap, dedup, and conflict preservation is stated there — and handler-side docs only pointer to it
+
+### Requirement: Constraint Layering composition and snapshot clauses
+
+atom-graph-spec ROUTING §Constraint Layering SHALL state two clauses (single home — the format reference is the canonical rule owner):
+
+1. **Composition clause** — the graph layer covers the composed surface: subgraph top-level constraints union into the composed graph's graph layer (symmetric with the inventory use-chain union, ADR 0183); root entries first, subgraph entries in composition order, all `[graph]`-prefixed.
+2. **Dispatch-time snapshot clause** — graph-layer constraints are read from the current graph definition at each dispatch; mid-run graph-file edits change subsequent dispatches' `[graph]` entries; the project layer is frozen at activation. No run-record freezing exists.
+
+#### Scenario: Format reference states the composition clause
+
+- **WHEN** a graph author reads ROUTING §Constraint Layering
+- **THEN** the section states that composed subgraphs' top-level constraints join the graph layer as a union with the root's entries
+
+#### Scenario: Format reference states the snapshot semantics
+
+- **WHEN** a graph author reads ROUTING §Constraint Layering
+- **THEN** the section states the dispatch-time snapshot semantics for graph-layer constraints and the activation-frozen semantics for the project layer — no hidden consistency assumption remains
+
+### Requirement: PHASESCHEMA documents the top-level constraints field row
+
+atom-graph-spec PHASESCHEMA SHALL carry the top-level `constraints` field row (shape `z.array(z.string()).optional()`, ≤10 entries per graph convention bound, zero machine validation axis, `[graph]`-prefixed machine injection) alongside the `inventory` row — the field is a declared schema member, never silently passthrough-ignored.
+
+#### Scenario: Field row present in PHASESCHEMA
+
+- **WHEN** a graph author reads PHASESCHEMA's top-level field table
+- **THEN** the `constraints` row is present with shape, bound, validation axis, and injection semantics
+
+#### Scenario: Existing graphs without the field stay valid
+
+- **WHEN** a graph declares no top-level `constraints`
+- **THEN** the field row documents the absent-field behavior (empty set — no warning, no error)
+
+### Requirement: Run completion rule in format reference body
+
+The atom-graph-spec main body SHALL state the run completion rule directly (not only via ROUTING.md delegation): runs complete by natural drain — `graph_advance` returns `node: null` with fsmState `completed`; completion is a drain, never a marker phase; `graph_force_end` terminates a run (`terminated`, unfinished nodes aborted); no endRun parameter exists on `graph_advance` (removed, ADR 0215); routing actions SHALL NOT include `end`. ROUTING.md keeps the detailed semantics; the main body carries the one-line rule.
+
+#### Scenario: Completion rule visible in main body
+
+- **WHEN** a consumer reads atom-graph-spec/SKILL.md main body
+- **THEN** the natural-drain completion rule (node: null → completed; force_end → terminated; no endRun) is stated directly without following the ROUTING.md pointer
+
+#### Scenario: ROUTING keeps detail home
+
+- **WHEN** a consumer needs the full completion semantics
+- **THEN** ROUTING.md remains the detailed home and the main body references it
+
+### Requirement: Canonical top-level key order documented
+
+The atom-graph-spec format reference (PHASESCHEMA.md §Top-Level Fields) SHALL document the canonical top-level key order: `flow` SHALL be declared before `inventory`, `constraints` SHALL be declared after `inventory` (canonical: `name → description → $schema → version → interaction → flow → inventory → constraints → context → phases`). The field table SHALL note the layout so authored graphs follow it.
+
+#### Scenario: Format reference documents the layout
+
+- **WHEN** an author consults PHASESCHEMA.md §Top-Level Fields
+- **THEN** the section SHALL state that `flow` precedes `inventory` and `constraints` follows `inventory`
+
+### Requirement: Flow compliance documented in the format reference
+
+The atom-graph-spec format reference (PHASESCHEMA §Flow Transitions) SHALL document: (1) the compliance guarantee — the flow subset grammar is a strict subset of the mermaid flowchart grammar, every edge form the engine accepts parses under the real mermaid parser; (2) the compliance check — builtin graphs are verified by the suite regression test (real mermaid parser, dev axis), project graphs are verified at load time with a non-conformant block surfacing as a load-time problem (never a load failure); (3) authoring guidance — flow edges SHALL be written in mermaid-valid subset form (`A --> B` unlabeled, `A -->|label| B` labeled, self-edges for loops; chained edges are mermaid-valid but outside the engine subset and SHALL NOT be authored).
+
+#### Scenario: Authoring guidance states the subset boundary
+
+- **WHEN** an author reads PHASESCHEMA §Flow Transitions to write a flow block
+- **THEN** the reference states the compliance guarantee, the two-track check, and the authoring rule (subset forms only — chained edges SHALL NOT be authored)

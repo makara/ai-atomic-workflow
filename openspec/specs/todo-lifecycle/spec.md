@@ -8,7 +8,7 @@ Platform todo lists are execution scratchpads scoped to the currently executing 
 
 ### Requirement: Node boundary SHALL be the todo boundary
 
-Every node dispatch (main, approval, gate, and activation prologue nodes) SHALL clear the platform todo list before execution begins; every node completion SHALL clear it again after the node output write and before `graph_advance` — unconditional on success or failure. Nodes SHALL use todo on demand as a disposable scratchpad; no node SHALL be required to create one.
+Every main node dispatch SHALL clear the platform todo list before execution begins; every node completion SHALL clear it again after the node output write and before `graph_advance` — unconditional on success or failure. The dispatch-type enumeration is narrowed to the single main path (approval/gate/activation-prologue nodes are deleted, ADR 0215/0216/0148). Nodes SHALL use todo on demand as a disposable scratchpad; no node SHALL be required to create one.
 
 #### Scenario: Dispatch starts with an empty todo
 

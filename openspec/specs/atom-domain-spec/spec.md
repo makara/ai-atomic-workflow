@@ -188,14 +188,14 @@ docs/domains.md SHALL stay linked to the glossary (term disambiguation), CONTEXT
 
 ### Requirement: Live graph and engine-feature indexing
 
-`docs/domains.md` SHALL index the live domain set and state live counts matching disk facts: graph domains include `estate-maintain` (asset `packages/graph-scheduler/graphs/estate-maintain.taskflow.yaml`); engine-feature domains include `mutation-plane`, `query-plane`, and `atomic-step-flows` (two-plane tool division — ADR 0128); the index SHALL state counts matching disk facts (50 domains — 46 active + 4 retired; 9 graphs; 14 skill assets).
+`docs/domains.md` SHALL index the live domain set and state live counts matching disk facts: graph domains include `estate-maintain` (asset `packages/graph-scheduler/graphs/estate-maintain.yaml`); engine-feature domains include `graph-flow-layout` (asset `openspec/specs/graph-flow-layout/spec.md` — canonical graph-file layout, ADR 0241); the index SHALL state counts matching disk facts (85 domains — 61 active + 24 retired; 12 graphs; 18 skill domains; 31 engine-feature domains).
 
 #### Scenario: Index counts match disk
 
 - **WHEN** the domain index is scanned
-- **THEN** total / active / retired counts SHALL match directory facts (50 / 46 / 4)
-- **AND** the graph section SHALL list 9 graphs including estate-maintain
-- **AND** the engine-feature section SHALL list mutation-plane, query-plane, and atomic-step-flows
+- **THEN** total / active / retired counts SHALL match directory facts (85 / 61 / 24)
+- **AND** the graph section SHALL list 12 graphs including estate-maintain
+- **AND** the engine-feature section SHALL list graph-flow-layout
 
 #### Scenario: No stale graph language
 

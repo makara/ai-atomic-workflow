@@ -2,6 +2,25 @@
 
 > Release history for ai-atomic-workflow — monorepo, one release line for both packages. Content derived from code state (skills, graphs, schema features), not git commits. Caveman style — one line per change, latest state wins.
 
+## [v0.6.0]
+
+"LangGraph runtime, flow transitions, self-contained graphs."
+
+### Added
+
+- Scheduler: LangGraph runtime adapter + compile pipeline (adapter.ts / compile.ts / flow.ts); top-level flow transition table (condition-matched advance, backward-only jump channel); inventory schema (per-phase goal + constraints); builtin task templates (startup / router / scope-entry / adopting / handoff); __handoff result-report terminal (two-element session report); strict workflow schema (unknown phase keys rejected loudly); graph_assets perception list; mermaid-compliance + interaction-scan machine audits.
+- Graphs: 12 builtin graphs rewritten as workflow YAML with full flow blocks (transition surface single-source).
+- Skills: first-principles (vendored).
+
+### Changed
+
+- Scheduler engine rebuilt on embedded LangGraph runtime (custom FSM / state-machine / flow-flatten / topology replaced); advance channel = condition / jump / end (direct-end; branchTo deleted); subgraph composition deleted — nested execution is router sibling runs; 518-test observable-contract rewrite.
+- Skills: graph-workflow overhauled (atom-pilot / atom-phase-handler / atom-scope-interview / spec skills); HLT instruction layer removed — scenario-keyed hints.
+
+### Removed
+
+- .taskflow.yaml graph format (→ workflow YAML); custom FSM machinery; approval + gate node types (→ inline interviews + flow self-edges); loop template (→ flow self-edges); HLT registry instruction layer; cross-run delegation + use composition.
+
 ## [v0.5.0]
 
 "Signal discipline module."
@@ -98,6 +117,6 @@ Initial release.
 
 ### Added
 
-- Engine: graph-scheduler DAG engine + MCP server (9 tools, stdio), pure-function FSM kernel, libsql persistence; approval gates (non-bypassable human decision cards).
+- Engine: graph-scheduler graph execution engine + MCP server (9 tools, stdio), pure-function FSM kernel, libsql persistence; approval gates (non-bypassable human decision cards).
 - Graphs: `.taskflow.yaml` format (main/approval, `dependsOn`, `task`, `skill`, `channels`, `join`).
 - Skills: graph-workflow system (atom-pilot, atom-phase-handler, atom-kernel, entry + reference skills); setup-atomic-workflow (scaffolds `.graph-scheduler/`, idempotent).

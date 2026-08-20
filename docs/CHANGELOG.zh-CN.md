@@ -2,6 +2,25 @@
 
 > ai-atomic-workflow 发布历史 — monorepo，两个包共用一条发布线。内容依据代码状态（技能、图、schema 特性）推导，非 git 提交。Caveman 风格 — 每条一句话，最新状态为准。
 
+## [v0.6.0]
+
+"LangGraph 运行时、flow 转移、自包含图"。
+
+### 新增
+
+- 引擎：LangGraph 运行时适配器 + 编译管线（adapter.ts / compile.ts / flow.ts）；顶层 flow 转移表（条件匹配推进、backward-only jump 通道）；inventory schema（每阶段目标 + 约束）；内置任务模板（startup / router / scope-entry / adopting / handoff）；__handoff 结果报告终节点（两元素会话报告）；严格 workflow schema（未知 phase 键响亮拒绝）；graph_assets 感知列表；mermaid 合规 + interaction 扫描机器审计。
+- 图：12 个内置图重写为 workflow YAML（flow 块全覆盖 — 转移表面单一来源）。
+- 技能：first-principles（vendored）。
+
+### 变更
+
+- 引擎：调度器重建于内嵌 LangGraph 运行时（自研 FSM / state-machine / flow-flatten / topology 替换）；advance 通道 = condition / jump / end（direct-end；branchTo 删除）；子图组合删除 — 嵌套执行为 router 兄弟运行；518 测试可观测契约重写。
+- 技能：graph-workflow 大改（atom-pilot / atom-phase-handler / atom-scope-interview / spec 技能）；HLT 指令层移除 — scenario-keyed 提示。
+
+### 移除
+
+- .taskflow.yaml 图格式（→ workflow YAML）；自研 FSM 机制；approval + gate 节点类型（→ 内联访谈 + flow 自环）；loop 模板（→ flow 自环）；HLT registry 指令层；cross-run delegation + use 组合。
+
 ## [v0.5.0]
 
 "信号纪律模块"。
@@ -98,6 +117,6 @@ The arch-review-loop。
 
 ### 新增
 
-- 引擎：graph-scheduler DAG 执行引擎 + MCP 服务器（9 工具、stdio）、纯函数 FSM 内核、libsql 持久化；审批关卡（阶段间不可绕过的决策卡）。
+- 引擎：graph-scheduler 图执行引擎 + MCP 服务器（9 工具、stdio）、纯函数 FSM 内核、libsql 持久化；审批关卡（阶段间不可绕过的决策卡）。
 - 图：`.taskflow.yaml` 格式（main/approval、`dependsOn`、`task`、`skill`、`channels`、`join`）。
 - 技能：graph-workflow 技能系统（atom-pilot、atom-phase-handler、atom-kernel、入口 + 参考技能）；setup-atomic-workflow（生成 `.graph-scheduler/`、幂等）。

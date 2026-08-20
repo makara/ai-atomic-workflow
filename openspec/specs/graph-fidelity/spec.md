@@ -8,22 +8,27 @@ The merged platform-seam module: executes the graph system's signal discipline o
 
 ### Requirement: Settlement feedback surfaces stay consistent across consumer docs
 
-Consumer documentation (ADR index rows, ADR bodies, CHANGELOG, delivery skills, README) SHALL state that R2 cost economy (context management, settlement feedback) is SUSPENDED pending redesign (ADR 0175), and SHALL NOT narrate notify/showToast settlement or class-driven compression as the implemented seam. Historical records (CHANGELOG entries predating the change, ADR historical decision bodies) SHALL be preserved as history, with revision notes where they could be misread as current state.
+MODIFIED: consumer documentation (ADR index rows, ADR bodies, delivery skills, README) SHALL state that R2 cost economy (context management, settlement feedback) is ACTIVE since the rebuild (ADR 0186 supersedes the suspension, ADR 0175; first-principles graph-fidelity-context-management.md rev.7), and SHALL NOT narrate the pre-rebuild suspended state as current. The headroom MCP compressor SHALL NOT be named as a base-package surface — it is the graph-fidelity-context module's internal dependency. Historical records (CHANGELOG entries predating activation, ADR 0175 decision body, ADR historical records) SHALL be preserved as history with revision notes where they could be misread as current state. The settlement/telemetry narrative SHALL match the shipped implementation (first-sight processing, cache telemetry, notify/display via the interface layer).
 
 #### Scenario: Index row states notify channel
 
-- **WHEN** a reader checks the ADR index 0171 row
-- **THEN** it states the R2 suspension revision note (0175) rather than the `ctx.ui.notify` channel as active
+- **WHEN** a reader checks the ADR index 0175 row
+- **THEN** it states the record was superseded by 0186 (activation/rebuild) rather than the suspension as active
 
 #### Scenario: Historical CHANGELOG entries preserved
 
 - **WHEN** a reader opens CHANGELOG `[Unreleased]`
-- **THEN** pre-suspension entries remain as historical facts, and a new entry states the suspension (ADR 0175, identity-only echo)
+- **THEN** pre-activation suspension entries remain as historical facts, and a new entry states activation (ADR 0186, first-sight processing active)
 
 #### Scenario: Index rows state suspension
 
 - **WHEN** a reader checks the ADR index rows for 0171/0173/0174
-- **THEN** they note the R2 suspension (ADR 0175) rather than presenting notify/showToast settlement or compression as active
+- **THEN** they note the R2 activation (ADR 0186) rather than presenting notify/showToast settlement or compression as suspended
+
+#### Scenario: First-principles doc states the redesign
+
+- **WHEN** a reader opens `docs/first-principles/graph-fidelity-context-management.md`
+- **THEN** the doc carries rev.7 with the SUSPENDED status removed, the redesigned fundamental requirements (R2 restructured, R3 cache utilization, tag-based classification), the implementation requirements (R10–R13 first-sight model), and the activation record reference (ADR 0186)
 
 ### Requirement: Single merged plugin module
 
@@ -48,12 +53,14 @@ Consumer documentation (ADR index rows, ADR bodies, CHANGELOG, delivery skills, 
 
 ### Requirement: Transform-chain composition is single-source
 
-The context transform pipeline composes the discipline echo only. The working-face reduction stages (errored-result fidelity reduction, headroom compression) are REMOVED from the runtime chain — R2 cost economy is suspended (ADR 0175). Both platform faces execute the same echo-only composition, differing only in message shape adaptation and hook registration. Face adapters contain no duplicated domain logic: text joining, working-text selection, result-id scanning, seam-line stripping, mode lookup, and frame lookup are implemented once in the shared shape seam.
+**Before**: The base package's context transform pipeline composes the discipline echo only; the composition machinery lives in the base package (core chain modules + lifecycle facade).
+
+**After**: The R1 signal chain (normalization, frame anchoring, echo rendering, chain application, resident injection machinery) SHALL be owned by the platform-hooks-sdk as a core capability. The base package adapters SHALL consume the chain from the SDK (create-factory + typed lifecycle contract) and SHALL hold only platform entry wiring, message-shape adaptation via SDK-provided shape descriptors, and discipline hints. Both platform faces SHALL continue to execute the same single composition in the same order.
 
 #### Scenario: Both faces run the identical chain
 
-- **WHEN** either platform delivers a message transcript to the plugin
-- **THEN** the messages pass through the same single composition in the same order (echo stage only, no reduction stages), and chain order is asserted by exactly one test
+- **WHEN** either platform delivers a message transcript to the base plugin
+- **THEN** the messages pass through the same single composition sourced from the SDK, and chain order is asserted by exactly one test
 
 #### Scenario: Change detection is single-source
 
@@ -63,16 +70,21 @@ The context transform pipeline composes the discipline echo only. The working-fa
 #### Scenario: Adapter boilerplate is single-source
 
 - **WHEN** the two face adapters are compared for the listed shape operations
-- **THEN** each operation is implemented in exactly one shared location, and the adapters contain only message-shape adaptation and hook-registration tables
+- **THEN** each operation is implemented in exactly one shared location (the SDK), and the adapters contain only message-shape adaptation and hook-registration tables
 
 #### Scenario: Cross-face echo byte-identity holds
 
 - **WHEN** both faces render the discipline echo for the same frame facts
 - **THEN** the generated lines are byte-identical
 
+#### Scenario: Base ships no chain
+
+- **WHEN** the base package source tree is inspected after migration
+- **THEN** no chain implementation module (normalize/echo/runframe/resident machinery) remains in the base package, and the base imports the chain from the SDK
+
 ### Requirement: Discipline echo contract (anchored frame detection + canonical dedup)
 
-MODIFIED: The per-call discipline echo derives ONE `[seam]` line per LLM call from the most recent run frame and appends it to the most recent user-like message. "User-like" SHALL mean role `user`, `developer`, or `custom` (single-source `isUserLike(role)` predicate); OMP 17.2.15 delivers user input via `custom_message` converted to role `developer`, so user-role-only anchoring silently no-ops on sessions whose input arrives through custom messages (skill invocation, ask results, auto runs). The line SHALL be an identity pointer plus progress — `▣ [seam] node <id> · N/M` — carrying node id (pointer, never copying the frame's `declared operations`/`out of scope` clause) and the node progress segment (`N/M` from the frame when present). The value-ratio graphic segment (`│████░░│ cur/ref`) is REMOVED: the R2 cost-economy surface is suspended (ADR 0175), so no benefit data feeds the line. Metering deltas remain out of the line surface.
+The per-call discipline echo derives ONE `[seam]` line per LLM call from the most recent run frame and appends it to the most recent user-like message. "User-like" SHALL mean role `user`, `developer`, or `custom` (single-source `isUserLike(role)` predicate); OMP 17.2.15 delivers user input via `custom_message` converted to role `developer`, so user-role-only anchoring silently no-ops on sessions whose input arrives through custom messages (skill invocation, ask results, auto runs). The line SHALL be an identity pointer plus progress — `▣ [seam] node <id> · N/M` — carrying node id (pointer, never copying the frame's `declared operations`/`out of scope` clause) and the node progress segment (`N/M` from the frame when present). The value-ratio graphic segment (`│████░░│ cur/ref`) renders when benefit facts exist — the benefit ledger is the single render source (ADR 0190/0191); with no benefit facts the line renders without it. Metering deltas remain out of the line surface.
 
 #### Scenario: Inline format pinned
 
@@ -107,7 +119,7 @@ MODIFIED: The per-call discipline echo derives ONE `[seam]` line per LLM call fr
 #### Scenario: Echo and elision agree on frames
 
 - **WHEN** the same transcript whose frames sit in user-like role messages is processed by the echo renderer
-- **THEN** the shared parser identifies the frame set from the anchored frames; the elision planner no longer exists (removed with the R2 suspension, ADR 0175) — the echo renderer is the sole frame consumer
+- **THEN** the shared parser identifies the frame set from the anchored frames; the elision planner does not exist in the rebuilt R2 module (ADR 0186) — the echo renderer is the sole frame consumer
 
 #### Scenario: Frame clause is not copied
 
@@ -183,26 +195,33 @@ The prompt-assembly-probe package is documented as a development-time contract-v
 
 ### Requirement: Adapter typing against real platform types
 
-The OMP face SHALL be typed against the platform's real extension contract — a default-export factory `(pi: ExtensionAPI) => void | Promise<void>` importing `ExtensionAPI` from `@oh-my-pi/pi-coding-agent` — and the opencode face SHALL be typed against the platform's real plugin contract — a default-export `{ server: Plugin }` importing `Plugin` from `@opencode-ai/plugin`. No invented platform interfaces (duck-typed stand-ins) SHALL be used as the adapter contract; test type-level assertions SHALL pin both factory shapes.
+**Before**: Real platform types SHALL appear in the platform-hooks-sdk adapter files only. graph-fidelity's platform entry points SHALL consume the SDK's platform-shaped registration result; graph-fidelity itself SHALL NOT declare platform contract types.
+
+**After**: Real platform types and platform message models SHALL appear in the platform-hooks-sdk adapter files only. The base package SHALL consume platform message shapes and shape descriptors (message models, text extraction, shape readers) from the SDK adapters; graph-fidelity itself SHALL NOT declare platform contract types and SHALL NOT own platform message models.
 
 #### Scenario: OMP factory typed
 
-- **WHEN** the OMP adapter module is type-checked
-- **THEN** its default export satisfies `ExtensionFactory = (pi: ExtensionAPI) => void | Promise<void>`, with event handlers registered via `pi.on` against the typed event overloads
+- **WHEN** the SDK OMP adapter is type-checked
+- **THEN** its registration output satisfies `ExtensionFactory = (pi: ExtensionAPI) => void | Promise<void>`, with event handlers registered via `pi.on` against the typed event overloads
 
 #### Scenario: opencode factory typed
 
-- **WHEN** the opencode adapter module is type-checked
-- **THEN** its default export satisfies `{ server: Plugin }` where `Plugin = (input: PluginInput) => Promise<Hooks>`, and a test asserts the assignment compiles
+- **WHEN** the SDK opencode adapter is type-checked
+- **THEN** its registration output satisfies `{ server: Plugin }` where `Plugin = (input: PluginInput) => Promise<Hooks>`, and a test asserts the assignment compiles
 
 #### Scenario: no duck-typed seam
 
-- **WHEN** the adapters directory is scanned for platform-type imports
-- **THEN** both adapter files import the real platform type packages, and no adapter-local `OmpHookApi`-style interface exists
+- **WHEN** the SDK adapters directory is scanned for platform-type imports
+- **THEN** the adapter files import the real platform type packages, and no adapter-local duck-typed message-model interface exists in the base package
+
+#### Scenario: Shape descriptors adapter-owned
+
+- **WHEN** the base adapters build the chain's shape parameters
+- **THEN** they import the shape descriptors and message text extraction from the SDK adapters, and the base holds no platform message model definitions
 
 ### Requirement: Distribution channels declared
 
-The package SHALL declare the distribution channels each platform's loader actually consumes: an `omp.extensions` manifest field listing the OMP adapter entry (relative to the package root) for installed-plugin discovery, and an `exports["./server"]` entry for the opencode npm-package entry convention. The OMP installed-plugin channel SHALL be the single OMP distribution path — repo-dev installs use the `omp plugin` command (package path or npm name) and the marketplace catalog SHALL declare the graph-fidelity plugin entry with a non-empty package-domain description. The extension entries SHALL be built, self-contained artifacts under `dist/` (adapter entry points compiled with all dependencies inlined, `node:` builtins external, platform type-only imports type-erased) — consumer manifests reference `dist/` bundles, never `src/` adapters (ADR 0166). No tui-kind bundle exists (opencode-tui.ts deleted, ADR 0170); opencode.json references the opencode server bundle only.
+MODIFIED: the package SHALL declare the distribution channels each platform's loader actually consumes: an `omp.extensions` manifest field listing the OMP adapter entry (relative to the package root) for installed-plugin discovery, and an `exports["./server"]` entry for the opencode npm-package entry convention. The OMP installed-plugin channel SHALL be the single OMP distribution path — repo-dev installs use the `omp plugin` command (package path or npm name) and the marketplace catalog SHALL declare the graph-fidelity plugin entry with a non-empty package-domain description. The marketplace and package descriptions SHALL name the shipped base-package capabilities — headroom compression is removed from the capability list (it ships with the graph-fidelity-context module, whose own marketplace entry describes it).
 
 #### Scenario: manifest declared
 
@@ -247,12 +266,12 @@ The package SHALL declare the distribution channels each platform's loader actua
 #### Scenario: Marketplace description reflects shipped capabilities
 
 - **WHEN** the marketplace catalog entry is read
-- **THEN** its description names the shipped capabilities: per-call discipline echo, errored-result fidelity reduction, class-driven headroom compression, PCL input-seam marking, and node-boundary settlement with measured metering
+- **THEN** its description names the shipped capabilities: per-call discipline echo, errored-result fidelity reduction, PCL input-seam marking, and node-boundary settlement with measured metering — and SHALL NOT name headroom compression
 
 #### Scenario: Package description reflects shipped capabilities
 
 - **WHEN** the package.json description is read
-- **THEN** it names the same shipped capability set (echo, errored-result reduction, class-driven compression, PCL marking, settlement/metering) consistently with the marketplace entry wording
+- **THEN** it names the same shipped capability set (echo, errored-result reduction, PCL marking, settlement/metering) consistently with the marketplace entry wording — and SHALL NOT name headroom compression
 
 ### Requirement: Deploy mirror test tolerance
 
@@ -437,53 +456,24 @@ The frame-contract pin suite SHALL skip cleanly — never fail the graph-fidelit
 - **WHEN** the graph-fidelity test suite runs with the atom-phase-handler SKILL.md present
 - **THEN** the frame-contract pins execute and assert the frame format, tier marker, Checks baseline, and mechanical-tier wording
 
-### Requirement: HLT core requirement resident entry
-
-The `[resident]` block SHALL carry a distilled HLT core requirement entry (`HLT_CORE_REQUIREMENT`): the six-line essence — registered-call shape `{intent, tool, args, bound}`, in-project code → serena (locate may route through jcodemunch), verify-after-write, code cells fail loudly (never silent degrade), registered tool capability never restricted (the deny capability targets redundant platform paths only — a registered write engine is never denied), and a cold-read pointer to HLT-REGISTRY.md. The entry SHALL be unconditional: style rows (caveman/rtk/ponytail) are absent outright (the mode knob was removed with the R2/R1 decoupling, ADR 0175) while the HLT core requirement always stays (PCL treatment — correctness over style). The block render/dedup follows the canonical rules. The clarification wording SHALL be sweep-verified: no residual old-phrase text ("Tool capability is never restricted (zero deny)" or "zero denial, the agent's tool capability is never restricted") SHALL remain anywhere in the module's skill/registry sources (`packages/graph-workflow/`), and a sweep test SHALL assert zero matches.
-
-#### Scenario: Resident block contains HLT core requirement
-
-- **WHEN** the resident block renders for either platform face
-- **THEN** it contains a `[resident] hlt:`-prefixed entry whose text is byte-equal to the pinned `HLT_CORE_REQUIREMENT` constant (wording: registered capability never restricted; redundant platform paths may be denied), and a byte-pin test asserts both faces render it identically
-
-#### Scenario: Off mode keeps HLT core requirement
-
-- **WHEN** resident entries are selected (the `GRAPH_FIDELITY_MODE` knob was removed with the R2/R1 decoupling — ADR 0175; style rows are absent outright, so the HLT entry is the unconditional correctness set)
-- **THEN** style entries (caveman/rtk/ponytail) are never present while the HLT core requirement entry always is — a mode-matrix test is inapplicable (no knob exists; the stronger form holds: style rows absent entirely, HLT entry unconditional)
-
-#### Scenario: Dedup applies to the new entry
-
-- **WHEN** the block already contains a byte-equal HLT core requirement line
-- **THEN** no duplicate line is appended (canonical dedup), and the existing line is refreshed in place
-
-#### Scenario: Registered engine never denied
-
-- **WHEN** the deny capability is engaged and a registered write engine (serena) invocation occurs
-- **THEN** the invocation is never denied — denial applies only to redundant platform write paths under the serena-writable condition
-
-#### Scenario: Zero deny preserved
-
-- **WHEN** the resident block assembles or the adapter hook runs
-- **THEN** no registered tool is restricted, blocked, or redirected — denial applies only to redundant platform write paths while a registered write engine covers the target (serena-writable condition), and injection failure degrades to no-injection (undefined), never denial of a registered engine
-
-#### Scenario: Wording sweep finds no old phrase
-
-- **WHEN** the wording sweep test runs across the module's skill/registry sources in `packages/graph-workflow/`
-- **THEN** zero matches for the old zero-deny phrasing remain, and the pinned `HLT_CORE_REQUIREMENT` wording (registered capability never restricted) is the only phrasing present
-
 ### Requirement: Cross-package pin suites degrade cleanly
 
-Cross-package pin suites (resident-hlt-pin, frame-contract, spec-format-pin) SHALL be uniformly skipIf-guarded: when the pinned source artifact is absent (a tree move or a fresh partial clone), the pin tests SKIP with a documented reason instead of failing the package suite — matching the frame-contract contract.
+Cross-package pin suites (frame-contract, spec-format-pin) SHALL be uniformly skipIf-guarded: when the pinned source artifact is absent (a tree move or a fresh partial clone), the pin tests SKIP with a documented reason instead of failing the package suite — matching the frame-contract contract. The resident-hlt-pin suite is deleted with the HLT layer (ADR 0194 D7) and SHALL NOT be re-introduced.
 
 #### Scenario: source absent skips
 
-- **WHEN** the graph-fidelity test suite runs without the pinned source artifact (atom-kernel SKILL.md / HLT-REGISTRY.md, atom-phase-handler SKILL.md, change delta specs)
+- **WHEN** the graph-fidelity test suite runs without the pinned source artifact (atom-phase-handler SKILL.md, change delta specs)
 - **THEN** the affected pin tests are skipped (not failed) and the rest of the suite runs unchanged
 
 #### Scenario: source present pins
 
 - **WHEN** the pinned source artifact is present
 - **THEN** the byte-equality/format pins execute and assert the contract
+
+#### Scenario: resident-hlt pin stays deleted
+
+- **WHEN** the graph-fidelity test tree is inspected
+- **THEN** no resident-hlt pin suite exists and no test references HLT-REGISTRY.md as a pinned artifact
 
 ### Requirement: Build artifact delivery contract
 
@@ -553,12 +543,13 @@ Mechanical PCL vocabulary detection runs on the platform's user-input event, whi
 
 ### Requirement: Package surface contract
 
-The package surface is minimal and accurate: exported symbols are consumed by the package or its documented public entry points (no test-only exports); README claims match code reality (environment variable defaults, exported plugin names, documented commands); the test configuration includes coverage collection; opencode session-message retention is bounded.
+The package surface is minimal and accurate: the exports map SHALL expose only the plugin entries (`./omp`, `./server`); the root barrel and the `./interfaces` subpath SHALL NOT be published; exported symbols are consumed by the package or its documented plugin entry points (no test-only exports, no unpublished dead types); README claims match code reality (environment variable defaults, exported plugin names, documented commands); the test configuration includes coverage collection; opencode session-message retention is bounded.
 
 #### Scenario: No test-only exports
 
-- **WHEN** the package's exported symbols are scanned for consumers within the package source
-- **THEN** every exported symbol has at least one consumer in package source or a documented public entry point
+- **WHEN** the package's exports map and barrel are inspected
+- **THEN** only the plugin entries (`./omp`, `./server`) are published
+- **AND** no test-only symbol and no unpublished dead type (e.g. an unused module interface type) is exported
 
 #### Scenario: Documentation matches code
 
@@ -574,6 +565,22 @@ The package surface is minimal and accurate: exported symbols are consumed by th
 
 - **WHEN** the opencode face accumulates session messages
 - **THEN** retention is bounded by a documented limit
+
+#### Scenario: Plugin-entry-only imports
+
+- **WHEN** an external consumer imports the package
+- **THEN** it imports through the plugin entry points only (`./omp`, `./server`)
+- **AND** the root import and the `./interfaces` subpath are not available
+
+#### Scenario: No consumer-side options slot
+
+- **WHEN** the module factory is inspected
+- **THEN** no mutable module-level options slot exists; per-server-call options are captured by the SDK adapter at bind time
+
+#### Scenario: Pure bind-shell adapters
+
+- **WHEN** an adapter file is inspected
+- **THEN** it is a bind shell: module factory call, bind call, platform-entry shape export — no option-shape guard, no handler definition, no singleton assembly
 
 ### Requirement: Adapter hygiene — comments match code, no duplicated predicates, bounded session maps
 
@@ -695,52 +702,39 @@ The interface encapsulation layer SHALL expose a deny contract through which pla
 - **WHEN** the OMP adapter initializes
 - **THEN** no `tool_call` deny handler is registered and no deny-related code is imported
 
-### Requirement: Hints contract — extensibility seam
-
-The interface encapsulation layer SHALL expose a hints contract through which additional user-level information is attached to tool-call results before the results reach the LLM. The contract SHALL declare a hint decision (given a tool invocation, what hint text — if any — to attach) and the attached text SHALL be user-level information consumed by the LLM, equal in status to user-provided guidance. The interface layer SHALL remain type-only: contract types are declared in the interface surface, and the built-in hint implementation lives in core. Built-in hints SHALL be identified by a distinct name that does not collide with the agent-type advisory vocabulary (`## Agent hints:`); the distinction SHALL be documented in the contract comments.
-
-#### Scenario: Contract exists in the interface layer
-
-- **WHEN** the interface encapsulation layer is inspected
-- **THEN** a hints contract is present alongside the signal, feedback, and deny contracts, declared with typed hint-decision payloads, and the interface layer contains no runtime value (implementation factories live in core)
-
-#### Scenario: Hint text equals user-level info
-
-- **WHEN** a hint is attached to a tool-call result
-- **THEN** the attached text is delivered to the LLM as guidance of the same status as user information, and the LLM is the sole consumer
-
-#### Scenario: Name collision avoided
-
-- **WHEN** the hints contract and its hint texts are scanned
-- **THEN** they are not labeled as agent-type hints, and the documentation distinguishes tool-result hints from `## Agent hints:` agent-type advisory
-
 ### Requirement: Built-in hints vocabulary
 
-The built-in hints SHALL be driven by a data-driven, platform-evidenced vocabulary of three classes: write tools, content-read tools, and locate tools. A platform-native write tool (`write`, `edit`) or content-read tool (`read`) invocation SHALL attach a hint to use the registered engine (serena) next time. A locate-class invocation — platform locate/search tools (`glob`, `grep`) or a shell command whose first token is a locate command (`find`, `ls`, `fd`, `rg`, `ag`, `tree`) — SHALL attach a hint to use jcodemunch next time. Vocabulary entries SHALL be platform-evidenced and pin-tested; no speculative tool names SHALL be added. Hint frequency SHALL NOT be constrained by the interface contract; the implementation decides attachment policy.
+The built-in hint texts SHALL be single-sourced in `src/hints.ts` (renamed from `src/texts.ts`; the module directly exports the consumer `HintDisplayFn` that returns the block body for the classified scenario) and SHALL attach per their scenario trigger conditions, classified through the SDK unified scenario interface: platform-native write tools (`write`, `edit`, `ast_edit`) classify as the write scenario and attach the write hint (mutation engine + pre-edit consultation + verify-after + `register_edit` obligation); the native `read` tool classifies as the read scenario unconditionally (no path/extension/selector consultation — the file-type content axis is deleted per ADR 0204) and attaches the read hint; locate-class invocations — platform locate/search tools (`glob`, `grep`) or a shell command whose leading tokens include a locate command (`find`, `ls`, `fd`, `rg`, `ag`, `tree`, including chained forms with `rtk`/`proxy` wrapper stripped) — classify as the find scenario and attach the find hint. The display function SHALL judge compliance for consumer-promoted tools inline: `ctx.usedTool` matched against the module's inline tool-name sets (built from the tool-name arrays in `src/hints.ts` — both serena surface forms `serena_*` / `mcp__serena_*` plus `mcp__jcodemunch_*`) returns `null` (silent); no consumer-supplied classification extension map exists (PROMOTED_TOOL_MAP deleted). The SDK classify native rules (write/read/locate/CLI-locate/internal-URI exemption, `rtk` run prefix) remain the SDK hard floor.
 
 #### Scenario: Platform write triggers serena hint
 
-- **WHEN** a tool-call result for a platform-native write tool (`write` or `edit`) is returned to the LLM
-- **THEN** the result carries a hint to use serena for the next in-project write
+- **WHEN** a tool-call result for a platform-native write tool (`write`, `edit`, or `ast_edit`) is returned to the LLM and the invocation is non-compliant (native mutation tools are outside the promoted set)
+- **THEN** the result carries the write scenario hint (mutation engine + pre-edit consultation + verify-after + `register_edit` obligation with n/a case), naming the used native tool in DO-NOT form
 
 #### Scenario: Content read triggers serena hint
 
-- **WHEN** a tool-call result for a platform content-read tool (`read`) is returned to the LLM
-- **THEN** the result carries a hint to use serena for the next in-project read
+- **WHEN** a tool-call result for the platform content-read tool (`read`) is returned to the LLM and the invocation is non-compliant (native read is not a promoted read surface)
+- **THEN** the result carries the read scenario hint unconditionally — no code-file path gate (the read class is unconditional; the file-type content axis is deleted per ADR 0204); the hint names the outline-first read flow (`get_file_outline` before opening, `get_symbol_source` for symbols, `get_context_bundle` for symbol+imports, `get_file_content` as last resort) and the used `read` tool in DO-NOT form
 
 #### Scenario: Platform locate triggers jcodemunch hint
 
 - **WHEN** a tool-call result for a platform locate/search tool (`glob` or `grep`) is returned to the LLM
-- **THEN** the result carries a hint to use jcodemunch for the next file locate
+- **THEN** the result carries the find scenario hint (query plane first — `search_text` / `search_symbols` / `find_references` / `find_importers` + symbolic-tool ground truth), naming the used locate tool in DO-NOT form
 
 #### Scenario: CLI locate triggers jcodemunch hint
 
-- **WHEN** a shell tool-call result whose command first token is a locate command (`find`, `ls`, `fd`, `rg`, `ag`, `tree`) is returned to the LLM
-- **THEN** the result carries a hint to use jcodemunch for the next file locate
+- **WHEN** a shell tool-call result whose leading token(s) include a locate command (`find`, `ls`, `fd`, `rg`, `ag`, `tree` — standalone or chained after `&&`/`||`/`;`/`|`, with `rtk`/`proxy` wrapper stripped) is returned to the LLM
+- **THEN** the result carries the find scenario hint naming the CLI-locate substitute path (bash locate → query plane alternative)
+- **AND** the hint content matches the classifier's CLI-locate trigger (no content–classification mismatch) — the DO-NOT name is the locate command itself (e.g. `find` / `rg` / `ls`), never the shell
+
+#### Scenario: Selector-suffixed code reads fire read-guard
+
+- **WHEN** a native `read` result carries `args.path` with a code extension followed by a selector suffix (`file.ts:50-200`, `file.ts:raw`, `file.ts:2-4:raw`)
+- **THEN** the read scenario hint fires as usual — the selector suffix never gates or suppresses attachment (read classifies unconditionally; no extension judgment is consulted)
 
 #### Scenario: Non-classified tools attach nothing
 
-- **WHEN** a tool-call result for a tool outside the three classes is returned to the LLM
+- **WHEN** a tool-call result for a tool with no scenario coverage is returned to the LLM
 - **THEN** no hint is attached and the result passes through unchanged
 
 #### Scenario: Vocabulary pinned to platform evidence
@@ -748,9 +742,41 @@ The built-in hints SHALL be driven by a data-driven, platform-evidenced vocabula
 - **WHEN** the hints vocabulary tests run
 - **THEN** at least one test per class asserts the vocabulary against the platform's real tool surface, and no speculative entry is asserted
 
+#### Scenario: ast_edit joins the write class
+
+- **WHEN** a tool-call result for the platform-native structural write tool `ast_edit` is returned to the LLM
+- **THEN** the result carries the write scenario hint (same class as `write`/`edit`), naming `ast_edit` in DO-NOT form
+
+#### Scenario: State-changing tools carry no read coverage
+
+- **WHEN** `activate_project`, `onboarding`, or `open_dashboard` executes
+- **THEN** no read-scenario hint attaches (state-changing setup tools are not reads)
+- **AND** the tools carry no scenario coverage (fail-open)
+
+#### Scenario: Hint tool names trace to reference sources
+
+- **WHEN** a hint body tool name is audited
+- **THEN** it traces to a `.refs` original flow cited in the tool-guidance derivation table (file:line)
+- **AND** no invented tool name appears
+
+#### Scenario: Run hint states full bash coverage
+
+- **WHEN** the run scenario hint is emitted for a non-locate bash invocation without the wrapper prefix
+- **THEN** the hint states that the invocation classifies as the run scenario (full bash coverage), the SAFE command set is presented as preferred examples (not an exhaustive allow-list), and the raw bash invocation is named in DO-NOT form with the wrapper rule
+
+#### Scenario: Promoted read surface used
+
+- **WHEN** a read-classified tool execution uses a promoted read surface (e.g. `serena_get_symbols_overview`, `mcp__jcodemunch_get_file_outline`) and the result is not error-shaped
+- **THEN** the invocation is compliant — no read hint attaches and no feedback emits (the display function recognizes `ctx.usedTool` in its inline read set and returns `null`)
+
+#### Scenario: Prefixed bash
+
+- **WHEN** the caller runs bash with the project wrapper prefix (`rtk` or `rtk proxy`) and the command is not a CLI-locate chain
+- **THEN** the invocation is compliant for the run scenario and no run hint attaches
+
 ### Requirement: Hint attachment seams
 
-Hints SHALL be attached to tool-call results before the results reach the LLM, on both platform faces, without modifying the original result content (append-only). The OMP face SHALL attach hints through the post-execution `tool_result` hook, whose event carries the tool name, call id, input, and result content; the opencode face SHALL attach hints through the post-execution result hook. Attachment SHALL happen at most once per tool execution on both faces — the platform post-execution events fire once per execution, so no deduplication state is required. The OMP face SHALL NOT attach hints through the context seam: the OMP message model stores tool calls and results as separate top-level messages whose content blocks carry only text/image, so block-level seam matching never fires; attachment happens via the post-execution `tool_result` hook. Content-embedded error results SHALL attach no hint — start-anchored serena markers (`Invalid args`, `The answer is too long`) begin the text, and the platform exit line is line-anchored (a full line of the form `Command exited with code <number>`, following stdout in the platform's bash output shape); prose mentions of the exit phrase SHALL NOT suppress attachment. Non-string result text SHALL NOT throw in the error-shape predicate — it fails open (no skip). Hints are user-level information (equivalent to user text, consumer = the LLM); they never block, gate, or modify tool behavior, and a determination or attachment failure degrades silently.
+Hints SHALL be attached to tool-call results before the results reach the LLM, on both platform faces, without modifying the original result content (append-only). The OMP face SHALL attach hints through the post-execution `tool_result` hook, whose event carries the tool name, call id, input, and result content; the opencode face SHALL attach hints through the post-execution result hook. Attachment SHALL happen at most once per tool execution on both faces — the platform post-execution events fire once per execution, so no deduplication state is required — AND only when the invocation is non-compliant: a compliant execution (promoted tool used, no error) attaches nothing (see scenario-tool-hints Compliant invocation suppression). The OMP face SHALL NOT attach hints through the context seam: the OMP message model stores tool calls and results as separate top-level messages whose content blocks carry only text/image, so block-level seam matching never fires; attachment happens via the post-execution `tool_result` hook. The OMP face SHALL gate attachment on the canonical `errorShaped` verdict alone — the platform `isError` flag is already folded into the verdict at adapter normalization, so the dual-guard check (`isError === true` AND `errorShaped === true`) SHALL be collapsed to a single `errorShaped` check. The opencode face SHALL keep its existing `errorShaped` check.
 
 #### Scenario: OMP attaches at the context seam
 
@@ -759,12 +785,12 @@ Hints SHALL be attached to tool-call results before the results reach the LLM, o
 
 #### Scenario: OMP attaches via the tool_result hook
 
-- **WHEN** an OMP tool execution completes successfully and its tool matches a hint class
+- **WHEN** an OMP tool execution completes successfully, its tool matches a hint class, and the invocation is non-compliant
 - **THEN** the hook override appends the hint text block to the result content before it reaches the LLM, and the original result content is unchanged
 
 #### Scenario: opencode attaches at the post-execution hook
 
-- **WHEN** an opencode tool executes and its result matches a hint class
+- **WHEN** an opencode tool executes, its result matches a hint class, and the invocation is non-compliant
 - **THEN** the hint text is returned with the tool result before it reaches the LLM, and the original result output is unchanged
 
 #### Scenario: Per-execution attachment (no re-attachment on replay)
@@ -821,3 +847,161 @@ Hints SHALL be attached to tool-call results before the results reach the LLM, o
 
 - **WHEN** hint determination or attachment throws
 - **THEN** the result passes through unchanged, no hint is attached, and the platform loop is not broken
+
+#### Scenario: OMP attachment single-verdict guard
+
+- **WHEN** an OMP tool_result is evaluated for hint attachment
+- **THEN** attachment is skipped when the canonical `errorShaped` verdict is true
+- **AND** no separate platform `isError` check runs at the attachment site
+
+#### Scenario: Compliant execution attaches nothing
+
+- **WHEN** a tool execution uses a promoted tool for its scenario and the result is not error-shaped
+- **THEN** no hint is attached and the result passes through unchanged — the compliant path is silent (no append, no feedback)
+
+### Requirement: Interface phase completion for the context module
+
+**Before**: The interface encapsulation layer implements the phases the context module docks through — SignalLifecycle landing/observation and DisplayFeedback notify/display — and the base package adapters own the platform hook registrations.
+
+**After**: Platform hook registration is consumed from the platform-hooks-sdk: the graph-fidelity package binds its transform handlers through the SDK adapters (`bind(adapter, handlers)`) and wires the resulting platform-shaped registrations into its own platform entry points. The platform seam ownership moves to the SDK — graph-fidelity holds business logic (echo chain, transform composition) and SDK consumption, and no longer owns a platform-binding layer. The context module docks through the same SDK contract.
+
+#### Scenario: Landing phase wired
+
+- **WHEN** the SDK-wired OMP registration is active
+- **THEN** the tool_result hook fires registered transforms before persistence (pre-persistence rewrite semantics preserved)
+
+#### Scenario: Observation phase wired
+
+- **WHEN** a message_end arrives with usage
+- **THEN** the observation phase delivers cacheRead/cacheWrite to registered observers
+
+#### Scenario: Notify/display delivered
+
+- **WHEN** the context module renders a settlement line
+- **THEN** the notify/display delivery carries it via the platform notification capability
+
+### Requirement: SDK consumption for platform hook registration
+
+graph-fidelity SHALL declare the platform-hooks-sdk as a dependency and SHALL perform all platform hook registration through its bind registry. The former platform-binding surface (hook registration, settlement queue, platform display delivery) SHALL be removed; dead exports (e.g. `createOpencodeContextHooks`) SHALL NOT survive the migration. Echo-chain and core transform logic SHALL remain in graph-fidelity unchanged in behavior.
+
+#### Scenario: No residual binding layer
+
+- **WHEN** the graph-fidelity source tree is inspected after migration
+- **THEN** no file implements platform hook registration directly
+- **AND** the dead `createOpencodeContextHooks` export is absent
+
+#### Scenario: Behavior parity
+
+- **WHEN** graph-fidelity's registered hooks fire on either platform
+- **THEN** the echo/transform behavior matches the pre-migration behavior for identical inputs
+
+### Requirement: Discipline module — ported hook capabilities
+
+graph-fidelity SHALL ship a discipline delivery module (`src/discipline/`) that ports the serena + jcodemunch Claude Code hook capabilities onto the platform-hooks-sdk interface (OMP + opencode faces): a pure classification core (`classify.ts` — tool event → DisciplineKind: serena-remind / jcm-read-guard / jcm-edit-guard / write-reindex), hook-source hint texts (`texts.ts` — serena remind prompt face, jcm read-guard advisory for code-file reads and indexed-repo grep, jcm edit_guard consultation naming get_symbol_source / get_file_outline / get_blast_radius / find_references / search_text, post-edit register_edit reminder), a session boundary (`session.ts` — activate guidance + the resident discipline set), and a single facade (`buildDiscipline(activateGuidance) → Discipline { onToolResult, onSessionStart }`). Hint classes: native write tools (write/edit/ast_edit) → serena-remind + jcm-edit-guard; code-file native reads and locate classes → jcm-read-guard; serena write tools → write-reindex only. The facade exposes NO session-end seam.
+
+#### Scenario: Every-match hints
+
+- **WHEN** a tool call matches a discipline kind (native write/edit/ast_edit, code-file read, serena write)
+- **THEN** the matching hint text is emitted on that tool result — every time, with no counter, threshold, or dedup state (ADR 0178)
+
+#### Scenario: Zero deny
+
+- **WHEN** any discipline classification matches
+- **THEN** the output is a hint (guidance text) only — never a block, deny, or tool-call rejection (ADR 0146/0180)
+
+#### Scenario: Edit consultation
+
+- **WHEN** a native write tool is invoked (`write`, `edit`, or `ast_edit`)
+- **THEN** the edit-guard consultation hint fires alongside serena-remind, naming the jcodemunch read tools to consult — worded forward-looking ("before the next edit…") so the post-execution attachment closes the consultation chain on the subsequent write
+- **AND** when a serena write tool is invoked, the edit-guard hint does NOT fire (write-reindex only)
+
+#### Scenario: Read-guard code-file type judgment
+
+- **WHEN** a native `read` tool result carries an `args.path` whose file extension is in the code-suffix set (ported from the jcm hooks code-file extensions — selector suffixes stripped first)
+- **THEN** the read-guard hint fires (code-file reads, every match, no size threshold)
+- **AND** when the path is a non-code file (documentation, data, other) the read-guard hint SHALL NOT fire
+
+#### Scenario: Session lifecycle
+
+- **WHEN** a session starts on either platform face
+- **THEN** the resident block carries PCL vocabulary, the activate guidance (two-step source-faithful instruction: activate via Serena's `activate_project` tool unless already done; read the Serena Instructions Manual if not yet; follow before doing anything else), and the discipline line composed from `discipline/texts.ts`
+- **AND** the discipline facade exposes no session-end seam: no `session_shutdown`/dispose handler is registered on either face, and the observability pin SHALL assert the absence
+
+#### Scenario: Face-seam delivery of dual-form serena write hints
+
+- **WHEN** a tool named `serena_<write-tool>` or `mcp__serena_<write-tool>` (write tools: replace_content / replace_in_files / replace_symbol_body / rename_symbol / insert_before_symbol / insert_after_symbol / create_text_file / safe_delete_symbol) completes on either platform face
+- **THEN** the delivery pin tests on BOTH adapter faces (opencode tool.execute.after, OMP tool_result) assert the write-reindex hint text is emitted and the edit-guard consultation hint text is NOT — dual-form prefix matching (`serena_` bare and `mcp__serena_`) pinned on both faces
+
+#### Scenario: Face-seam delivery of write-reindex hint
+
+- **WHEN** a serena write tool result arrives on either platform face
+- **THEN** the delivery pin tests on BOTH adapter faces assert the write-reindex hint text (naming the mounted `mcp__jcodemunch_register_edit` obligation) is emitted end-to-end
+
+### Requirement: Resident block discipline set
+
+The graph-fidelity resident block SHALL contain three surfaces: the PCL vocabulary (atom-pilot source of truth), the full five-scenario enumeration entry (decision-time — each scenario's operation flow and concrete tool names stated once, find/read/write/verify/run, single-sourced with the hint blocks), and the independent jcodemunch entry (compressed full-coverage enumeration of the jcodemunch prompt-policy tool set, single-sourced with the scenario hint blocks). The five-scenario enumeration SHALL be DERIVED from the hint blocks in `src/hints.ts` (renamed from `src/texts.ts`) and the consumer tool-name arrays (single source — a derivation over the block source and tool-name data, no parallel hand-written wording), rendering each scenario's representative promoted tool names; the derivation SHALL NOT consume a classification extension map (PROMOTED_TOOL_MAP deleted — representative names come from the tool-name arrays grouped by scenario, `register_edit` appended beyond the cap). The derivation output SHALL stay within the resident budget by listing representative names per scenario rather than full block bodies. The activate guidance entry and the code-exploration entry SHALL NOT exist (removed per ADR 0208). No discipline line SHALL be resident-carried. No session-boundary module SHALL exist. The resident block SHALL carry no scenario selector line and no cold-read pointer.
+
+#### Scenario: Resident contains the discipline line
+
+- **WHEN** the resident block is rendered on either platform face
+- **THEN** it contains the PCL vocabulary, the five-scenario enumeration entry, and the jcodemunch entry — NO discipline line (byte-pin asserted: no `[resident] Discipline:` entry on both faces), NO activate guidance entry, NO code-exploration entry, no session-boundary-derived entry
+- **AND** no `onSessionStart` or `session.ts` import exists in the consumer tree
+
+#### Scenario: Resident content is single-sourced
+
+- **WHEN** the resident block entries are compared with their sources
+- **THEN** the five-scenario enumeration is DERIVED from the five-scenario content and the tool-name arrays in `src/hints.ts` (no third copy of the wording exists) and the PCL vocabulary from the atom-pilot source, and the jcodemunch entry is composed from the same reference-source extraction table as the scenario hint blocks (`src/resident-data.ts` — flattened from `src/core/` — is the single consumer-side composition home)
+
+#### Scenario: Resident seam is SDK-owned
+
+- **WHEN** the consumer binds its handlers through the SDK with resident content supplied
+- **THEN** the SDK wires the resident seam on both faces and the consumer carries no per-face resident handler
+- **AND** no consumer-side error-shape detection module exists (the error verdict comes from the SDK canonical tool-result payload)
+
+#### Scenario: No HLT instruction text
+
+- **WHEN** the resident block is rendered on either platform face
+- **THEN** no HLT-registry instruction text is present (byte-level absence asserted)
+
+#### Scenario: Activate exclusion during active graph run
+
+- **WHEN** an active graph run is executing
+- **THEN** no resident text demands activation before the pilot's first action — the activate guidance entry is removed entirely (activation guidance stays platform-native), so nothing in the resident block conflicts with the pilot first-action rule
+
+#### Scenario: Resident posture names representative tools
+
+- **WHEN** the resident five-scenario enumeration entry is inspected
+- **THEN** each scenario line names its concrete promoted tools (find — `search_text` / `search_symbols` / `find_references` / `find_importers`; read — `get_file_outline` / `get_symbol_source` / `get_context_bundle` / `get_file_content`; write — serena write family + `register_edit`; verify — `get_diagnostics_for_file` / `find_dead_code` / `get_untested_symbols` / `check_references`; run — platform shell with the `rtk` wrapper prefix)
+- **AND** the register_edit obligation uses the single "while the index is in use" condition with the explicit n/a case
+
+#### Scenario: Enumeration and hints wording single-sourced
+
+- **WHEN** the resident enumeration and the corresponding hint block both describe a scenario
+- **THEN** the tool names and operation-flow wording match (the enumeration is derived from the block source and the tool-name arrays — no second hand-written copy)
+- **AND** a resident-content pin asserts the derivation matches the block source per scenario
+
+#### Scenario: Resident injection is decision-time only
+
+- **WHEN** a session begins with the discipline module active
+- **THEN** the resident block is injected before any tool selection with the PCL + five-scenario enumeration + jcodemunch entry
+- **AND** injection never touches tool invocation payloads
+
+#### Scenario: Jcodemunch entry covers the full source policy
+
+- **WHEN** the jcodemunch resident entry is compared against the "Other AI Agents" block in `.refs/jcodemunch-mcp/AGENT_HOOKS.md`
+- **THEN** every tool name in the source block appears in the entry (compressed form — one line per use-case group, "use-case → tool names"), and no tool name is invented outside the source
+- **AND** the session-start sequence order (`resolve_repo` → `index_folder` → `suggest_queries`) is preserved
+
+### Requirement: Consumer test ownership boundary
+
+graph-fidelity tests SHALL exercise the consumer-facing surface of the package (adapter wiring, platform-entry shapes, consumer content data, dual-face byte identity, spec↔renderer pins) and SHALL NOT re-test behavior owned by the platform-hooks-sdk test suite (resident block rendering/application, fidelity chain application, identity echo rendering, middleware chain semantics). Each observable contract SHALL have exactly one owning test suite; where a consumer test currently duplicates SDK-owned coverage, the duplication SHALL be removed and only the consumer-specific assertion retained.
+
+#### Scenario: Duplicated SDK-owned coverage removed
+
+- **WHEN** a graph-fidelity test asserts SDK-owned behavior (renderResidentBlock / applyResidentBlock / applyResidentToSystem / applyFidelityChain / renderIdentityEcho semantics)
+- **THEN** the assertion is removed unless it adds a consumer-specific contract pin (dual-face byte identity or spec↔renderer consistency)
+
+#### Scenario: Contract pins survive
+
+- **WHEN** the slim-down removes duplicated coverage
+- **THEN** the dual-face byte-identity assertions (echo rendering identical across OMP/opencode faces) and the spec↔renderer pin (spec-format assertions) remain present

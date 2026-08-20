@@ -8,15 +8,15 @@ Auto approval decisions are auditable — the recommendation basis persists with
 
 ### Requirement: Auto approval decisions carry rationale
 
-When Run Mode auto executes an approval recommendation, the assembled `IApprovalDecision` SHALL include `rationale` — a short summary of the judgment-context basis (observable output fields / decision values that drove the recommendation). The persisted decision JSON SHALL carry `rationale`; the pilot's final report SHALL display auto decisions with their rationale.
+`rationale` SHALL survive only as the optional recommendation basis on the single-form approval() card — the auto-execution mechanism (Run Mode) no longer exists, so no decision is auto-executed and no rationale is mandated. When a recommendation basis is shown, the decision JSON SHALL carry the optional `rationale`; manual choices omit it. (Stale run-mode wording removed.)
 
 #### Scenario: Auto decision persists rationale
 
-- **WHEN** a Run Mode auto approval decision is persisted
+- **WHEN** an approval() card carries a recommendation with a stated basis and the user picks it
 - **THEN** the decision JSON SHALL include `rationale` summarizing the recommendation basis
 - **AND** the final report SHALL show the rationale alongside the decision
 
 #### Scenario: Manual decisions unaffected
 
-- **WHEN** a human chooses an approval option
+- **WHEN** a human chooses an approval option without a basis summary
 - **THEN** `rationale` SHALL be optional (absent when the choice carries no basis summary) — the field never replaces `note`/`label` semantics

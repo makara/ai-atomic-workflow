@@ -56,72 +56,72 @@ The global deployment candidate `~/.agents/skills` SHALL NOT contain copies of s
 
 ### Requirement: atom-phase-handler — central dispatch handler
 
-MODIFIED: `atom-phase-handler` SHALL be the single entry point for processing `NextNode` objects. It SHALL route by `node.type` to the appropriate handler (main, approval, or gate) and return the execution result. The approval handler SHALL assemble card content + the AI-judged recommendation and delegate the mode decision to `approval()` (assemble → approval() → IApprovalDecision → persist → route) — the mode branch lives in the kernel contract, not handler documents. Node output reports (main step 6) SHALL be emitted as concise prose summaries per the atom-pilot DISPLAY.md node-report format — never a JSON code fence; an empty output SHALL be reported without a code block; approval/gate decisions SHALL report the single-line `decision: <action> (<label>)` form while the full IApprovalDecision JSON stays in the session for routing.
+MODIFIED: the handler SHALL run a single main path for every dispatched node (no type dispatch — gate/approval no longer exist). Main execution = inline tool-call execution; when the node's `NodeDetail.completion` declares options (choices / direct_end), the handler SHALL assemble the decision card from the machine-declared block — no `routing.actions` wording, no task-text branch evaluation for card options. The node's decision output SHALL carry the condition value (when the node's execution produces one) and the pilot reports it on advance (`graph_advance(runId, nodeId, condition)`) — the backend routes via the flow transition table. The loop-template dispatch rules (start looped graph sibling run → drive → collect → evaluate until → re-run) SHALL NOT exist — a loop is a flow self-edge, the loop-head node executes as a plain main node. The router-template dispatch rules SHALL keep the sibling-run selection semantics. Node output reports as concise prose (no JSON fence). Rework conditions SHALL be evaluated inline per the task text (self-edges and jump targets route via the flow table).
 
 #### Scenario: Handler routes by node type
 
-- **WHEN** `atom-phase-handler` receives `NextNode { type: "main", ... }`
-- **THEN** it SHALL execute the main handler inline (with inline context assembly when channels present)
-- **WHEN** `NextNode { type: "approval", ... }`
-- **THEN** it SHALL assemble card content + recommendation and delegate the mode decision to `approval()` (auto + recommendation → executes; manual/absent/no recommendation → card), map to IApprovalDecision, persist, and route
-- **WHEN** `NextNode { type: "gate", ... }`
-- **THEN** it SHALL evaluate rework jumps against the judgment context — no approval(), no pause
+- **WHEN** a node dispatches
+- **THEN** the handler SHALL run the single main path — no type dispatch (gate/approval no longer exist)
 
 #### Scenario: Handler assembles runtime context
 
-- **WHEN** dispatching any node type
-- **THEN** the handler SHALL assemble context including: `runId`, `graphName`, `nodeId`, `snapshot?` (from `graph_status` for resume scenarios)
-- **THEN** context SHALL be injected into the sub-agent prompt or decision UI
+- **WHEN** a node dispatches
+- **THEN** the handler SHALL assemble context (runId, graphName, nodeId, snapshot?) + `## Constraints` block (no `## Run Mode` block)
 
 #### Scenario: Handler returns structured result
 
-- **WHEN** execution completes (main, approval, or gate)
-- **THEN** the result SHALL include `nodeId`, `status`, `output`, and `durationMs` (session display — the handler-measured wall clock; duration is NOT transmitted to `graph_advance`, which derives it from timestamps)
-- **THEN** approval decisions SHALL carry the selected action and optional note
+- **WHEN** a node execution completes
+- **THEN** the handler SHALL return `{ nodeId, status, output, durationMs }` to the pilot — the output carries the condition value when produced
 
 #### Scenario: Main node output reported as prose summary
 
-- **WHEN** a main node completes and step 6 reports the node output
-- **THEN** the report SHALL be emitted as a concise prose summary per the atom-pilot DISPLAY.md node-report format — never a JSON code fence; the full output-contract data remains in the agent session
+- **WHEN** a main node completes with reportable content
+- **THEN** the output SHALL be a concise prose summary — never a JSON code fence
 
 #### Scenario: Empty output reported without a code block
 
-- **WHEN** a node's output is empty (no reportable content)
-- **THEN** no code block SHALL be emitted — the blank-fence rendering is eliminated
+- **WHEN** a main node completes with no reportable content
+- **THEN** no code block SHALL be emitted
 
 #### Scenario: Approval/gate decision single-line with full JSON retained
 
-- **WHEN** an approval or gate node completes with an IApprovalDecision output
-- **THEN** the report SHALL carry the single-line `decision: <action> (<label>)` form
-- **AND** the full IApprovalDecision JSON SHALL stay in the session for the pilot's routing (graph_advance branchTo / graph_jump / endRun) and audit
+- **WHEN** a main confirmation decision completes
+- **THEN** the report SHALL carry the single-line decision form
+- **AND** the full decision JSON SHALL remain available in the agent session
 
-### Requirement: Input-stage consumption
+#### Scenario: Card options render from completion
 
-atom-phase-handler SHALL read activation inputs from the activation boundary: `## Run Mode:` block from the session activation facts (graph_start `args.mode` — required, absent → MODE_REQUIRED at start; the handler consumes the run-mode block from the session copy, absence → manual + warning, never auto), `## Constraints` block from the pilot-loaded constraints (absent → empty + warning). Consumption shape SHALL be unchanged from the prologue-output reads — only the source naming follows the activation boundary model (ADR 0148).
+- **WHEN** a dispatched NodeDetail carries `completion.choices` / `completion.direct_end`
+- **THEN** the decision card SHALL render those options directly — no parsing of the task text to discover options
 
-#### Scenario: Mode read from activation facts
+#### Scenario: Condition in node output
 
-- **WHEN** an approval or gate node dispatches
-- **THEN** the handler SHALL inject the `## Run Mode:` block from the session activation facts; missing facts degrade to manual + warning
+- **WHEN** a node's execution concludes with a condition value
+- **THEN** the output carries it and the advance reports it — the backend matches the flow edge
 
-#### Scenario: Constraints read from activation facts
+#### Scenario: Loop-head executes as plain main
 
-- **WHEN** any node dispatches
-- **THEN** the handler SHALL inject the `## Constraints` block from the pilot-loaded session copy; missing degrades to empty + warning
+- **WHEN** a dispatched node is a flow self-loop head
+- **THEN** the handler executes it through the plain main path — no loop template rules apply
+
+#### Scenario: Router selection unchanged
+
+- **WHEN** a router node dispatches
+- **THEN** selection (auto/card) and sibling-run launch proceed per the router template rules
 
 ### Requirement: Handler SHALL enforce the todo node-boundary lifecycle
 
-atom-phase-handler SHALL clear the platform todo list at every node boundary: dispatch (before task execution) and completion (after the output write, before returning to the pilot). The clear SHALL be unconditional on success/failure and SHALL apply uniformly to main, approval, and gate nodes. The clear SHALL go through the kernel `todo()` primitive's clear semantics — never a platform-specific spelling in the handler body.
+MODIFIED: atom-phase-handler SHALL clear the platform todo list at every node boundary: dispatch (before task execution) and completion (after the output write, before returning to the pilot). The clear SHALL be unconditional on success/failure and SHALL apply uniformly to the single main path. The clear SHALL go through the kernel `todo()` primitive's clear semantics — never a platform-specific spelling in the handler body.
 
 #### Scenario: Dispatch clears the scratchpad
 
-- **WHEN** the handler begins executing any node type
+- **WHEN** the handler begins executing any node
 - **THEN** it SHALL invoke the `todo()` clear semantics before the node's task runs
 
 #### Scenario: Completion clears before advance
 
 - **WHEN** the handler finishes a node — done or failed
-- **THEN** it SHALL invoke the `todo()` clear semantics after the output file write and before the pilot's `graph_advance` call
+- **THEN** it SHALL invoke the `todo()` clear semantics after the output write and before the pilot's `graph_advance` call
 
 #### Scenario: Handler uses the kernel primitive
 
@@ -131,7 +131,7 @@ atom-phase-handler SHALL clear the platform todo list at every node boundary: di
 
 ### Requirement: Handler SHALL enforce the Tool usage check self-report
 
-MODIFIED: the tool-usage self-report SHALL be the `tools:` row of the single `## Checks` block — one line naming chain-head evidence per declared class or an `n/a` structural reason. Any `violated` line SHALL prefix the node output with `[TOOL USAGE VIOLATION: <count>]`; approval pre-call SHALL scan dependsOn outputs for the marker and append `[TOOL USAGE VIOLATION: <nodeId> × N]` (aggregation pipeline unchanged).
+The tool-usage self-report SHALL be the `tools:` row of the single `## Checks` block — one line naming chain-head evidence per declared class or an `n/a` structural reason. Any `violated` line SHALL prefix the node output with `[TOOL USAGE VIOLATION: <count>]`; the decision pre-call SHALL scan dependsOn outputs for the marker and append `[TOOL USAGE VIOLATION: <nodeId> × N]` (aggregation pipeline unchanged).
 
 #### Scenario: Self-report closes main nodes
 
@@ -142,23 +142,7 @@ MODIFIED: the tool-usage self-report SHALL be the `tools:` row of the single `##
 
 - **WHEN** any declared class is violated
 - **THEN** the output SHALL carry `[TOOL USAGE VIOLATION: <count>]`
-- **AND** approval pre-call SHALL surface the marker per dependsOn node
-
-### Requirement: Registry entries inject per declared classes
-
-On main-node dispatch, the handler SHALL inject the HLT registry entries for the node's declared operation classes — the union of the phase `operations:` declaration and the dispatched skill's `Operation classes` subsection (phase declaration overrides/complements the skill default). Injection SHALL ride the existing reference-block pipeline (deterministic, no fallback search). Nodes declaring no classes SHALL receive no registry injection.
-
-#### Scenario: Phase declares locate and edit
-
-- **WHEN** a phase declares `operations: [locate, edit]` and the skill declares a default set
-- **THEN** the dispatch SHALL inject the registry entries for the merged class set
-- **AND** the entries SHALL arrive as context blocks before the task text
-
-#### Scenario: No declaration, no injection
-
-- **WHEN** neither the phase nor the skill declares operation classes
-- **THEN** no registry entries SHALL be injected
-- **AND** no warning SHALL be emitted
+- **AND** the decision pre-call SHALL surface the marker per dependsOn node
 
 ### Requirement: Class-based Tool usage verification
 
@@ -176,23 +160,9 @@ MODIFIED: the handler SHALL perform the tool-usage verification by declared clas
 - **THEN** every declared class SHALL be counted as a violation
 - **AND** the marker SHALL be `[TOOL USAGE VIOLATION: <N>]` with N = declared class count
 
-### Requirement: atom-phase-handler main procedure is an HLT tool-call execution wrapper
-
-The main Dispatch Rules delegate execution to `atom-kernel §High-Level Tool Registry`: context assembly delivers the evidence sources, execution runs calls per registry contracts (bounded evidence loop default 3, verify per Entry: verify), then handler machinery (constraint check, tool usage check, output persistence, todo lifecycle) wraps the call. The handler does not define a competing execution spec.
-
-#### Scenario: Main execution delegates
-
-- **WHEN** a main node executes
-- **THEN** the handler's Dispatch Rules reference atom-kernel §High-Level Tool Registry for the execution core, and no bespoke execution shape appears in the handler
-
-#### Scenario: Dispatch machinery retained
-
-- **WHEN** a main node completes
-- **THEN** the handler still performs constraint check, tool usage check, output persistence, and todo lifecycle as its wrapping machinery
-
 ### Requirement: Main dispatch timing SHALL anchor tool-call execution after context assembly
 
-The handler's main-node dispatch SHALL execute in the fixed order: dispatch todo clear → context assembly (evidence sources) → tool-call execution per `atom-kernel §High-Level Tool Registry` (bounded evidence loop, verify per Entry: verify) → constraint check → tool usage check → output persist → completion todo clear. Todo lifecycle SHALL be boundary clears only (dispatch + completion) — no plan projection, no content contract. Approval and gate paths SHALL remain unchanged (boundary clears only).
+MODIFIED: the handler's main-node dispatch SHALL execute in the fixed order: dispatch todo clear → context assembly (evidence sources) → tool-call execution per atom-kernel §Tool Discipline → constraint check → tool usage check → output persist → completion todo clear. Todo lifecycle SHALL be boundary clears only (dispatch + completion) — no plan projection, no content contract. The main path is the only path — no approval/gate paths exist to reference.
 
 #### Scenario: Tool-call execution follows context assembly
 
@@ -231,22 +201,34 @@ Given packages/graph-workflow/skills/atom-phase-handler/SKILL.md When reading th
 
 ### Requirement: Decision UI block injection — main-node confirmation points per approval()
 
-The handler SHALL prepend a `## Decision UI` block to main-node context (alongside `## Run Mode:` and `## Constraints`), declaring that every user-confirmation point in the node's execution — including "ask the user" / "check with the user" / "quiz" / question()-style instructions in the dispatched skill — executes per the approval() contract: mode from `## Run Mode` (absent → manual); recommendation present + auto → execute it; no recommendation → card. Upstream skill content SHALL NOT be modified; the injection layer is the single interpretation site.
+`## Decision UI` block SHALL prepend to main node context (alongside `## Constraints`). Block semantics = explicit declaration mapping: card presentation is triggered ONLY by explicit graph tokens (`Interview:` / `confirm:` / explicit confirmation instructions / `routing.actions` branch declarations). Prose without an explicit token SHALL NOT trigger the approval() card — the node executes self-decided. No run-mode wording exists. The "Upstream skill confirmation auto-executes in auto mode" scenario keeps its historical name; its content confirms no auto execution (run mode removed, ADR 0215).
 
 #### Scenario: Upstream skill confirmation auto-executes in auto mode
 
-- **WHEN** a main node dispatches with an upstream skill containing a prose confirmation point (e.g. "Check with the user..."), run mode auto, and a recommendation exists
-- **THEN** the confirmation SHALL execute the recommendation without a card
+- **WHEN** a main node dispatches and the upstream skill contains prose confirmation points (e.g. "Check with the user...") and the node's graph definition carries an explicit confirmation token (`Interview:` / `confirm:` / `routing.actions`)
+- **THEN** confirmation SHALL present the card — no auto execution (run mode removed; recommendation is marked only)
+- **WHEN** the same prose confirmation point sits on a node whose graph definition carries no explicit confirmation token
+- **THEN** the prose confirmation point SHALL NOT trigger the card — the node executes self-decided
+
+#### Scenario: Prose confirmation wording without token self-decides
+
+- **WHEN** a node's task text contains prose confirmation wording but the graph definition declares no explicit token
+- **THEN** no card SHALL be presented — the node executes self-decided
+
+#### Scenario: Explicit token still maps to card
+
+- **WHEN** a node's graph definition declares `Interview:` / `confirm:` / explicit confirmation instructions / `routing.actions`
+- **THEN** the approval() card SHALL be presented at that point
 
 #### Scenario: Standalone execution presents cards as before
 
-- **WHEN** a skill runs outside a graph (no `## Run Mode` / `## Decision UI` context)
-- **THEN** confirmation points SHALL present cards as before (absence never auto)
+- **WHEN** a main confirmation node executes standalone
+- **THEN** the card SHALL present — no auto-execution path exists
 
 #### Scenario: Interview turns unaffected
 
-- **WHEN** an interview turn has no recommendation
-- **THEN** the card SHALL appear in any run mode — the injection block does not change interview semantics
+- **WHEN** an interview() turn runs on a main node
+- **THEN** the card SHALL be presented without recommendation — never auto-gated
 
 ### Requirement: Error handling table in SKILL.md
 
@@ -255,82 +237,103 @@ The handler error-handling table (scenario -> response) SHALL live in atom-phase
 #### Scenario: Error semantics located once
 
 - **WHEN** a consumer looks up handler error semantics
-- **THEN** they resolve to SKILL.md §Error Handling; DECISION-CARDS.md holds only card content, gate evaluation, and persist rules
+- **THEN** they resolve to SKILL.md §Error Handling; DECISION-CARDS.md holds only card content and persist rules
 
 ### Requirement: Marker emission spec single home
 
-The marker emission spec (all marker strings: `[CONSTRAINT VIOLATION]`, `[TOOL USAGE VIOLATION]`, `[FILE MISSING]`, headroom health markers, with emission-side rules) SHALL live in atom-phase-handler SKILL.md.
+MODIFIED: the marker emission spec (all marker strings: `[CONSTRAINT VIOLATION]`, `[TOOL USAGE VIOLATION]`, `[FILE MISSING]`, with emission-side rules) SHALL live in atom-phase-handler SKILL.md. Headroom health markers are removed from the set — no `[HEADROOM DOWN]` marker exists (compression is the graph-fidelity-context module's internal concern).
 
 #### Scenario: Marker list changed
 
 - **WHEN** a marker string spelling changes
 - **THEN** atom-phase-handler SKILL.md is the single edited site; downstream consumers reference it
 
+#### Scenario: No headroom marker in the set
+
+- **WHEN** scanning atom-phase-handler SKILL.md marker emission section for headroom
+- **THEN** zero references exist
+
 ### Requirement: NODE-SCHEMA owns runtime shapes only
 
-NODE-SCHEMA.md SHALL define NodeDetail, GraphSnapshot, IApprovalDecision, and the fsmState status-value table (idle/running/completed/terminated); it SHALL NOT restate completion mechanisms (owned by atom-graph-spec ROUTING + atom-pilot SKILL.md).
+MODIFIED: NODE-SCHEMA restores the `agent` row — the runtime NodeDetail shape carries the `agent` hints field (priority-ordered sub-agent type preferences, advisory — fallback platform default). The `position` and `executionMode` rows stay dropped (no execution-position or mode-hint facts exist on the dispatch surface). The `template_args` row SHALL carry the full per-template shape: `{ paths }` (router), `{ terminal }` (scope-entry), `{ questions: [{ prompt, condition }] }` (router — caller-declared extra judgment entries; accept-node consolidation, ADR 0246). The `review-accept` / `adopt-accept` / `adopt-scope` template rows SHALL NOT appear in the schema table (accept templates deleted, ADR 0246; adopt-scope removed, ADR 0247 — the adoption goal is confirmed by the framework's scope-entry + requirement accept loop + adopting grilling).
 
-#### Scenario: Completion defined once
+#### Scenario: NodeDetail field surface
 
-- **WHEN** a consumer needs run completion semantics
-- **THEN** they resolve to atom-graph-spec ROUTING §Completion + atom-pilot SKILL §Run Completion; NODE-SCHEMA holds the status-value table only
+- **WHEN** NODE-SCHEMA is read
+- **THEN** it SHALL document `agent` (advisory sub-agent type preferences for main phases)
+- **AND** it SHALL document no `position` / `executionMode` fields
 
-### Requirement: Mode-Source Canonical Sites
+#### Scenario: Agent hints block assembled at dispatch
 
-The run-mode source rule (`## Run Mode` block, absence never auto) SHALL be stated at exactly two canonical sites: atom-kernel §approval() (decision semantics) and atom-phase-handler CONTEXT-ASSEMBLY.md §Prologue Context Blocks (block sourcing). All other files SHALL reference these by pointer and SHALL NOT restate the rule.
+- **WHEN** a dispatched main node's NodeDetail carries `agent`
+- **THEN** the handler SHALL assemble a `## Agent hints:` block from the field (priority-ordered — first available wins, fallback platform default)
+- **AND** nodes without `agent` SHALL receive no such block (no empty block)
 
-#### Scenario: Two-site rule
+#### Scenario: NODE-SCHEMA matches the consolidated template surface
 
-- **WHEN** scanning phase-handler SKILL.md, DECISION-CARDS.md, NODE-SCHEMA.md, or atom-pilot SKILL.md for run-mode semantics
-- **THEN** each carries only pointers to the canonical sites — no restatement
-
-#### Scenario: Schema carries no behavior rule
-
-- **WHEN** reading NODE-SCHEMA.md §GraphSnapshot
-- **THEN** no run-mode consumption rule appears — schema files carry field shapes only
+- **WHEN** the NODE-SCHEMA template table is read
+- **THEN** it SHALL list `startup` / `router` / `scope-entry` / `adopting` only, with `template_args` shapes covering paths / terminal / questions — no review-accept / adopt-accept / adopt-scope rows
 
 ### Requirement: Error Handling Unique Rows Only
 
-atom-phase-handler SKILL §Error Handling SHALL contain only rows whose content is not stated elsewhere in the skill family: main-phase-requires-task, channel-resolution failure, task() dispatch failure. Rows duplicating flow steps (unknown type, judge failure, auto-without-recommendation, activation degrade) SHALL be absent — those live at their flow-step sites.
+atom-phase-handler SKILL §Error Handling SHALL contain only rows whose content is not stated elsewhere in the skill family: main-phase-requires-task, channel-resolution failure, task() dispatch failure. Rows duplicating flow steps (unknown type, activation degrade) SHALL be absent — those live at their flow-step sites.
 
 #### Scenario: Duplicate rows deleted
 
 - **WHEN** reading phase-handler SKILL §Error Handling
-- **THEN** rows 4-7 of the pre-convergence table (unknown type / judge fails / auto no-recommendation / activation facts missing) are absent
+- **THEN** rows of the pre-convergence table (unknown type / judge fails / auto no-recommendation / activation facts missing) are absent
 - **AND** no other file restates them
 
 ### Requirement: Judge Failure Single Home
 
-The conservative judge-failure rule (failure -> no hit -> pass through; never fabricate a jump) SHALL be stated once: atom-kernel §judge() + its failure table. All other sites SHALL pointerize.
+The judge() primitive and its failure table were removed with the gate type (ADR 0216). Rework conditions are evaluated inline from main task text — no judge() call exists, no conservative judge-failure rule to single-home. No skill, channel, constraint, or test SHALL reference judge() or a jump-evaluation pass. REMOVED.
 
-#### Scenario: Single-site conservative rule
+#### Scenario: No judge reference exists
 
-- **WHEN** scanning phase-handler DECISION-CARDS.md §Gate Jump Evaluation or atom-pilot SKILL §Error Handling for the conservative rule
-- **THEN** only a `per atom-kernel §judge()` pointer exists
+- **WHEN** a consumer scans repo content for judge() references
+- **THEN** none SHALL exist in live assets — ADR history excepted (judge() removed with the gate type, ADR 0216)
 
 ### Requirement: Session-based upstream assembly single home
 
-Upstream context (direct dependsOn + `node:` channels + prologue outputs) SHALL be assembled by the executing agent from its own session — the agent executed the upstream nodes earlier in the run; after session compaction the platform transcript (history addressing) restores full reports. CONTEXT-ASSEMBLY.md §Session-Based Upstream Assembly SHALL hold the assembly rules; schema files SHALL NOT restate them. Activation facts (`args.mode`, pilot-loaded constraints) are session facts of the activation — assembled the same way; degradation rules (missing/corrupt → manual mode + empty constraints warning) are unchanged.
+Upstream context (direct dependsOn + `node:` channels + activation facts) SHALL be assembled by the executing agent from its own session — the agent executed the upstream nodes earlier in the run; after session compaction the platform transcript (history addressing) restores full reports. CONTEXT-ASSEMBLY.md §Session-Based Upstream Assembly SHALL hold the assembly rules; schema files SHALL NOT restate them. No `## Run Mode:` block exists (run mode removed, ADR 0215).
 
 #### Scenario: Upstream blocks from session
 
 - **WHEN** a node dispatch references upstream reports (dependsOn / `node:` channels / activation facts)
-- **THEN** the handler SHALL assemble `## Upstream:` / `## Constraints` / `## Run Mode:` blocks from the agent session (its own prior outputs, or platform history recovery after compaction)
+- **THEN** the handler SHALL assemble `## Upstream:` and `## Constraints` blocks from the agent session (its own prior outputs, or platform history recovery after compaction)
 - **AND** no dispatch payload content and no file reads are involved
 
 #### Scenario: Missing upstream report degrades, never fails
 
-- **WHEN** an upstream node has not yet produced a report (first round of a retry loop)
-- **THEN** the handler SHALL warn and continue — no failure
+- **WHEN** an upstream report is unavailable after compaction recovery
+- **THEN** the handler SHALL degrade gracefully — never fail the dispatch on missing upstream content
 
 ### Requirement: Run Frame block assembly
 
-The handler prepends a deterministic frame block to every dispatched node's context.
+MODIFIED: the handler prepends a deterministic frame block to every dispatched node's context as the first block of the consolidated 4-block set (adopt-scope-and-handler-blocks, ADR 0247 — display-minimalism law-2 fix + per-node token reduction): `## Run Frame` (unconditional, first — run position + task summary + declared operations + user-input contract; the declared operations line is the SINGLE render point for `node.operations` — the former separate Class block is folded here, node.operations SHALL NOT appear in any other block), `## Context` (conditional, second — upstream / reference / file / decision-ui sub-sections under compact sub-headers; absent sections omitted), `## Constraints` (unconditional, third — unchanged semantics), `## Checks` (unconditional, last — unchanged semantics). The former 7-block order (Run Frame → Upstream → Reference → Class → File → Decision UI → Constraints) is replaced. The Run Frame remains the single C1 frame signal (seam law — one emission seam per signal class); mechanical tier (seam-live) behavior unchanged: no prose Checks block, no Context hints block, markers still prefix on violation.
 
 #### Scenario: Frame precedes other blocks
 
 - **WHEN** the handler assembles context for a dispatched node
-- **THEN** the `## Run Frame` block is the first block of the node context (before Upstream/Constraints blocks) and is generated deterministically from runId, nodeId, node type, and the node's task
+- **THEN** the `## Run Frame` block is the first block of the node context (before the Context/Constraints/Checks blocks) and is generated deterministically from runId, nodeId, node type, and the node's task
+
+#### Scenario: Run Frame carries operations single-render
+
+- **WHEN** a main node with `node.operations` dispatches
+- **THEN** the `## Run Frame` block SHALL carry the declared operations line
+- **AND** no other assembled block SHALL repeat `node.operations` content (no separate Class block)
+
+#### Scenario: Context block merges conditional sections
+
+- **WHEN** a main node dispatches with upstream (`node:` channels / dependsOn), reference (`skill:` channels), file channels, and/or a declared decision point
+- **THEN** the `## Context` block SHALL carry the present sections under compact sub-headers (upstream / reference / file / decision-ui) in order
+- **AND** absent sections SHALL be omitted (no empty sub-headers)
+
+#### Scenario: Constraints and Checks unchanged
+
+- **WHEN** a main node dispatches
+- **THEN** the `## Constraints` block SHALL carry the `[graph]`/`[project]` layered entries (2 KB cap, dedup, conflicts preserved)
+- **AND** the `## Checks` block SHALL be the single-line collapsed row (prose tier) or absent with markers (mechanical tier)
 
 ### Requirement: Reasoning persistence check
 
@@ -409,7 +412,7 @@ The handler SHALL detect graph-fidelity presence by seam liveness: the most rece
 
 ### Requirement: Single-line Checks block (prose baseline)
 
-The `## Checks` block SHALL render as ONE line — `## Checks: constraints ok · tools n/a · reasoning ok · ctx A n · B n · C n · L3 n · out ~n tok` — with green rows collapsed. Violation rows SHALL expand with detail and SHALL prefix the node output with the violation markers (emission rules unchanged: `[CONSTRAINT VIOLATION: <count>]`, `[TOOL USAGE VIOLATION: <count>]`, `[REASONING VIOLATION: <count>]`, `[CONTEXT VIOLATION: <count>]`). The tools row SHALL name chain-head evidence per declared class or an `n/a` structural reason; missing evidence per declared class SHALL count as violation (unchanged). The four former sections do not exist as separate sections.
+MODIFIED: the `## Checks` block SHALL render as ONE line — `## Checks: constraints ok · tools n/a · reasoning ok · ctx A n · B n · C n · L3 n · out ~n tok` — with green rows collapsed. Violation rows SHALL expand with detail and SHALL prefix the node output with the violation markers (emission rules unchanged: `[CONSTRAINT VIOLATION: <count>]`, `[TOOL USAGE VIOLATION: <count>]`, `[REASONING VIOLATION: <count>]`, `[CONTEXT VIOLATION: <count>]`). The tools row SHALL name chain-head evidence per declared class or an `n/a` structural reason; missing evidence per declared class SHALL count as violation (unchanged). The four former sections do not exist as separate sections. The block's position in the consolidated 4-block set is last (after `## Constraints`); the former 7-block prepend order is replaced (adopt-scope-and-handler-blocks, ADR 0247).
 
 #### Scenario: All green
 
@@ -420,3 +423,46 @@ The `## Checks` block SHALL render as ONE line — `## Checks: constraints ok ·
 
 - **WHEN** a declared tool class lacks chain-head evidence
 - **THEN** the tools segment expands with the violation detail and `[TOOL USAGE VIOLATION: 1]` prefixes the output
+
+#### Scenario: Checks position in the 4-block set
+
+- **WHEN** a main node dispatches
+- **THEN** the `## Checks` block SHALL appear last in the assembled block order (Run Frame → Context → Constraints → Checks)
+
+### Requirement: Constraints block merges graph and project layers
+
+MODIFIED: the `## Constraints` block SHALL be assembled from the merged constraint set: `[graph]`-prefixed entries (dispatch fact — `NodeDetail.constraints` graph part, from the loaded definition) + `[project]`-prefixed entries (activation session fact — existing pipeline). Block shape per the unified format (title, one bullet per entry with source prefix, closing compliance sentence); layered append with conflict preservation (no silent drop); 2 KB cap and lang/git semantic dedup SHALL apply to the merged block; explicit warning on truncation, never silent. Inventory entry-level constraints SHALL NOT enter the block. Constraint-injection rule details remain single-sourced at atom-graph-spec §Constraint Layering — the handler SKILL.md carries the pointer sentence and the block format. The block's position in the consolidated 4-block set is third (after `## Run Frame` and `## Context`, before `## Checks`); the former 7-block prepend order is replaced (adopt-scope-and-handler-blocks, ADR 0247).
+
+#### Scenario: Both layers visible before inline task
+
+- **WHEN** a main-type node is dispatched with 2 graph constraints and 8 project rules
+- **THEN** the task text received by the executing agent contains the `## Constraints` block at the top — 10 bullets, each prefixed `[graph]` or `[project]` — positioned before the task instructions
+
+#### Scenario: Rework evaluation includes merged constraints
+
+- **WHEN** a main node evaluates an inline rework condition with a merged constraint set
+- **THEN** the evaluation context includes the merged block (rework conditions can reference graph-level rules)
+
+#### Scenario: Constraints position in the 4-block set
+
+- **WHEN** a main node dispatches
+- **THEN** the `## Constraints` block SHALL appear third in the assembled block order (Run Frame → Context → Constraints → Checks)
+
+### Requirement: Handler SHALL NOT orchestrate subgraph delegation
+
+MODIFIED: the handler SHALL NOT orchestrate subgraph delegation — the boundary-delegation path is removed. Every dispatched node executes through the single main dispatch path. The loop-template node handling (repeated sibling-run execution) SHALL be removed; the router-template node handling SHALL remain (one-shot sibling-run selection). `## Agent hints:` injection is restored for peer-level main phases: when the dispatched node's NodeDetail carries `agent`, the handler SHALL assemble a `## Agent hints:` block (priority-ordered — first available wins, fallback platform default).
+
+#### Scenario: Composed member single dispatch
+
+- **WHEN** a dispatched node executes
+- **THEN** the handler SHALL dispatch it through the standard main path — no batch assembly, no structured output package, no loop sibling-run orchestration
+
+#### Scenario: Agent-hints block for hinted nodes
+
+- **WHEN** a dispatched main node's NodeDetail carries `agent`
+- **THEN** a `## Agent hints:` block SHALL be injected (priority-ordered — first available wins, fallback platform default)
+
+#### Scenario: No loop sibling-run orchestration
+
+- **WHEN** a loop-head node dispatches
+- **THEN** no sibling-run start/drive/collect orchestration occurs — the node's own flow self-edge governs re-entry

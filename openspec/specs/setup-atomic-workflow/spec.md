@@ -216,30 +216,13 @@ The repo-root `skills.sh.json` SHALL be valid JSON conforming to `https://skills
 
 ### Requirement: Grouping coverage SHALL include graph-workflow skills
 
-The optional groupings SHALL cover the graph-workflow skills and MCP instruction skills so the repo page is scannable.
+MODIFIED: the optional groupings SHALL cover the graph-workflow skills and MCP instruction skills so the repo page is scannable. The MCP instruction skill list is `mcp-jcodemunch`, `mcp-serena` — mcp-headroom is removed (no legacy headroom instruction skill exists anywhere).
 
 #### Scenario: Graph Workflow group lists the atom-* skills
 
 - **WHEN** the repo page renders with the customized groupings
 - **THEN** a "Graph Workflow" group SHALL list the 11 graph-workflow skills
-- **AND** MCP instruction skills (mcp-headroom, mcp-jcodemunch, mcp-serena) SHALL be grouped or explicitly ungrouped per `notGrouped`
-
-### Requirement: Scaffold SHALL include the attached-doc directory
-
-- **WHEN** the setup skill scaffolds a project
-- **THEN** it SHALL create `.graph-scheduler/graphs/` (existing behavior) AND `.graph-scheduler/docs/` — the maker-journey attached-doc home
-- **AND** the write step SHALL be idempotent (fill gaps only, never overwrite) — the docs/ directory SHALL be created only when missing
-
-#### Scenario: Fresh project scaffold includes docs dir
-
-- **WHEN** setup-atomic-workflow runs on a project without `.graph-scheduler`
-- **THEN** the created inventory SHALL include `.graph-scheduler/docs/`
-- **AND** the self-check SHALL verify the directory exists
-
-#### Scenario: Re-run adds nothing
-
-- **WHEN** setup-atomic-workflow re-runs on a fully scaffolded project
-- **THEN** the inventory SHALL report existed for all pieces, including docs/ — no writes, no errors
+- **AND** MCP instruction skills (mcp-jcodemunch, mcp-serena) SHALL be grouped or explicitly ungrouped per `notGrouped`
 
 ### Requirement: Seed literals single-sourced
 

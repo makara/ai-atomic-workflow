@@ -48,24 +48,21 @@ The flagship workflow — one loop takes the biggest remaining architectural pro
 Use atom-pilot to run <graph name>: <your goal in plain language>
 ```
 
-The loop at a glance — one round composes requirement production, adoption, and implementation; `loop-gate` re-enters the loop while a Top Recommendation remains (auto mode, bounded):
+The loop at a glance — one round composes requirement production, adoption, and implementation; the round-report terminal re-enters the round on `remaining` (flow self-edge) or drains on `complete`; termination is the user's call at the direct-end options:
 
 ```mermaid
 graph LR
-   REQ[Requirement<br/>arch-review] --> ADOPT[Adopt<br/>adopt-with-docs]
-   ADOPT --> TRACK{ADR exists?}
-   TRACK -->|no: minimal| MIN[Apply + review]
-   TRACK -->|yes: detailed| DET[Spec + tickets + implement]
-   MIN --> GATE{Accept?}
-   DET --> GATE
-   GATE -->|no: rework| TRACK
-   GATE -->|yes| ARCHIVE[Archive spec]
-   ARCHIVE --> LOOP{Review reqs}
-   LOOP -->|Top Rec remains<br/>auto · bounded| REQ
-   LOOP -->|no Top Rec| DONE[Loop complete]
+   SCOPE[scope-entry<br/>scope interview] --> REQ[Requirement<br/>router → arch-review]
+   REQ -->|revise| REQ
+   REQ --> GRILL[Adopting<br/>grilling consensus]
+   GRILL --> ADOPT[Adopt<br/>router → adopt-with-docs]
+   ADOPT --> IMPL[Implement<br/>router → spec-implement]
+   IMPL --> ROUND[round-report<br/>remaining OR complete]
+   ROUND -->|remaining| SCOPE
+   ROUND -->|complete| DONE[completed]
 ```
 
-One round composes requirement production (`arch-review`), adoption + spec production (`adopt-with-docs`), and implementation (`spec-implement`); `loop-gate` re-enters the loop while a Top Recommendation remains (auto mode, bounded); `loop-accept` ends the round (Loop again default, Complete = user ends). Run mode (manual/auto) is confirmed at each activation:
+One round composes requirement production (`arch-review`) with the requirement accept loop hosted on the framework's requirement router node (accept → adopt; revise → flow self-edge re-run), adoption + spec production (`adopt-with-docs`, grilling consensus is the acceptance), and implementation (`spec-implement`); the round-report terminal re-enters the round on `remaining` (flow self-edge) or drains on `complete`; termination is the user's call at the direct-end options of scope-entry / adopting (node report `direct_end: true` → pilot advances with the end decision — run completes as `completed`, never `force_end`).
 
 ```text
 Use atom-pilot to run arch-review-loop: find and fix the biggest architectural problem in this codebase.
@@ -77,14 +74,14 @@ The round splits into three independently executable graphs; `arch-review-loop` 
 
 |Need|Run|
 |-|-|
-|Requirement production only (find problems)|`graph_start arch-review`|
-|Adoption + spec only (confirm a produced report / raw idea, produce the change)|`graph_start adopt-with-docs`|
+|Requirement production only (find problems)|`graph_start arch-review-loop` (interactive scope-entry + requirement accept loop hosted by the framework — arch-review itself is a non-interactive analysis chain)|
+|Adoption + spec only (confirm a produced report, produce the change)|`graph_start arch-review-loop` (adoption interaction hosted by the framework — adopt-with-docs is a non-interactive self-deciding spec pipeline)|
 |Implementation only (change exists)|`graph_start spec-implement` with `args.changeName`|
 |Full round (requirement + adoption + implementation in one loop)|`graph_start arch-review-loop`|
 
-- `arch-review` — requirement production — standalone: scope interview (scope + output path + report input fresh\|existing) → arch-review report (improve-codebase-architecture) → review-accept (Continue = requirement ready, Loop again, End).
-- `adopt-with-docs` — requirement adoption + spec production — standalone raw-idea entry; composed, it receives the produced report as input document, appends its record as a dated appendix section, and materializes the adopted requirements as the OpenSpec change (spec-propose).
-- `spec-implement` — implementation: spec-extract reads the produced change (upstream channel when composed, `args.changeName` standalone) → track machinery → archive (tracks own post-archive doc maintenance). No spec generation, no auto-loop gate — rework is the single loop in `arch-review-loop`.
+- `arch-review` — non-interactive requirement production subgraph (`interaction: none`): explore → first-principles → present-candidates pure analysis chain. Interactive scope-entry and the requirement accept loop (accept/revise on the requirement router node, ADR 0246) are hosted by the composing framework graph (arch-review-loop / first-principles-dev), which strings this subgraph between its own interactive nodes; no standalone interactive execution.
+- `adopt-with-docs` — non-interactive adoption spec-production subgraph (`interaction: none`): self-deciding spec-propose consuming the adoption consensus from the composing framework graph's interactive nodes via channels. Adoption consensus (adopting grilling — the consensus IS the acceptance, ADR 0246; the adoption goal is confirmed in the grilling first-round frontier — the adopt-scope interview is deleted, ADR 0247) are framework-hosted; raw-idea journeys route through a framework graph.
+- `spec-implement` — non-interactive implementation (`interaction: none`): spec-extract reads the produced change (upstream channel when composed, `args.changeName` standalone) → track machinery → archive (tracks own post-archive doc maintenance). No spec generation, no auto-loop gate — rework is the single loop in `arch-review-loop`.
 
 **Raw MCP tools?** The loop behind all of this is `graph_start` → execute the returned work order → `graph_advance` → repeat until null. If you want to drive the MCP tools directly instead of via atom-pilot, see the call-flow example in [packages/graph-scheduler/README.md](packages/graph-scheduler/README.md).
 
@@ -98,16 +95,13 @@ Doc-estate maintenance as a graph — keeps the derived-view / normative / contr
 graph LR
    ENTRY[Entry<br/>trigger classification] --> REQ{user-request?}
    REQ -->|yes| GRILL[Grill requirements]
-   REQ -->|no| WORK{Workstream}
-   GRILL --> WORK
-   WORK -->|domains| DOM[domains-index]
-   WORK -->|specs| SYN[specs-sync]
-   WORK -->|adrs| ALN[adr-align]
-   DOM --> REV[Review]
-   SYN --> REV
-   ALN --> REV
-   REV -->|pass| ACC[Accept]
-   REV -->|rework| WORK
+   REQ -->|no| DOM[domains-index]
+   GRILL --> DOM
+   DOM --> SYN[specs-sync]
+   SYN --> ALN[adr-align]
+   ALN --> REV[Review]
+   REV -->|rework| ENTRY
+   REV -->|pass| DONE[Pass completes]
 ```
 
 The entry classifies the trigger (domain-change / skill-change / proactive / user-request — user-request adds a grilling confirmation step, no ADR), then dispatches the matching workstream — `domains-index` (atom-doc-maintain), `specs-sync` (atom-spec-maintain), `adr-align` (atom-adr-maintain); the review is a consistency gate (requirements class + reverse-validation + read-only deployment-mirror check):
@@ -118,26 +112,28 @@ Use atom-pilot to run estate-maintain: sync the doc estate after the domains cha
 
 ## All Built-in Workflows
 
-Ten workflows ship in `packages/graph-scheduler/graphs/` and run out of the box. Three get the deep treatment above (arch-review-loop, estate-maintain, graph-generate below); the rest are one-line entries — full detail in [packages/graph-scheduler/README.md](packages/graph-scheduler/README.md):
+Twelve workflows ship in `packages/graph-scheduler/graphs/` and run out of the box. Three get the deep treatment above (arch-review-loop, estate-maintain, graph-generate below); the rest are one-line entries — full detail in [packages/graph-scheduler/README.md](packages/graph-scheduler/README.md):
 
 |Graph|What it does|
 |-|-|
 |**arch-review-loop**|See above — the flagship loop|
-|**arch-review**|Requirement production graph, standalone: scope-entry interview (entry node — scope + output path + report input fresh\|existing) → arch-review report (improve-codebase-architecture — producer) → review-accept (Continue = requirement ready / Loop again / End). Independently executable requirement production; the loop composes it as its requirement stage (adopt + implement follow in arch-review-loop).|
-|**adopt-with-docs**|Requirement adoption (adopt stage) + spec production: adopt-scope (interview: idea/goal or input document) → adopting (grilling conversation, inline domain-modeling side effects) → adopt-accept (adoption approval) → spec-propose (openspec-propose — adopted requirements materialize as the OpenSpec change). Standalone raw idea entry; composed as the loop's adopt stage — receives the produced report as input document and appends its record as a dated appendix section.|
-|**spec-implement**|Implementation graph: spec-extract (produced change — upstream channel when composed / {args.changeName} standalone) → track gate (minimal/detailed) → track-owned closure (plain archive / atom-doc-lifecycle) → pipeline-done. Pure implementation of an existing change — no spec generation; rework is the loop in arch-review-loop.|
-|**openspec-apply**|OpenSpec apply pipeline: apply change → dual review → bounded auto-rework gate → plain archive (openspec-archive-change)|
-|**openspec-engineer**|OpenSpec detailed implementation: spec synthesis → tickets → tdd implementation → dual review → bounded gate → approval → lifecycle closure (reverse-validated archive + ADR fold + index)|
-|**e2e-minimal**|Minimal E2E: main → approval loop|
+|**arch-review**|Non-interactive requirement production subgraph (interaction: none): explore (improve-codebase-architecture Step 1 — codebase walk, friction evidence) → first-principles (analysis over requirement input + explore digest) → present-candidates (report preserves the upstream thinking chain). Pure analysis chain — interactive scope-entry and the requirement accept loop (accept/revise on the requirement router node, ADR 0246) are hosted by the composing framework graph (arch-review-loop / first-principles-dev), which strings this subgraph between its own interactive nodes.|
+|**adopt-with-docs**|Non-interactive adoption spec-production subgraph (interaction: none): spec-propose (openspec-propose — adopted requirements materialize as the OpenSpec change), a self-deciding pipeline consuming the adoption consensus from the composing framework graph's interactive nodes via channels. Interactive adoption consensus (adopting grilling — the consensus IS the acceptance, ADR 0246; adoption goal + trace intent confirmed in the grilling first-round frontier — the adopt-scope interview is deleted, ADR 0247) are hosted by the framework graph (arch-review-loop / first-principles-dev); raw-idea journeys route through a framework graph.|
+|**spec-implement**|Non-interactive implementation graph (interaction: none): spec-extract (produced change — upstream channel when composed / {args.changeName} standalone) → track gate (minimal/detailed) → track-owned closure (plain archive / atom-doc-lifecycle) → workflow-done. Pure implementation of an existing change — no spec generation; rework is the loop in arch-review-loop.|
+|**openspec-apply**|OpenSpec apply workflow: apply change → dual review → bounded rework decision → plain archive (openspec-archive-change)|
+|**openspec-engineer**|OpenSpec detailed implementation: spec synthesis → tickets → tdd implementation → dual review → rework decision → confirmation → lifecycle closure (reverse-validated archive + ADR fold + index)|
+|**e2e-minimal**|Minimal E2E: main → main confirmation loop|
 |**estate-maintain**|See above — estate maintenance|
 |**release-prep**|Pre-release preparation — propose (release-prep-analyze: version from git tag history, deterministic + idempotent pre-tag, never executes git tag/commit/push) → plan-grill (grilling confirmation of every planned operation — interview, never auto-gated) → apply (release-prep-apply: version bump on release-line surfaces + CHANGELOG [Unreleased] fold per spec + README list sync vs ground truth, overwrite-style + verified) → release-review (approval; continue completes the run — final report prints tag/commit commands, user executes manually; jump re-runs a phase).|
 |**graph-generate**|See [Making a Graph](#making-a-graph) (Part 2) — the maker journey|
+|**graph-maintain**|Graph file maintenance — the maintenance flow: entry (atom-scope-interview — target graph via graph_assets + maintenance intent) → audit (atom-graph-writer maintain mode: inventory compliance + content-vs-inventory) → propose (per-finding fix proposals) → approval (mandatory user gate) → execute (two-path bundle apply + load-probe) → review → rework decision → accept. Mirrors the maker journey; pairs with the problem-surfacing channel (graph_start problems / graph_init full pass / graph_assets query)|
+|**first-principles-dev**|First-principles-prerequisite development flow with framework-hosted interaction: scope-entry (framework-owned atom-scope-interview — scope + requirement/diff input + report input + output path) → requirement (arch-review, interaction: none — pure analysis chain; the requirement accept loop is caller-declared on the router node — accept → adopt, revise → flow self-edge re-run, ADR 0246) → adopting (framework-owned grilling — the consensus IS the acceptance; adoption goal + trace intent confirmed in the first-round frontier, the adopt-scope interview is deleted, ADR 0247) → adopt (adopt-with-docs, interaction: none — self-deciding spec production) → implement (spec-implement, interaction: none) → fp-doc-update (folds requirement/diff + reasoning conclusions into docs/first-principles/development-flow.md per the fp README update-maintenance contract; reports round condition remaining \| complete — flow self-edge re-entry or drain)|
 
 ## Documentation Management
 
 How this project's documentation is managed — **only the documents the current built-in graphs actually consume are listed**; everything else in `docs/` is legacy, kept for reference, not consumed by any graph.
 
-The graph runtime delivers context through channels: ambient context (convention files, user-supplement config, platform estate) plus graph-declared channels, constraints, and run state. What the 10 built-in graphs actually consume:
+The graph runtime delivers context through channels: ambient context (convention files, user-supplement config, platform estate) plus graph-declared channels, constraints, and run state. What the 12 built-in graphs actually consume:
 
 |Class|Documents|Consumed by|
 |-|-|-|
@@ -145,7 +141,7 @@ The graph runtime delivers context through channels: ambient context (convention
 |Platform estate (organic — agent-read when present, never declared)|`docs/adr/` + `index.md` + `archive/` (ADRs), `openspec/specs/**`, `openspec/changes/**` (spec assets)|estate-maintain (adr-align), openspec graphs, arch-review-loop adoption chain|
 |Constraints|`.graph-scheduler/constraints.md` → `constraints.json`|activation (pilot loads once into the session; every node's Constraints block assembles from it)|
 |Runtime|node run state (progress only — status/retry/timing; node content lives in the agent session, ADR 0143)|graph-scheduler DB (delta snapshots — one-line rows + changed rows per dispatch)|
-|Assets|`packages/graph-scheduler/graphs/` + `registry.json` (10 graphs), `packages/graph-workflow/skills/` (16 skills)|all graph execution|
+|Assets|`packages/graph-scheduler/graphs/` + `registry.json` (12 graphs), `packages/graph-workflow/skills/` (17 skills)|all graph execution|
 |Artifacts|`docs/reports/` (arch-review reports), `docs/adopt/` (adoption records)|arch-review / adopt-with-docs|
 
 Specs and changes follow the OpenSpec flow: proposals become `openspec/changes/<name>/` (proposal + delta specs + design + tasks), implementation syncs deltas into `openspec/specs/`, then the change archives. ADRs record decisions; superseded ones fold into `docs/adr/archive/`. The README family itself is regenerated from this blueprint.
@@ -166,9 +162,11 @@ AI agents skip steps silently, lose context between stages, can't express condit
 
 ## How It Works
 
-**Runtime work orders with graph.** Each phase is a self-contained work order. Your agent pulls the next ready order, executes it, reports back; the scheduler advances the graph. The graph only tracks progress and reminds what's next — it executes nothing. A DAG captures what linear chains can't: conditional branches, approval gates, parallel fan-outs.
+**Runtime work orders with graph.** Each phase is a self-contained work order. Your agent pulls the next ready order, executes it, reports back; the scheduler advances the graph. The graph only tracks progress and reminds what's next — it executes nothing. The workflow graph captures what linear chains can't: conditional branches, approval gates, bounded rework loops, round re-entry.
 
-**Scoped context with channels.** Each work order carries the exact prompt, the right skill, and a context "channel" — a focused slice of relevant decisions and artifacts, nothing heavy. Effective context is one deterministic merge: ambient context (convention files, user-supplement config, platform estate — see `CONTEXT.md` glossary) plus graph-declared channels (skill references, upstream node outputs, file globs), identical for every phase. Activation facts (run mode, constraints) live at the invocation boundary — `graph_start` requires the mode, the pilot loads constraints once into the session. The engine reads no prose: skills carry the knowing; dispatch payloads are delta snapshots (one-line node rows + changed rows), so progress display and jump navigation never re-pay the full state.
+**Graphs are self-contained.** Every graph is one workflow YAML that declares everything it needs: phases (task text, skill, channels), the top-level `flow` block — the transition surface, the graph's routing authority — `inventory` (one goal + constraints entry per phase), and graph-level `constraints` (prose rules: rework bounds, condition vocabulary). The graph declares its own interaction mode and catalog description. Nothing external orchestrates it: the engine validates the YAML and routes by the transition table; the agent reads the phase's own declaration. A graph is a complete work-order board, not a fragment.
+
+**Subgraphs are just graphs.** Nested execution is `template: router` — a node whose `paths` are graph names. The router's agent selects one (a unique candidate or a hard criterion → auto-select; otherwise a recommendation card) and the frontend starts it as a sibling run: `graph_start` → drive to `node: null` → collect the result. No `use` composition, no namespaced members — every graph is standalone with its own interaction mode. A "subgraph" is just another graph; composition is running, not nesting.
 
 **Hints, not controls — the graph never dispatches.** A graph says _what_ each phase needs — skills, context, and, optionally, agent-type preferences in priority order. Dispatch itself stays in your agent's hands: when a skill fans out sub-agents, it follows the hints, not the graph's command. The graph is a work-order board, not a manager.
 
@@ -182,7 +180,7 @@ AI agents skip steps silently, lose context between stages, can't express condit
 
 ### graph-scheduler
 
-One package, two capabilities: the **MCP Server** (9 tools, stdio transport) and the `atom-graph-scheduler` bin. Two install routes — **the runtime matches the installer**:
+One package, two capabilities: the **MCP Server** (10 tools, stdio transport) and the `atom-graph-scheduler` bin. Two install routes — **the runtime matches the installer**:
 
 **Option A: npm + Node runtime**
 
@@ -234,7 +232,7 @@ Config file locations: OMP → `~/.omp/agent/mcp.json`, OpenCode → `opencode.j
 
 ### graph-workflow
 
-Two install channels — pick one (all 16 built-in skills are required for graph execution):
+Two install channels — pick one (all 17 built-in skills are required for graph execution):
 
 **Option A: Claude Code marketplace**
 
@@ -265,7 +263,7 @@ Initialize a project with the **setup-atomic-workflow** skill (the retired `atom
 Use setup-atomic-workflow to initialize this project
 ```
 
-It scaffolds `.graph-scheduler/` — `config.json` (db path, taskflow dir, registry paths), `graphs/`, `docs/`, and `constraints.md`. Idempotent: never overwrites existing files. Re-running it writes nothing.
+It scaffolds `.graph-scheduler/` — `config.json` (db path, graph dir, registry paths), `graphs/`, `docs/`, and `constraints.md`. Idempotent: never overwrites existing files. Re-running it writes nothing.
 
 ## Making a Graph
 
@@ -273,16 +271,15 @@ The maker journey — Atomic Workflow bootstraps itself: authoring a graph is a 
 
 ```mermaid
 graph LR
-   ENTRY[Entry<br/>scope interview] --> SPEC[Spec<br/>atom-graph-spec]
-   SPEC --> DESIGN[Design]
-   DESIGN --> IMPL[Implement]
+   ENTRY[Entry<br/>scope interview] --> SPEC[Spec<br/>atom-graph-design]
+   SPEC --> ACCEPT[spec-accept]
+   ACCEPT --> IMPL[Implement<br/>atom-graph-writer]
    IMPL --> REVIEW[Review]
-   REVIEW --> GATE{Accept?}
-   GATE -->|no: rework| IMPL
-   GATE -->|yes| ACCEPT[Accepted]
+   REVIEW -->|fail: rework| IMPL
+   REVIEW -->|pass| DONE[Accepted]
 ```
 
-Entry (atom-scope-interview, no CONTEXT.md hard dependency) → spec (topology design via atom-graph-design per atom-graph-spec) → spec-accept → implement (atom-graph-writer writes the `.taskflow.yaml` + registry entry + attached doc `.graph-scheduler/docs/<name>.md`, load-probe validated) → review → gate (bounded rework) → accept. Single kind (graph), single operation (create) — no skill co-production. Skill production (create/edit) flows through `arch-review-loop` (improver journey) openspec changes — implementation loads the spec skill per affected domain (graph → atom-graph-spec, skill → atom-skill-spec, doc → atom-doc-maintain):
+Entry (atom-scope-interview, no CONTEXT.md hard dependency) → spec (topology design via atom-graph-design per atom-graph-spec) → spec-accept → implement (atom-graph-writer writes the `.yaml` + registry entry, load-probe validated) → review → rework decision (bounded rework) → accept. Single kind (graph), single operation (create) — no skill co-production. Skill production (create/edit) flows through `arch-review-loop` (improver journey) openspec changes — implementation loads the spec skill per affected domain (graph → atom-graph-spec, skill → atom-skill-spec, doc → atom-doc-maintain):
 
 ```text
 Use atom-pilot to run graph-generate: generate a workflow for release notes from merged PRs.
@@ -292,9 +289,9 @@ Use atom-pilot to run graph-generate: generate a workflow for release notes from
 
 ## Architecture
 
-**What a graph is.** A graph is a work-order board declared in a `.taskflow.yaml` file: a named set of phases wired by `dependsOn` edges. The scheduler issues each ready phase as a work order and tracks progress — it executes nothing. Your agent pulls the order, does the work, reports back; the graph advances.
+**What a graph is.** A graph is a work-order board declared in a workflow YAML file — any `.yaml` document that passes schema validation, identified by its declared `name` (no suffix convention): a named set of phases wired by `dependsOn` edges. The scheduler issues each ready phase as a work order and tracks progress — it executes nothing. Your agent pulls the order, does the work, reports back; the graph advances.
 
-**Graph structure.** Phases are the units of work. Types: `main` (inline execution), `approval` (human decision card), `gate` (machine rework judgment), and `flow` composition (reference another graph via `use`, flattened at load). Key phase fields: `task` (the work order / card text), `skill` (execution skill), `agent` (priority hints for sub-agent dispatch), `channels` (context — global `context:` + per-phase additions), `jumps` (gate-only rework conditions), `routing` (approval-only branch-route actions), `dependsOn` (topological order).
+**Graph structure.** Phases are the units of work — type `main` only (inline execution + decision; subgraph composition via `use` is deleted — nested execution is the `template: router` sibling run). Conditional routing lives in the top-level `flow` block (mermaid-subset transition edges — `A -->|condition| B` labeled, `A --> B` sequence default): the graph is the interpretation authority, the engine matches the reported condition value mechanically against the transition table and activates the target (no match fails loudly — missed-condition guard; `branchTo`/`routing` are deleted). Rework/loop is declared as `flow` self-edges (`A -->|fail| A` — inline bounded loops, bound in the graph's constraints prose + retryCount). Key phase fields: `task` (the work order / card text), `skill` (execution skill), `agent` (priority hints for sub-agent dispatch), `channels` (context — global `context:` + per-phase additions), `dependsOn` (topological order). Canonical top-level key order: `name → description → $schema → version → interaction → flow → inventory → constraints → context → phases` (flow before inventory, constraints after inventory).
 
 **Built-in vs user graphs.** Built-in graphs ship in `packages/graph-scheduler/graphs/`, registered in `graphs/registry.json`. User graphs live in `.graph-scheduler/graphs/` (scaffolded by setup-atomic-workflow). Resolution is project-first: a project graph with the same name overrides a built-in.
 
@@ -302,10 +299,10 @@ Two packages:
 
 |Package|Role|
 |-|-|
-|**graph-scheduler**|Infrastructure. MCP Server (DAG execution engine, 9 tools) + built-in graphs shipped in the package.|
-|**graph-workflow**|Skill system. `atom-pilot` (lifecycle loop), `atom-phase-handler` (dispatch by phase type), entry and reference skills.|
+|**graph-scheduler**|Infrastructure. MCP Server (graph execution engine, 10 tools) + built-in graphs shipped in the package.|
+|**graph-workflow**|Skill system. `atom-pilot` (lifecycle loop), `atom-phase-handler` (single main dispatch), entry and reference skills.|
 
-The 10-workflow list lives in [Part 1](#all-built-in-workflows) with the out-of-the-box pitch.
+The 12-workflow list lives in [Part 1](#all-built-in-workflows) with the out-of-the-box pitch.
 
 ## Status & Roadmap
 
@@ -313,22 +310,22 @@ Atomic Workflow is in **alpha**.
 
 **Stable** (implemented, no planned breaking changes before v1.0):
 
-- graph-scheduler FSM engine and 9 MCP tools
-- `.taskflow.yaml` graph format and phase schema (main/approval/gate + flow composition, join modes, channels, agent hints, branch routes, run state)
+- graph-scheduler FSM engine and 10 MCP tools
+- workflow YAML graph format (schema-defined identity — any `.yaml`; `$schema` + `version` self-description headers) and phase schema (main type + top-level `flow` transitions, channels, agent hints, run state)
 - CRUD execution loop (`graph_start` → `graph_advance` → `graph_jump`, plus `graph_status` / `graph_list`)
 - setup-atomic-workflow project initialization
-- 10 built-in graphs and 16 built-in skills
+- 12 built-in graphs and 17 built-in skills
 
 **Active development** (may change):
 
-- More control-flow features — branch-route patterns, gate jump conditions
+- More control-flow features — branch-route patterns, rework decisions
 - More built-in graphs / workflows
 - Data maintenance tools (current `graph_clean_*` are minimal) — the MCP tool interface may change
 
 ### Roadmap
 
 - [ ] More out-of-the-box graphs — release-notes generation, spec drafting, estate workflow extensions
-- [ ] More token-saving strategies — headroom compression integration, leaner context channels, smaller graph overhead
+- [ ] More token-saving strategies — leaner context channels, smaller graph overhead
 - [ ] More convenient operations tooling — run status views, smarter history/cleanup
 - [ ] Wider platform support — cross-platform MCP registration
 
@@ -354,6 +351,6 @@ Bug reports and pull requests welcome. See [CONTEXT.md](CONTEXT.md) for the proj
 
 |Document|For|
 |-|-|
-|[packages/graph-scheduler/README.md](packages/graph-scheduler/README.md)|Graph format, all 9 MCP tools, built-in graphs, making graphs with graphs|
+|[packages/graph-scheduler/README.md](packages/graph-scheduler/README.md)|Graph format, all 10 MCP tools, built-in graphs, making graphs with graphs|
 |[packages/graph-workflow/README.md](packages/graph-workflow/README.md)|Skill system, full skill list, how skills drive graph execution|
 |[CONTEXT.md](CONTEXT.md)|Terminology reference (project glossary)|

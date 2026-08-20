@@ -1,6 +1,6 @@
 {
   "name": "ai-atomic-workflow",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "description": "Graph-Engineering for Real Engineers: Graphs define workflows; workflows build graphs. Based on mattpocock/skills.",
   "license": "MIT",
@@ -10,8 +10,9 @@
   ],
   "scripts": {
     "build": "yarn workspaces foreach --all --no-private run tsup",
-    "check": "yarn manifests && yarn typecheck && yarn lint && yarn format:check",
-    "check:ci": "yarn manifests && yarn typecheck && yarn lint && yarn format:check && yarn test",
+    "check": "yarn check:dist && yarn manifests && yarn typecheck && yarn lint && yarn format:check",
+    "check:ci": "yarn check:dist && yarn manifests && yarn typecheck && yarn lint && yarn format:check && yarn test",
+    "check:dist": "yarn build && vitest run packages/graph-fidelity/test/dist-smoke.test.ts packages/graph-fidelity-context/test/dist-smoke.test.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
@@ -33,7 +34,7 @@
     "prettier-plugin-packagejson": "^3.0.2",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.66.0",
+    "typescript-eslint": "^8.67.0",
     "vite": "^8.2.1",
     "vitest": "^4.1.10"
   },

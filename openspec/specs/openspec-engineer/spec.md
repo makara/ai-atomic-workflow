@@ -2,18 +2,18 @@
 
 ## Purpose
 
-Detailed implementation (spec synthesis → tickets → tdd → dual review → archive). Assets: `packages/graph-scheduler/graphs/openspec-engineer.taskflow.yaml`.
+Detailed implementation (spec synthesis → tickets → tdd → dual review → archive). Assets: `packages/graph-scheduler/graphs/openspec-engineer.yaml`.
 
 ## Requirements
 
 ### Requirement: openspec-engineer pipeline — detailed track full closure
 
-The `openspec-engineer` graph SHALL run the detailed implementation track for a change with a recorded ADR decision: spec synthesis, ticket splitting, tdd implementation, dual-axis review, bounded auto-rework gate, human acceptance, and lifecycle closure — in that order. Change resolution SHALL follow the same NEVER-ask rule as openspec-apply: `{args.changeName}` → single active change via `openspec list --json` → `blocked` with candidate list (no guess). The closure (`openspec-archive` node) SHALL dispatch atom-doc-lifecycle — reverse-validated archive + ADR decision-fold + index rebuild in one unit. The post-archive doc-maintenance flow SHALL NOT exist.
+The `openspec-engineer` graph SHALL run the detailed implementation track for a change with a recorded ADR decision: spec synthesis, ticket splitting, tdd implementation, dual-axis review, bounded rework decision, human acceptance, and lifecycle closure — in that order. Change resolution SHALL follow the same NEVER-ask rule as openspec-apply: `{args.changeName}` → single active change via `openspec list --json` → `blocked` with candidate list (no guess). The closure (`openspec-archive` node) SHALL dispatch atom-doc-lifecycle — reverse-validated archive + ADR decision-fold + index rebuild in one unit. The post-archive doc-maintenance flow SHALL NOT exist.
 
 #### Scenario: Detailed track executes end to end
 
 - **WHEN** the graph is started with a change name or a single active change exists and the change has a recorded ADR
-- **THEN** the graph SHALL produce a spec (to-spec), split it into tickets (to-tickets), implement tickets with tdd discipline (implement), review the implementation dual-axis against spec + tickets + ADR (implement-review), gate on `overall: fail` with bounded rework (implement-gate), present the human acceptance card (implement-accept), and close the change through atom-doc-lifecycle (openspec-archive)
+- **THEN** the graph SHALL produce a spec (to-spec), split it into tickets (to-tickets), implement tickets with tdd discipline (implement), review the implementation dual-axis against spec + tickets + ADR (implement-review), decide the bounded rework inline (implement-gate → main: task-text condition `overall: fail AND implement retryCount < 2` → rework target implement), present the human acceptance card (implement-accept), and close the change through atom-doc-lifecycle (openspec-archive)
 - **THEN** the change SHALL be archived only after reverse-validation passes (task ledger evidence matched by code evidence)
 - **AND** when the change created an ADR, the fold SHALL run in the same closure pass
 
@@ -26,7 +26,7 @@ The `openspec-engineer` graph SHALL run the detailed implementation track for a 
 #### Scenario: Review honors ADR + spec + tickets contract
 
 - **WHEN** implement-review audits the implementation
-- **THEN** it SHALL check ticket acceptance criteria, spec commitments, and ADR decision conformance — `overall: fail` output triggers the bounded gate rework (retry implement, `retryAttempt < 2`), never silent pass
+- **THEN** it SHALL check ticket acceptance criteria, spec commitments, and ADR decision conformance — `overall: fail` output triggers the bounded rework decision (retry implement, `retryCount < 2`), never silent pass
 
 #### Scenario: Blocked change resolution never asks
 
@@ -44,12 +44,12 @@ All channel references inside `openspec-engineer` SHALL resolve within the track
 
 #### Scenario: Retry and jump targets stay in-track
 
-- **WHEN** implement-gate eval retries or implement-accept jumps
+- **WHEN** implement-gate jump retries or implement-accept jumps
 - **THEN** targets SHALL be explicit and resolve to in-track nodes only (implement / to-spec) — cross-track re-routing is expressed via pilot `graph_jump`, never in-graph edges
 
 ### Requirement: openspec-engineer naming family consistency
 
-System documentation and skill descriptions SHALL reference the graph as `openspec-engineer` (never `openspec-detail` or `dev-pipeline`). Project registry files SHALL register `openspec-engineer` with the graph definition file `openspec-engineer.taskflow.yaml`.
+System documentation and skill descriptions SHALL reference the graph as `openspec-engineer` (never `openspec-detail` or `dev-pipeline`). Project registry files SHALL register `openspec-engineer` with the graph definition file `openspec-engineer.yaml`.
 
 #### Scenario: Docs and registry reference the settled name
 
@@ -105,7 +105,7 @@ The `implement-accept` decision card SHALL disclose the rework semantics of the 
 
 #### Scenario: No static atom-graph-spec channel
 
-- **WHEN** a validator scans openspec-engineer.taskflow.yaml
+- **WHEN** a validator scans openspec-engineer.yaml
 - **THEN** no phase SHALL declare `skill:atom-graph-spec` in channels
 
 ### Requirement: Archive phase reads verification.md via node: stream field

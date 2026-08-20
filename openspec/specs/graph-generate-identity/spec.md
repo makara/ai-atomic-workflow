@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Maker meta-graph identity made explicit — the graph name is the operation, graph top-level description, resolution source visible, pilot identity banner. Assets: `packages/graph-scheduler/graphs/graph-generate.taskflow.yaml`, `atom-pilot`.
+Maker meta-graph identity made explicit — the graph name is the operation, graph top-level description, resolution source visible, pilot identity banner. Assets: `packages/graph-scheduler/graphs/graph-generate.yaml`, `atom-pilot`.
 
 ## Requirements
 
 ### Requirement: Maker graph named graph-generate
 
-The maker journey graph SHALL be named `graph-generate` (file `graph-generate.taskflow.yaml`, registry entry `graph-generate`) — the name states the operation (generate a graph). The name `graph-workflow` SHALL NOT be used for the maker graph (retired — it collides with the skills package namespace and carries no operation semantics).
+The maker journey graph SHALL be named `graph-generate` (file `graph-generate.yaml`, registry entry `graph-generate`) — the name states the operation (generate a graph). The name `graph-workflow` SHALL NOT be used for the maker graph (retired — it collides with the skills package namespace and carries no operation semantics).
 
 #### Scenario: graph-generate resolves
 
@@ -23,7 +23,7 @@ The maker journey graph SHALL be named `graph-generate` (file `graph-generate.ta
 
 ### Requirement: Graph top-level description field
 
-Graph definitions SHALL accept a top-level `description` free-text field (no closed enum, no behavior branching). The description SHALL focus on the graph's purpose/effect — e.g. "Maker journey — produces .taskflow.yaml graphs". `graph_start` SHALL carry the description in its response; the pilot SHALL display it before the first node.
+Graph definitions SHALL accept a top-level `description` free-text field (no closed enum, no behavior branching). The description SHALL focus on the graph's purpose/effect — e.g. "Maker journey — produces .yaml workflow graphs". `graph_start` SHALL carry the description in its response; the pilot SHALL display it before the first node.
 
 #### Scenario: Description carried in graph_start
 
@@ -33,7 +33,7 @@ Graph definitions SHALL accept a top-level `description` free-text field (no clo
 #### Scenario: Pilot shows identity banner
 
 - **WHEN** the pilot receives the first node
-- **THEN** it SHALL display the run identity before execution: graph name, description, and resolution source (e.g. `Executing graph-generate (bundled) — Maker journey: produces .taskflow.yaml graphs`)
+- **THEN** it SHALL display the run identity before execution: graph name, description, and resolution source (e.g. `Executing graph-generate (bundled) — Maker journey: produces .yaml workflow graphs`)
 
 #### Scenario: Description optional
 
@@ -53,3 +53,17 @@ When a graph produces artifacts (maker journey), the pilot SHALL state the two-l
 
 - **WHEN** the pilot starts a maker-journey run
 - **THEN** the user SHALL see the executed graph name + description before any node executes — no post-hoc discovery
+
+### Requirement: Identity-field spec coverage verified at change archive
+
+Changes that extend or alter the `graph_start` response surface (identity fields such as `description`, `resolvedFrom`, `resolvedPath`, `problems`) SHALL update the graph-generate-identity spec in the same change. The archive step SHALL verify identity-field spec coverage and SHALL report the gap when a changed identity field is not recorded in this spec — archiving SHALL NOT proceed silently over the gap.
+
+#### Scenario: problems field recorded
+
+- **WHEN** a change adds a field to the graph_start response
+- **THEN** the change's delta spec for graph-generate-identity records the field and its semantics
+
+#### Scenario: Archive blocks uncovered identity field
+
+- **WHEN** the archive step finds a graph_start response field not recorded in graph-generate-identity
+- **THEN** archiving SHALL report the gap and require the delta before proceeding

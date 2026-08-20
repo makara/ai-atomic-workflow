@@ -2,184 +2,144 @@
 
 ## Purpose
 
-Platform primitives — task()/approval()/interview()/judge() + graph tool detection (platform layer). Asset: `packages/graph-workflow/skills/atom-kernel/SKILL.md`.
+Platform primitives — task()/approval()/interview()/todo() + graph tool detection (platform layer). Asset: `packages/graph-workflow/skills/atom-kernel/SKILL.md`.
 
 ## Requirements
 
 ### Requirement: task() — sub-agent dispatch
 
-System SHALL provide `task()` for dispatching sub-agents with a 4-field contract. Tasks SHALL be batched in `tasks[]` with shared `context`. Each sub-agent receives self-contained instructions with explicit acceptance criteria. The contract SHALL describe dispatch behavior without naming a platform tool. Platform spellings SHALL live in a single spelling table within atom-kernel: OMP maps `task()` to the `task` tool; other platforms map their equivalents.
+MODIFIED: the subgraph-delegation structured-output-package paragraph stays removed (no boundary batch, no structured output package — round-12 deletion stands). Node-level `task()` dispatch and the receipt contract (status + declared fields + output-location pointer(s) + artifact references, compressed) remain unchanged. The agent-hints consumption note is restored: when dispatching sub-agents for a node, the executing agent SHALL prefer the agent types declared in the node's `## Agent hints` block (priority-ordered — first available wins), falling back to the platform default when the declared types are unavailable or the node declares none. The receipt contract carries no agent fact (Card 9 unchanged).
 
-#### Scenario: Single task dispatches sub-agent
+#### Scenario: Node-level task dispatch
 
-- **WHEN** `task({ i: "Running lint", context: "# Constraints: use bun", tasks: [{ name: "LintCheck", task: "# Target: src/\n# Change: run linter\n# Acceptance: zero errors" }] })` is called
-- **THEN** a sub-agent SHALL be spawned with the specified task instructions
-- **THEN** the sub-agent SHALL receive the shared context as background
-- **THEN** the agent ID SHALL be returned for result retrieval via `agent://<id>`
+- **WHEN** a main node dispatches platform sub-agents via task()
+- **THEN** the dispatch SHALL follow the standard task() contract with a compact structured receipt
+- **AND** the dispatch SHALL prefer agent types from the node's `## Agent hints` block (priority-ordered, first available wins) when present
 
-#### Scenario: Batched tasks dispatch in parallel
+#### Scenario: No subgraph batch surface
 
-- **WHEN** `task()` receives multiple items in `tasks[]`
-- **THEN** all sub-agents SHALL be spawned concurrently
-- **THEN** shared `context` SHALL apply to every task in the batch
+- **WHEN** a composed subgraph's members execute
+- **THEN** they SHALL dispatch through the advance loop as peer nodes — no batch, no structured output package
 
-#### Scenario: 4-field contract embedded in sub-agent task
+#### Scenario: No hint — default applies
 
-- **WHEN** a sub-agent task includes the 4-field contract
-- **THEN** `target-skill` SHALL name the skill the sub-agent loads by plain name (required)
-- **THEN** `auxiliary-skills` SHALL list extra skills to load, or `[]` if none (required)
-- **THEN** `target-skill-input` SHALL describe what the skill works on — spec, ticket, scope (optional)
-- **THEN** `input-paths` SHALL list context files to read, or `[]` if none (optional)
-
-#### Scenario: Routing modes control handoff
-
-- **WHEN** task completes in default handoff mode — agent SHALL verify results and present a `## Decision Request` checkpoint card for user routing
-- **WHEN** task completes in skip-checkpoint mode — agent SHALL verify and return to caller directly; caller SHALL checkpoint later
-
-#### Scenario: Platform spelling table maps contract to tool
-
-- **WHEN** a platform does not expose the OMP `task` tool
-- **THEN** atom-kernel's spelling table SHALL document that platform's equivalent mapping
-- **AND** skills SHALL NOT need modification
+- **WHEN** a main node declares no `agent` hints
+- **THEN** the dispatch SHALL use the platform default agent type without warning
 
 ### Requirement: question() — single-decision UI
 
-System SHALL provide `approval()` as the single mode-aware decision UI; the former `question()` primitive is absorbed into it. Eight format rules govern structure, and a Decision Card maps approval fields to approval routing actions. Platform spellings SHALL live in the spelling table.
+MODIFIED：approval() 保留为单形态决策 UI（卡片 + 推荐标记 + 自定义输入），移除 mode 维度。question() 吸收史保留（ADR 0133 历史），运行语义中无 mode 分发。main 分支路由场景：`routingActions`（continue|retry|jump）映射为卡片选项，选择结果经 branchTo 驱动路由/节点激活。auto-mode 场景名保留为历史标记（run mode 已移除，ADR 0215），场景体确认无 auto 执行路径。
 
 #### Scenario: question presents single decision
 
-- **WHEN** `approval({ header, options, custom: true })` is called with run mode manual or absent (the former question() behavior)
-- **THEN** the user SHALL see a decision card with the header as topic, options as routing actions
-- **THEN** exactly one decision SHALL be presented per call
+- **WHEN** `approval({ header, options, custom: true })` 被调用
+- **THEN** 用户 SHALL 看到决策卡（header 为主题，options 为选项）——无 mode 条件
 
 #### Scenario: Eight format rules enforced
 
-- **WHEN** `approval()` presents a card
-- **THEN** Rule 1: header SHALL be a noun phrase ≤30 chars — topic, not outcome
-- **THEN** Rule 2: first option SHALL be the recommended answer, label as concrete answer phrase
-- **THEN** Rule 3: description SHALL be single line, may note next step
-- **THEN** Rule 4: pre-call text SHALL have background + option meanings + recommendation — three parts, same message
-- **THEN** Rule 5: body SHALL be forbidden — no extra content after the call
-- **THEN** Rule 6: `custom` SHALL be mandatory `true`
-- **THEN** Rule 7: one question per call
-- **THEN** Rule 8: no control characters (`\r`, `\t`, `\n`) in any field
+- **WHEN** `approval()` 呈现卡片
+- **THEN** 8 条格式规则生效（header 名词短语 ≤30 字符等）——无 mode 相关规则
 
 #### Scenario: Auto mode executes the recommendation
 
-- **WHEN** `approval()` is called with run mode auto and a recommendation is provided
-- **THEN** the recommendation SHALL execute without a card, and the decision SHALL be recorded with note `'run mode: auto'` and a rationale
+- **WHEN** approval() 被调用（run mode 已移除）
+- **THEN** 无 auto 执行路径——推荐仅标记为默认选项，卡片恒呈现，用户选择返回
 
 #### Scenario: Auto mode without recommendation presents a card
 
-- **WHEN** `approval()` is called with run mode auto and no recommendation
-- **THEN** a card SHALL be presented — no action is ever guessed
+- **WHEN** approval() 被调用（run mode 已移除）
+- **THEN** 卡片恒呈现——不存在"auto 无推荐"条件分支，任何上下文均呈现卡片
 
 #### Scenario: Custom input carries free-text semantics
 
-- **WHEN** user provides free-text via `custom: true`
-- **THEN** the input SHALL be recorded as `note` in the decision
-- **THEN** `note` semantics vary by action: `continue` → recorded remark, `retry` → inject into upstream context, `jump` → potential target override
+- **WHEN** 用户经 `custom: true` 提供自由文本
+- **THEN** 输入 SHALL 记录为决策的 `note`
 
 #### Scenario: Decision Card maps to question fields
 
-- **WHEN** an approval phase defines routing actions
-- **THEN** `topic` SHALL map to `header`
-- **THEN** `routingActions[].label` SHALL map to `options[].label`
-- **THEN** `routingActions[].description` SHALL map to `options[].description`
-- **THEN** `routingActions[].action` SHALL drive decision routing (continue/retry/jump/end)
-- **THEN** pre-call text SHALL be the pre-call text
+- **WHEN** main 节点声明 routing actions
+- **THEN** `topic` SHALL 映射到 `header`；`routingActions` 映射到选项
 
-### Requirement: judge() — one-shot judgment primitive
+#### Scenario: Branch-route options from main routingActions
 
-System SHALL provide `judge()` as a one-shot LLM judgment primitive: a single lightweight-model judgment returning a constrained answer (e.g. `true`/`false`), used for when-guard and gate-eval evaluation. `judge()` SHALL fail conservatively — an ambiguous when-guard result SHALL execute the phase, and a gate-eval no-match SHALL route downstream. Platform spellings SHALL live in the spelling table (OMP: `completion(…, model="smol")`); skills SHALL invoke the `judge()` contract, never a platform spelling.
-
-#### Scenario: when-guard judgment uses judge()
-
-- **WHEN** atom-phase-handler evaluates a when guard
-- **THEN** it SHALL issue a `judge()` call per the kernel contract
-- **AND** no direct `completion(…, model="smol")` spelling SHALL appear in the handler
-
-#### Scenario: Gate eval uses judge()
-
-- **WHEN** atom-phase-handler evaluates gate eval conditions
-- **THEN** the judgment SHALL be issued via the `judge()` contract
-- **AND** judgment failure SHALL degrade conservatively — no-match routes downstream, ambiguous when-guard executes
+- **WHEN** main 节点声明 routing.actions
+- **THEN** 卡片选项 = routingActions（continue|retry|jump）；选中 continue 分支 → branchTo 激活路由/节点；选中 retry/jump → graph_jump
 
 ### Requirement: interview() — multi-turn consensus
 
-System SHALL define `interview()` as a behavior contract for multi-round confirmation conversations with an explicit participation strategy. The contract SHALL stay decoupled from platform spellings — all questions SHALL go through the `approval()` contract WITHOUT recommendation (a card appears in any run mode — interviews are never auto-gated). Six behavior rules govern the confirmation process. `interview()` is NOT a callable function — it is implemented by the agent using `approval()` one turn at a time.
-
-Confirmation flow: confirm goal → decision rounds → `{ decisions }`. The former solve mode is retired as a contract mode: when the goal produces a design/solution, the caller composes research as a flow step and calls interview() for confirmation rounds only; `research`/`design` SHALL NOT be contract parameters.
-
-`participation` SHALL be an explicit caller-declared strategy on every call: `'as-needed'` (context fully covers the goal → return consensus directly; the former zero-question degradation, now an explicit strategy, never inferred) or `'mandatory'` (at least one question round regardless of context coverage). Default SHALL be stated in the contract; absence never auto-infers from context.
-
-Six rules: (1) comprehensive coverage — every aspect of the goal topic covered; (2) fact lookup — discoverable facts looked up, never asked; (3) recommendation first — recommended answer first option, derived from context analysis; (4) dependency resolution — prerequisite before dependent; (5) single question per turn via approval() without recommendation; (6) shared understanding gate — no action until the user confirms shared understanding.
+MODIFIED: interview() 契约不变（participation 显式、卡片恒呈现、永不自动跳过）。作为 R2 决策权威的 main 节点内联确认载体。direct-end 条款改为**内容状态相关**: 门控内容为空（nothing to adopt / accept / confirm / review）时，最终确认卡 SHALL 呈现「无内容可采纳（推荐）」与「结束本轮（direct end）」两选项; 门控内容非空时，最终确认卡 SHALL 以采纳/确认动作为推荐选项、声明的 direct-end label 为备选 — 「无内容可采纳」措辞 SHALL NOT 在内容非空时出现。任一 direct-end 选项（无内容可采纳 或 label）被选择 SHALL 直接结束本轮（节点报告 `direct_end: true` → pilot 以 `end` 决策推进 `graph_advance` — run 经自然排空完成（`completed`），绝不调用 `graph_force_end`、绝不正常继续循环）; direct-end 是最终卡上的附加选项，永不替代强制轮次。
 
 #### Scenario: interview conducts multi-turn consensus
 
-- **WHEN** agent implements `interview({ goal: "Confirm database strategy", context: "...", participation: "mandatory" })`
-- **THEN** every aspect of the goal topic SHALL be covered — comprehensive coverage, no skipped dimensions
-- **THEN** each branch of the decision tree SHALL be exhausted before stopping
-- **THEN** dependencies between decisions SHALL be resolved in order — prerequisite before dependent
-- **THEN** exactly one question SHALL be asked per turn via `approval()` (no recommendation)
-- **THEN** at least one question round SHALL occur (mandatory participation)
+- **WHEN** agent 实现 `interview({ goal, context, participation })`
+- **THEN** 目标主题的每个方面 SHALL 被覆盖——全面覆盖，无跳过维度
 
 #### Scenario: Interview turn cards in auto mode
 
-- **WHEN** an interview turn presents in auto mode
-- **THEN** a card SHALL appear — no recommendation exists, so the mode never gates the interview
+- **WHEN** 一个 interview 轮次呈现
+- **THEN** 卡片 SHALL 出现——无推荐，轮次永不自动跳过
 
 #### Scenario: Recommendation drives each question
 
-- **WHEN** agent presents a decision question
-- **THEN** the recommended answer SHALL be the first option
-- **THEN** the recommendation SHALL be derived from context analysis
+- **WHEN** agent 呈现决策问题
+- **THEN** 推荐答案 SHALL 为第一选项
 
 #### Scenario: Fact lookup avoids unnecessary questions
 
-- **WHEN** a fact is discoverable from the environment (filesystem, tools, skills)
-- **THEN** the agent SHALL look it up — not ask the user
+- **WHEN** 事实可从环境发现（文件系统、工具、skills）
+- **THEN** agent SHALL 查证——不问用户
 
 #### Scenario: Goal consensus gate
 
-- **WHEN** `interview()` starts
-- **THEN** the agent SHALL first confirm shared understanding of the goal itself
-- **THEN** the interview SHALL NOT proceed until goal consensus is reached
+- **WHEN** `interview()` 启动
+- **THEN** agent SHALL 首先确认目标本身的共享理解
 
 #### Scenario: Zero-question degradation
 
-- **WHEN** interview() is called with `participation: "as-needed"` and context already covers all aspects of the goal and no clarification is needed
-- **THEN** `interview()` SHALL return consensus directly without asking questions
-- **THEN** this SHALL be the explicit as-needed strategy — never an inference from context
+- **WHEN** interview() 以 `participation: "as-needed"` 调用且 context 已覆盖目标全部方面、无需澄清
+- **THEN** `interview()` SHALL 直接返回共识（不问问题）
 
 #### Scenario: Returns structured consensus
 
-- **WHEN** interview completes
-- **THEN** the return value SHALL be `{ decisions: [{ decision, rationale }] }` — structured summary of agreed points
+- **WHEN** interview 完成
+- **THEN** 返回值 SHALL 为 `{ decisions: [{ decision, rationale }] }`
 
 #### Scenario: Design flows compose research outside interview
 
-- **WHEN** the caller composes a design flow (research → think → interview confirmation rounds) for a design goal
-- **THEN** the flow SHALL be: confirm(goal) → research → think → interview(confirmation) → repeat until accepted
-- **THEN** goal consensus SHALL be confirmed before any work begins
-- **THEN** research/think run outside interview() — interview() confirms decisions only (solve mode retired, ADR 0154)
+- **WHEN** 调用者组合设计流（research → think → interview 确认轮次）
+- **THEN** 流 SHALL 为：confirm(goal) → research → think → interview(confirmation) → 重复至接受
 
 #### Scenario: Rejection re-thinks affected decisions
 
-- **WHEN** user rejects a design decision during interview rounds
-- **THEN** the caller SHALL return to think, revise design, and re-interview affected decisions only
-- **THEN** confirmed decisions SHALL NOT be re-asked
+- **WHEN** 用户在某 interview 轮次拒绝设计决策
+- **THEN** 调用者 SHALL 回到 think，修订设计，仅重新 interview 受影响的决策
 
 #### Scenario: Caller assembles the design output
 
-- **WHEN** all design decisions are confirmed
-- **THEN** the caller SHALL assemble the design output (goal/design/decisions) — interview() returns `{ decisions: [{ decision, rationale }] }` only
+- **WHEN** 全部设计决策确认
+- **THEN** 调用者 SHALL 组装设计输出——interview() 仅返回 `{ decisions }`
 
 #### Scenario: Mandatory participation never zeroes out
 
-- **WHEN** interview() is called with `participation: "mandatory"`
-- **THEN** at least one question round SHALL be presented regardless of context coverage
-- **THEN** no zero-question degradation SHALL apply
+- **WHEN** interview() 以 `participation: "mandatory"` 调用
+- **THEN** 至少一轮问题 SHALL 出现——永不零问题降级
+
+#### Scenario: Direct-end option ends the round
+
+- **WHEN** 声明 direct-end 的 interview 走到最终确认卡 — 门控内容为空（「无内容可采纳（推荐）」+「结束本轮（direct end）」）或门控内容非空（采纳/确认动作推荐 + 声明的 label 备选）
+- **THEN** 任一 direct-end 选项被选择 SHALL 记录 `direct_end: true`，pilot 以 `end` 决策推进 `graph_advance` — run 经自然排空完成（`completed`），绝不调用 `graph_force_end`、绝不正常 advance
+
+#### Scenario: Direct end never replaces a mandatory turn
+
+- **WHEN** interview() 以 `participation: "mandatory"` 调用且声明 direct-end
+- **THEN** direct-end 选项 SHALL 仅为最终卡上的附加选择——强制轮次照常进行
+
+#### Scenario: Non-empty content card recommends the adoption action
+
+- **WHEN** 声明 direct-end 的 interview 门控内容非空（如刚确认的 scope/idea_goal）
+- **THEN** 最终确认卡 SHALL 以采纳/确认动作为推荐选项、声明的 direct-end label 为备选
+- **THEN** 「无内容可采纳」措辞 SHALL NOT 出现在卡上
+- **THEN** 选择 label SHALL 直接结束本轮; 选择采纳动作 SHALL 正常推进
 
 ### Requirement: Primitives triangle — layered composition
 
@@ -203,13 +163,12 @@ The primitives SHALL form a layered dependency where each level builds on the on
 
 ### Requirement: atom-kernel SHALL NOT declare loading writing-great-skills
 
-atom-kernel is a runtime-primitives reference skill (platform spellings, graph-scheduler tool detection, judge/task/approval/interview contracts). It SHALL NOT declare loading skill `writing-great-skills` — an authoring-format skill with no content dependency on the kernel. The runtime-constraints header SHALL carry at most the `**Layer**` declaration; loading declarations SHALL be limited to skills the kernel body actually consumes.
+atom-kernel is a runtime-primitives reference skill (platform spellings, graph-scheduler tool detection, task/approval/interview contracts). It SHALL NOT declare loading skill `writing-great-skills` — an authoring-format skill with no content dependency on the kernel. The runtime-constraints header SHALL carry at most the `**Layer**` declaration; loading declarations SHALL be limited to skills the kernel body actually consumes. (judge() removed from the contract list — gate type removed, ADR 0216.)
 
 #### Scenario: Kernel runtime constraints contain no authoring skill
 
-- **WHEN** atom-kernel SKILL.md is inspected for loading declarations
-- **THEN** `writing-great-skills` SHALL NOT appear in its runtime-constraints header
-- **AND** the header SHALL retain `**Layer**: atom — runtime primitives.`
+- **WHEN** reading atom-kernel's runtime-constraints header
+- **THEN** no authoring-format skill (writing-great-skills) appears in the loading declarations
 
 ### Requirement: atom-kernel SHALL keep conditional research loading
 
@@ -231,7 +190,7 @@ The interview() behavior-contract section SHALL NOT list upstream skills (grilli
 
 ### Requirement: Spelling table SHALL include the opencode platform row
 
-atom-kernel §Platform Spellings SHALL carry an opencode row covering all three primitives: `task()` maps to the Task tool with agent vocabulary `build`/`plan`/`general`/`explore`/`scout` and platform default `general`; `approval()` maps to the platform's decision-UI primitive; `judge()` maps to the platform's one-shot completion primitive. The row SHALL also name the platform's default agent type for hint fallback.
+atom-kernel §Platform Spellings SHALL carry an opencode row covering the primitives that exist: `task()` maps to the Task tool with agent vocabulary `build`/`plan`/`general`/`explore`/`scout` and platform default `general`; `approval()` maps to the platform's decision-UI primitive. The row SHALL NOT list `judge()` (removed with the gate type) and SHALL name the platform's default agent type for hint fallback.
 
 #### Scenario: opencode row present
 
@@ -245,13 +204,13 @@ atom-kernel §Platform Spellings SHALL carry an opencode row covering all three 
 
 ### Requirement: Agent-hint availability SHALL be judged against the spellings-table vocabulary
 
-The §Agent Hints consumption rule SHALL define "available" as membership in the current platform's agent vocabulary as listed in §Platform Spellings — not environment intuition. The fallback line SHALL reference the spellings table instead of a hardcoded `task`.
+MODIFIED: the agent-hints consumption surface is restored — the phase `agent` field exists again on peer-level main phases and `## Agent hints:` blocks are injected at dispatch when `node.agent` is present. Node-level sub-agent dispatch SHALL prefer the hinted agent types (priority-ordered — first available wins), falling back to the platform default or the agent type named in the node's task text. Composing (use) phases never carry `agent` (schema-enforced).
 
-#### Scenario: Availability is vocabulary membership
+#### Scenario: Agent-hint injection restored
 
-- **WHEN** a skill evaluates hints `[reviewer, explore, task, general]`
-- **THEN** availability of each entry SHALL be checked against the current platform's spellings-table vocabulary
-- **AND** the rule text SHALL point at the spellings table as the vocabulary source
+- **WHEN** a dispatched main node's NodeDetail carries `agent`
+- **THEN** a `## Agent hints:` block SHALL be assembled (priority-ordered — first available wins)
+- **AND** the executing agent SHALL prefer those types when dispatching sub-agents via task()
 
 ### Requirement: Platform default fallback SHALL resolve from the spellings table
 
@@ -270,13 +229,14 @@ A skill dispatching sub-agents with no available hint SHALL fall back to the pla
 
 ### Requirement: Tool detection SHALL live in atom-kernel
 
-The graph-scheduler MCP tool-name detection rules (substring match for graph_start/graph_advance/graph_status/graph_list/graph_force_end/graph_jump/graph_init/graph_clean_completed/graph_clean_all) SHALL be inlined in atom-kernel — the platform-primitive layer, available to every graph-execution entry point (users are not required to run atom-pilot). The standalone `atom-tool-detection` skill SHALL be removed; atom-pilot and atom-phase-handler SHALL reference atom-kernel (already loaded as platform primitive), never a standalone detection skill.
+MODIFIED: the graph-scheduler MCP tool-name detection SHALL be the exact-name set — `graph_start` / `graph_advance` / `graph_status` / `graph_list` / `graph_assets` / `graph_force_end` / `graph_jump` / `graph_init` / `graph_clean_completed` / `graph_clean_all` — never substring matching. The detection block SHALL be inlined in atom-kernel — the platform-primitive layer, available to every graph-execution entry point (users are not required to run atom-pilot) — and SHALL contain only the exact-name list (return shapes single-sited in atom-pilot §MCP Tool Reference). The standalone `atom-tool-detection` skill SHALL NOT exist; atom-pilot and atom-phase-handler SHALL reference atom-kernel (already loaded as platform primitive). The substring-matching wording SHALL NOT appear anywhere in the skill family.
 
 #### Scenario: Kernel detects tools inline
 
 - **WHEN** any graph-execution entry point needs graph-scheduler tool names
-- **THEN** it SHALL apply the detection rules from atom-kernel's body
+- **THEN** it SHALL apply the exact-name detection list from atom-kernel's body
 - **AND** no `atom-tool-detection` reference SHALL exist anywhere
+- **AND** no substring-matching rule SHALL be stated in any skill body
 
 ### Requirement: atom-kernel SHALL drop the 4-Field Contract
 
@@ -309,63 +269,18 @@ atom-kernel §Platform Spellings SHALL include a `todo()` primitive row defining
 - **THEN** it SHALL use the platform's native todo tooling directly
 - **AND** the `todo()` spelling SHALL NOT be required for in-node operations
 
-### Requirement: High-Level Tool Registry section in atom-kernel
-
-MODIFIED: `atom-kernel` is the sole home of the High-Level Tool Registry and the tool schema tables: the execution contract for main-phase work. The section defines the step as a registered tool call `{ intent, tool, args, bound }`, the bounded evidence loop (default 3, evidence-gap failure), fault tolerance, the two-tier structure, the write-verify obligation, and the operation-class closed set. The operation-class vocabulary SHALL be single-sourced: the engine constant `HLT_OPERATION_CLASSES` is the machine source for phase `operations:` validation, the kernel prose class table SHALL agree with the constant in both directions (a test pins prose ∩ constant = constant), and the plugin tool map SHALL agree (usage-constraint pin test). The Registry SHALL record vocabulary correspondence: the HLT registered tool call IS the execution semantics of the project-name term `Atom` (historical "graph phase" meaning retired).
-
-#### Scenario: Step shape declared once
-
-- **WHEN** a main-phase execution contract is needed
-- **THEN** the High-Level Tool Registry section in atom-kernel defines the step as a registered tool call `{ intent, tool, args, bound }` and no other skill defines a competing step shape
-
-#### Scenario: Evidence loop bounded
-
-- **WHEN** a step's evidence predicate is unsatisfied
-- **THEN** the read loop re-enters only while loop count is below the bound (default 3); exceeding the bound fails the step with an evidence-gap list
-
-#### Scenario: Registry entry supplies execution contract
-
-- **WHEN** a step's execution contract is needed
-- **THEN** the tool's registry entry (contract / chain / enforcement / tier views) supplies I/O, verify + conditional index obligations, and the two-tier structure (core = serena single-tool, utility = optional) — no second source exists
-
-#### Scenario: Verify loop mandatory
-
-- **WHEN** a step applies writes
-- **THEN** the step verifies per the registry `Entry: verify` (serena diagnostics + re-read) and records verification evidence before reporting success
-- **AND** register_edit is recorded while jcodemunch is in use, else `n/a: jcodemunch not in use`
-
-#### Scenario: Kernel points to the registry home
-
-- **WHEN** atom-kernel's registry section is read
-- **THEN** it contains the static scenario table and pointers to HLT-REGISTRY.md for the full registry — no duplicated rows
-
-#### Scenario: Discipline described as signal distribution
-
-- **WHEN** a main dispatch assembles the registry injection context
-- **THEN** discipline mechanics reference signal distribution (zero denial) — no enforcement-by-denial language appears
-
-#### Scenario: Operation class closed set pinned
-
-- **WHEN** an operation class is added to or removed from `HLT_OPERATION_CLASSES`
-- **THEN** the prose class table SHALL list exactly the same set (pin test fails on drift) and the plugin tool map SHALL stay within the set (mirror pin test fails on drift)
-
-#### Scenario: Glossary correspondence resolves
-
-- **WHEN** a reader looks up `Atom`
-- **THEN** the term SHALL resolve to the HLT registered tool call (execution semantics), with the historical graph-phase meaning marked retired
-
 ### Requirement: Atomic Step Protocol chapter removed
 
-The `§Atomic Step Protocol` chapter (step shape / evidence loop / execution-end summary / fault tolerance / verify loop / reference boundaries) is deleted from atom-kernel; its residue is the tool-call definition inside the §High-Level Tool Registry intro (the execution unit is a registered tool call `{ intent, tool, args, bound }` — no step layer exists). No skill, channel, constraint, or test references the chapter.
+The `§Atomic Step Protocol` chapter and its residue (the tool-call definition inside the former §High-Level Tool Registry intro) SHALL be deleted from atom-kernel. No skill, channel, constraint, or test SHALL reference the chapter.
 
 #### Scenario: No orphan reference
 
-- **WHEN** the atom-kernel SKILL.md is scanned
-- **THEN** no `# Atomic Step Protocol` chapter heading exists
+- **WHEN** the skills package is scanned for references to the Atomic Step Protocol chapter
+- **THEN** no live inbound references exist (outside frozen ADR/spec history text)
 
 ### Requirement: atom-atomic-step skill removed
 
-The standalone `atom-atomic-step` skill is deleted from the skills package; its content is superseded by the High-Level Tool Registry (ADR 0119). No skill, channel, constraint, or test references the deleted skill.
+The standalone `atom-atomic-step` skill is deleted from the skills package; its content is superseded by atom-kernel tool discipline (ADR 0119 decision history lives in the ADR). No skill, channel, constraint, or test SHALL reference the deleted skill.
 
 #### Scenario: No orphan reference
 
@@ -374,7 +289,7 @@ The standalone `atom-atomic-step` skill is deleted from the skills package; its 
 
 ### Requirement: atom-mcp-contract skill removed
 
-The standalone `atom-mcp-contract` skill is deleted from the skills package; its content (High-Level Tool Registry, tool schema tables, schema-first protocol) lives in atom-kernel. The atom-phase-handler auxiliary-skills constant lists exactly one reference skill — atom-kernel. No skill, channel, constraint, or test references the deleted skill.
+The standalone `atom-mcp-contract` skill is deleted from the skills package; its content (tool schema tables, schema-first protocol) lives in atom-kernel. The atom-phase-handler auxiliary-skills constant SHALL list exactly one reference skill — atom-kernel. No skill, channel, constraint, or test SHALL reference the deleted skill.
 
 #### Scenario: No orphan reference
 
@@ -384,16 +299,16 @@ The standalone `atom-mcp-contract` skill is deleted from the skills package; its
 #### Scenario: Single auxiliary reference
 
 - **WHEN** any node of any graph is dispatched
-- **THEN** the kernel reference content (primitives + registry + schemas) is present in the injected context via the single auxiliary constant
+- **THEN** the kernel reference content (primitives + tool schemas) is present in the injected context via the single auxiliary constant
 
 ### Requirement: Constraints and docs re-point
 
-`.graph-scheduler/constraints.md` references `atom-kernel §High-Level Tool Registry` for MCP tool usage and main-node execution; the built-in skill inventory SHALL be sourced from packages state (packages/graph-workflow/skills) with no atom-atomic-step or atom-mcp-contract entry, and the built-in skill count SHALL reflect the directory (14). CONTEXT.md SHALL be the project glossary (domain-modeling CONTEXT-FORMAT.md) — glossary-only, no architecture-reference pointer to any external file.
+`.graph-scheduler/constraints.md` references atom-kernel for MCP tool usage and main-node execution; the built-in skill inventory SHALL be sourced from packages state (packages/graph-workflow/skills) with no atom-atomic-step or atom-mcp-contract entry, and the built-in skill count SHALL reflect the directory as-read. CONTEXT.md SHALL be the project glossary — glossary-only, no architecture-reference pointer to any external file.
 
 #### Scenario: Constraint rule valid
 
-- **WHEN** a main node loads project constraints
-- **THEN** the MCP/execution rule names a skill that exists and is injected (atom-kernel, auxiliary layer)
+- **WHEN** `.graph-scheduler/constraints.md` is scanned
+- **THEN** it carries the MCP tool usage and main-node execution discipline reference (plain atom-kernel pointer — no §High-Level Tool Registry section exists to cite)
 
 #### Scenario: CONTEXT.md accurate
 
@@ -403,9 +318,8 @@ The standalone `atom-mcp-contract` skill is deleted from the skills package; its
 #### Scenario: Technical overview accurate
 
 - **WHEN** built-in skills are inventoried
-- **THEN** the count (14) reflects packages/graph-workflow/skills directory state
+- **THEN** the count reflects packages/graph-workflow/skills directory state
 - **AND** atom-atomic-step and atom-mcp-contract are absent from the inventory
-- **AND** the execution-model paragraph references atom-kernel §High-Level Tool Registry
 - **AND** no external docs file is read as the inventory source
 
 ### Requirement: ASP spec files removed
@@ -435,7 +349,7 @@ The atom-kernel §Platform Spellings table SHALL document the todo() state-machi
 
 ### Requirement: Tool-call contract schemas in atom-kernel
 
-atom-kernel SHALL document, for each mounted MCP server (serena, jcodemunch, headroom, graph-scheduler), the exact parameter contracts of its high-frequency tools: parameter names, required flags, value domains, semantics, and a canonical invocation example. It SHALL also define the schema-first protocol (parameter names never guessed; contract-missing tool → read full `xd://<tool>` docs before first call) and the failure-recovery chain (validation failure → read schema → repair → retry once → degrade per the registry chain).
+MODIFIED: atom-kernel SHALL document, for each mounted MCP server (serena, jcodemunch, graph-scheduler), the exact parameter contracts of its high-frequency tools: parameter names, required flags, value domains, semantics, and a canonical invocation example. Headroom SHALL be removed from the mounted-server list (the headroom MCP server is the graph-fidelity-context module's internal dependency, not a kernel-documented surface). It SHALL also define the schema-first protocol (parameter names never guessed; contract-missing tool → read full `xd://<tool>` docs before first call) and the failure-recovery chain (validation failure → read schema → repair → retry once → degrade per the registry chain).
 
 #### Scenario: Contract exists for a high-frequency tool
 
@@ -464,32 +378,16 @@ After any file modification while jcodemunch is in use, the agent MUST call jcod
 
 ### Requirement: Legacy mcp-* skills removed
 
-The legacy `skills/mcp-serena`, `skills/mcp-jcodemunch`, and `skills/mcp-headroom` MUST NOT exist; their capability is fully absorbed by atom-kernel tool schemas.
+MODIFIED: the legacy `skills/mcp-serena` and `skills/mcp-jcodemunch` MUST NOT exist; their capability is fully absorbed by atom-kernel tool schemas. `skills/mcp-headroom` is removed from the enumeration — no legacy headroom instruction skill is referenced anywhere.
 
 #### Scenario: Legacy skills absent
 
 - **WHEN** the repository is scanned for skills
-- **THEN** no `mcp-*` skill directories exist under `skills/`
-
-### Requirement: HLT Registry section lean
-
-The High-Level Tool Registry section SHALL stay under ~120 lines (measured post-trim: 113); every normative fact defined once; theory/rationale prose prohibited.
-
-#### Scenario: single plane-down statement
-
-Given the atom-kernel skill file When searching for the plane-down semantics (plane unavailable → fail loudly naming the dependency) Then it appears exactly once, in the Two-plane structure block, and Fault Tolerance contains no duplicate
-
-#### Scenario: no discipline-marker repetition
-
-Given the atom-kernel skill file When searching for "discipline" / "signal distribution" lines in registry entries Then there is at most one table-intro line stating the signal-distribution pointer, not per-entry marker lines
-
-#### Scenario: registry validation single-sited
-
-Given the atom-kernel skill file When searching for the registry validation rules (four views) Then they appear once, in the Registry Entries views table, with no restating paragraph
+- **THEN** no `mcp-*` skill directories exist under `skills/` (mcp-headroom never referenced)
 
 ### Requirement: Tool Schemas section lean
 
-The Tool Schemas section SHALL stay under ~280 lines (measured post-trim: 274; 8 high-use tables kept per design); tools with zero references in the skill set or graph flows SHALL NOT carry schema blocks.
+MODIFIED: the Tool Schemas section SHALL stay under ~280 lines; the kept high-use tables are serena / jcodemunch / graph-scheduler — the headroom table is removed from the kept set (7 tables, not 8). Tools with zero references in the skill set or graph flows SHALL NOT carry schema blocks — headroom is such a tool.
 
 #### Scenario: dead schemas removed
 
@@ -503,14 +401,19 @@ Given the atom-kernel skill file When searching for the graph-scheduler tool tab
 
 Given the atom-kernel skill file When searching for find_declaration / find_implementations / find_file / list_dir / rename_symbol / insert_before_symbol / insert_after_symbol / safe_delete_symbol / create_text_file Then each carries a one-line signature and no param table (inline example permitted)
 
+#### Scenario: no headroom schema block
+
+- **WHEN** searching atom-kernel SKILL.md for a headroom schema block
+- **THEN** no such block exists — the only headroom references in the repo live in the graph-fidelity-context module surface
+
 ### Requirement: Hot rules stay in SKILL.md
 
-atom-kernel SKILL.md SHALL retain every-dispatch operational rules (serena-sole mutation plane, evidence-loop bound, protocol obligations, approval() mode dispatch) in the body; cold reference tables (platform spellings, judge()/todo() contracts, registry detail) SHALL live in siblings behind pointers. Verbatim duplication between SKILL.md and siblings SHALL NOT exist — each fact has one home.
+atom-kernel SKILL.md SHALL retain every-dispatch operational rules (serena-sole mutation plane, evidence-loop bound, protocol obligations, approval() contract) in the body; cold reference tables (platform spellings, todo() contract, registry detail) SHALL live in siblings behind pointers. Verbatim duplication between SKILL.md and siblings SHALL NOT exist — each fact has one home. (judge() removed from the cold-table list — gate type removed, ADR 0216.)
 
 #### Scenario: Hot rules present
 
 - **WHEN** reading atom-kernel SKILL.md
-- **THEN** the serena-sole rule, evidence-loop bound, protocol obligations, and 3-branch mode dispatch appear in the body
+- **THEN** the serena-sole rule, evidence-loop bound, and protocol obligations appear in the body
 
 #### Scenario: No verbatim duplication
 
@@ -520,25 +423,7 @@ atom-kernel SKILL.md SHALL retain every-dispatch operational rules (serena-sole 
 #### Scenario: Reference band met
 
 - **WHEN** measuring atom-kernel SKILL.md body (frontmatter-stripped)
-- **THEN** <=1,400 words (platform-primitive reference band per atom-skill-spec Raised Length Bands, change 2026-08-09-skills-spec-compliance-platform-band)
-
-### Requirement: HLT-REGISTRY single home for platform spellings and cold primitives
-
-Platform Spellings, judge() detail, and todo() detail SHALL live once in HLT-REGISTRY.md; atom-kernel SKILL.md carries contract-level pointers only.
-
-#### Scenario: Cold primitive detail located once
-
-- **WHEN** a consumer loads judge() or todo() cold detail
-- **THEN** it resolves to HLT-REGISTRY.md; SKILL.md holds the pointer with no inline restatement
-
-### Requirement: Headroom schema merged into registry file
-
-Headroom tool schemas (compress/retrieve/stats, hash contract, health gate) SHALL live inside HLT-REGISTRY.md; no standalone HEADROOM-SCHEMAS.md file exists.
-
-#### Scenario: Headroom contract resolved
-
-- **WHEN** a consumer needs the headroom tool contract
-- **THEN** it resolves within HLT-REGISTRY.md
+- **THEN** <=1,400 words (platform-primitive reference band per atom-skill-spec Raised Length Bands)
 
 ### Requirement: Decision shape delegated to handler schema
 
@@ -575,16 +460,16 @@ The IApprovalDecision shape and its card-selection mapping SHALL have exactly on
 
 ### Requirement: Graph-Scheduler Output Sink Qualifier
 
-atom-kernel §graph-scheduler SHALL state the output-sink rule with the main-node qualifier: node output stays in the agent session and is never passed to graph_advance, EXCEPT approval/gate output (IApprovalDecision) which the pilot parses and routes. The blanket "never passed" phrasing SHALL NOT appear without the exception.
+atom-kernel §graph-scheduler SHALL state the output-sink rule with the main-node qualifier: node output stays in the agent session and is never passed to graph_advance, EXCEPT the decision output (IApprovalDecision) which the pilot parses and routes. The approval/gate exception wording is removed (those node types are deleted, ADR 0215/0216). The blanket "never passed" phrasing SHALL NOT appear without the exception.
 
 #### Scenario: Qualified rule present
 
 - **WHEN** reading atom-kernel §graph-scheduler
-- **THEN** the output rule names the main-node default and the approval/gate exception (matching atom-pilot §Loop Mechanics)
+- **THEN** the output rule names the main-node default and the decision-output exception (matching atom-pilot §Loop Mechanics)
 
 ### Requirement: Platform-Primitive Band Compliance
 
-atom-kernel SKILL.md body SHALL stay within the platform-primitive band <=1,400 words (fence-inclusive, frontmatter-stripped). Cold branches reachable only by some activations SHALL live in siblings: the Legacy 8-field rejection clause SHALL live at HLT-REGISTRY §Protocol. (interview() semantics live in SKILL.md §interview() — the former INTERVIEW-DETAIL.md sibling was folded and deleted, ADR 0154.) The hot surface (approval()/task()/interview() rules 1-8 + Mode Selection/judge()/todo() contracts, HLT core scenario rows) SHALL remain in SKILL.md (non-transferable per Hot-content Non-Transferability).
+atom-kernel SKILL.md body SHALL stay within the platform-primitive band <=1,400 words (fence-inclusive, frontmatter-stripped). (HLT-REGISTRY references removed — the file is deleted, ADR 0194; judge()/Mode Selection references removed with the gate type and run mode.) The hot surface (approval()/task()/interview() rules + todo() contract) SHALL remain in SKILL.md (non-transferable per Hot-content Non-Transferability).
 
 #### Scenario: Body in band
 
@@ -603,42 +488,53 @@ atom-kernel SKILL.md body SHALL stay within the platform-primitive band <=1,400 
 
 ### Requirement: Headroom and Register_Edit Single Homes
 
-The headroom compress contract SHALL be stated once (HLT-REGISTRY §headroom); the >8KB trigger and the register_edit post-edit obligation SHALL each have one authoritative site (compress entry chain / JCODEMUNCH-SCHEMAS §register_edit). Other files SHALL carry pointers only.
+MODIFIED: the headroom compress contract SHALL NOT be stated in atom-kernel — its single home is the graph-fidelity-context module (openspec/specs/graph-fidelity-context/spec.md + packages/graph-fidelity-context/src/actions/compress.ts). atom-kernel §Tool Schemas SHALL carry no headroom section or schema block; zero headroom references exist in the kernel skill family. The register_edit post-edit obligation SHALL keep its single home in JCODEMUNCH-SCHEMAS §register_edit, unchanged.
 
 #### Scenario: Headroom single-sited
 
-- **WHEN** scanning atom-kernel SKILL.md + HLT-REGISTRY for the headroom contract
-- **THEN** one full statement (HLT-REGISTRY §headroom) — the §Entry: compress duplicate is absent
+- **WHEN** scanning atom-kernel SKILL.md and siblings for the headroom contract
+- **THEN** zero references exist — the only headroom contract statement in the repo is the graph-fidelity-context module's own spec/skill/docs surface
 
 #### Scenario: Register_edit single-sited
 
-- **WHEN** scanning SKILL.md / HLT-REGISTRY / JCODEMUNCH-SCHEMAS for the register_edit obligation
+- **WHEN** scanning SKILL.md / siblings / JCODEMUNCH-SCHEMAS for the register_edit obligation
 - **THEN** one full statement (JCODEMUNCH-SCHEMAS) — other sites carry pointers
 
-### Requirement: Run mode consumption boundary
+### Requirement: Tool schemas retained as factual reference
 
-The kernel SHALL define run mode as controlling single-decision presentation only: `approval()` calls (approval nodes and main-node approval() checkpoints) SHALL be mode-aware (manual/absent → card; auto + recommendation → execute; auto without recommendation → card, never guess). Mode SHALL NOT be consumed by gate conditions (machine judgment — judge() only) and SHALL NOT auto-execute consensus conversations (interview turns and grilling rounds are never auto-gated). The kernel is the single semantic authority; graph task texts and gate conditions SHALL NOT extend mode consumption beyond this boundary.
+The rewritten §Tool Schemas SHALL remain the single home of the serena / jcodemunch / graph-scheduler compact parameter tables, usable as pure reference by any skill — with zero discipline, adapter-rule, or obligation content attached. (judge() removed from the primitives scenario list — gate type removed, ADR 0216.)
 
-#### Scenario: Gate conditions ignore run mode
+#### Scenario: Schemas consulted for parameters
 
-- **WHEN** a gate node evaluates jump conditions
-- **THEN** mode SHALL play no part in the evaluation — only declared jump conditions (e.g. output fields, retryCount bounds) SHALL be judged
+- **WHEN** a skill needs the exact parameter table of a serena / jcodemunch / graph-scheduler tool
+- **THEN** it reads the retained §Tool Schemas tables — factual reference only
 
-#### Scenario: Consensus conversations never auto-gate
+#### Scenario: No discipline content in schemas
 
-- **WHEN** an interview turn or a grilling round presents in auto mode
-- **THEN** a card SHALL appear — mode never gates confirmation or exploration conversations
+- **WHEN** the schema tables are scanned for discipline content
+- **THEN** no adapter rule, obligation, or core-requirement text is present
 
-### Requirement: Core Requirement box on the HLT hot surface
+### Requirement: Tool discipline direct specification
 
-The atom-kernel SKILL.md §High-Level Tool Registry SHALL open with a "Core Requirement" box carrying the six-line HLT essence (registered-call shape, in-project code → serena, verify-after-write, loud failure, zero deny, cold-read pointer). The box is the single source of the essence text; the graph-fidelity resident entry is a compressed copy (attribution + hash). The box SHALL NOT expand the hot surface's operational detail — the adapter rule and obligations one-liners remain below it unchanged.
+The atom-kernel SKILL.md §Tool Discipline SHALL state the tool-discipline specification directly as must-follow entries: the scenario set {find, read, write, verify, run} with the per-scenario rule stated in-line (find — indexed query plane with ground-truth confirmation; read — promoted surfaces with pre-edit consultation; write — serena sole engine for in-project code with verify-after-write; verify — evidence-only over the prior write; run — platform shell with project command prefix), the index-freshness obligation (`mcp__jcodemunch_register_edit` after mutations on indexed targets), and the pre-execution interception switch default OFF with the two enabling criteria. The review scenario SHALL NOT appear as a tool-triggered scenario: review is role-triggered — graph review nodes carry their own review standards — and the section SHALL note this exclusion explicitly. The section SHALL state the rules as normative entries without a pointer to an external delivery module or registry contract.
 
-#### Scenario: Box opens the HLT section
+#### Scenario: Discipline rules stated directly
 
-- **WHEN** the §High-Level Tool Registry section is read
-- **THEN** the Core Requirement box is its first subsection and contains exactly the six-line essence
+- **WHEN** reading atom-kernel SKILL.md §Tool Discipline
+- **THEN** the per-scenario rules and obligations are stated in the section itself as normative entries
+- **AND** no pointer to an external delivery module or registry contract replaces the rules
 
-#### Scenario: Hot surface size bounded
+#### Scenario: No HLT string in the skill
 
-- **WHEN** the HLT section is measured after the change
-- **THEN** the box adds at most ~6 lines and no adapter-table or obligations content moves into the hot surface
+- **WHEN** scanning atom-kernel SKILL.md for the string "HLT"
+- **THEN** no occurrence exists (including quoted references such as "not HLT" and comments)
+
+#### Scenario: Kernel primitives unaffected
+
+- **WHEN** reading the discipline section
+- **THEN** task / judge / approval / interview / todo primitives are not presented as part of the tool set
+
+#### Scenario: Review role-triggered exclusion
+
+- **WHEN** reading the discipline section's scenario list
+- **THEN** review is absent from the tool-triggered scenario set and the section notes that review standards are carried by graph review nodes, not by tool-result hints

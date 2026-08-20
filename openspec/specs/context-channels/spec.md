@@ -63,50 +63,17 @@ MODIFIED: `node:` channel resolution SHALL validate that the target nodeId belon
 
 ### Requirement: Judgment context assembly SHALL use the single context pipeline
 
-Gate/approval judgment context SHALL be assembled by the handler through the same pipeline as main: direct dependsOn outputs (`## Upstream:` blocks auto-injected) + `channels` `node:` target outputs + snapshot + run mode + constraints.
+Rework-condition context SHALL be assembled through the same pipeline as main execution: direct dependsOn outputs (`## Upstream:` blocks auto-injected) + `channels` `node:` target outputs + snapshot (incl. retryCount) + constraints. The main node evaluates its task-text conditions against this context inline; no separate judgment pass exists.
 
 #### Scenario: Direct upstream auto-inject
 
-- **WHEN** a gate/approval depends directly on a node whose output its conditions/recommendation reference
+- **WHEN** a main node's rework condition references a direct dependsOn output
 - **THEN** that output SHALL be injected automatically — no `reads` declaration (the field no longer exists)
 
 #### Scenario: Cross-level reference via channels
 
-- **WHEN** a gate/approval references a node that is not a direct dependsOn (transitive upstream, flow child, loop origin)
-- **THEN** the author SHALL declare `channels: [node:<id>]`; the handler SHALL inject that output; a missing output file SHALL be noted as `<id> has no output` and a condition referencing it evaluates false
-
-### Requirement: Condition-reference scope
-
-Gate jump conditions SHALL reference only node outputs within the judgment-domain formula — scope = direct dependsOn outputs ∪ phase `channels` entries ∪ `node:` streams in the global `context:`; the jump target is referenceable only within the retryCount bound (snapshot data), and output-field references SHALL guide authors to declare `channels: [node:<id>]`. The validator SHALL check that condition-text references fall within this scope (hardcoded `.taskflow/outputs/` paths and sibling-existence judgments SHALL error).
-
-#### Scenario: Condition within scope
-
-- **WHEN** a gate jump condition references a field of a direct dependsOn output, a declared phase `channels` `node:` target, or a global-context promoted stream
-- **THEN** validation passes
-
-#### Scenario: Jump target retryCount bound accepted
-
-- **WHEN** a gate jump condition references `<target> retryCount < N` for its own jump target
-- **THEN** validation passes — the bound is snapshot data
-
-#### Scenario: Jump target output reference rejected
-
-- **WHEN** a gate jump condition references its jump target's output fields without a `channels: [node:<id>]` declaration
-- **THEN** validation SHALL error with the condition text and the missing declaration
-
-#### Scenario: Condition out of scope
-
-- **WHEN** a gate jump condition references an output not covered by the judgment domain formula (or a hardcoded `.taskflow/outputs/` path / sibling-existence judgment)
-- **THEN** validation SHALL error with the condition text and the undeclared reference
-
-### Requirement: Gate dependency minimality
-
-Gate SHALL declare leaf dependencies only; cross-level judgment inputs go through `channels` `node:`. The gate dependsOn redundancy exemption SHALL be removed — the transitive redundancy check treats gates and other types alike.
-
-#### Scenario: Redundant gate dependency rejected
-
-- **WHEN** a gate declares a transitive dependency alongside its direct one (leaf rule violation)
-- **THEN** contract validation SHALL error naming the redundant dependency
+- **WHEN** a main node's rework condition references a node that is not a direct dependsOn (transitive upstream, flow child, loop origin)
+- **THEN** the author SHALL declare `channels: [node:<id>]`; the handler SHALL inject that output; a missing output SHALL be noted as `<id> has no output` and a condition referencing it evaluates conservatively (no rework)
 
 ### Requirement: Channel scope hierarchy — project, graph, flow, phase
 
@@ -170,11 +137,11 @@ The merge of the config default layer and the graph `context:` into the global c
 
 ### Requirement: Judgment-domain references stay nodeId-based
 
-Gate jump conditions SHALL reference node reports by nodeId within the judgment-domain formula (scope unchanged: direct dependsOn outputs ∪ phase `channels` entries ∪ `node:` streams in the global `context:`; jump target referenceable only within the retryCount bound). Gate judgment is agent-executed (judge()) — the judging agent reads the referenced reports from its own session. Runtime output paths SHALL NOT be referenced (they do not exist); ordinary document paths in task text remain legal content.
+Main task-text rework conditions SHALL reference node reports by nodeId within the judgment-domain formula (scope: direct dependsOn outputs ∪ phase `channels` entries ∪ `node:` streams in the global `context:`; rework target referenceable only within the retryCount bound). Rework evaluation is agent-executed inline from main task text — the executing agent reads the referenced reports from its own session. Runtime output paths SHALL NOT be referenced (they do not exist); ordinary document paths in task text remain legal context.
 
 #### Scenario: Condition references nodeId only
 
-- **WHEN** a gate jump condition references a report by nodeId within the judgment domain
+- **WHEN** a main task-text rework condition references a report by nodeId within the judgment domain
 - **THEN** validation SHALL pass (no runtime-path check exists)
 
 ### Requirement: Convention-file channel declarations warn at validation

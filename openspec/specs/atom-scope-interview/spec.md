@@ -45,3 +45,19 @@ The `as-needed` behavior flag SHALL reference atom-kernel §interview() Zero-que
 
 - **WHEN** reading the Behavior flags declaration
 - **THEN** the zero-question degradation concept appears as `per atom-kernel §Zero-question degradation` — no restated mechanics
+
+### Requirement: Direct-end entry wiring follows content-state card rule
+
+The atom-scope-interview entry wiring SHALL follow the content-state-dependent direct-end card rule: when the entry interview's confirmed content is non-empty (scope/topics confirmed), the final confirm card SHALL offer the adoption action (e.g. "确认范围，继续") as the recommended option and the declared direct-end label as the alternative — the `nothing to adopt` option SHALL NOT appear; when the confirmed content is empty, the final card SHALL offer `nothing to adopt (recommended)` and the declared label. Choosing either direct-end option SHALL emit `direct_end: true` per the declared output contract.
+
+#### Scenario: Entry with confirmed scope — adoption-action card
+
+- **WHEN** an entry interview completes with confirmed scope content (non-empty)
+- **THEN** the final confirm card SHALL recommend the adoption action and offer the declared direct-end label as the alternative
+- **THEN** the `nothing to adopt` wording SHALL NOT appear
+
+#### Scenario: Entry with empty scope — nothing-to-adopt card
+
+- **WHEN** an entry interview completes with genuinely empty content
+- **THEN** the final confirm card SHALL offer `nothing to adopt (recommended)` and the declared direct-end label
+- **THEN** choosing either SHALL emit `direct_end: true`

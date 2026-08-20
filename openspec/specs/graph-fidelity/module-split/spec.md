@@ -8,46 +8,48 @@ Two-package boundary for graph-fidelity: base package (zero runtime deps, interf
 
 ### Requirement: Two-package boundary
 
-The module SHALL split into two npm packages: base `@ai-atomic-workflow/graph-fidelity` (exports `./omp`, `./server`, `./interfaces`; zero runtime dependencies; self-contained bundles per ADR 0166) and additional `@ai-atomic-workflow/graph-fidelity-context` (`private: true`, reference-only, carrying the relocated `context-management` tree and its MCP SDK dependency).
+**Before**: The module SHALL split into two npm packages: base `@ai-atomic-workflow/graph-fidelity` (exports `./omp`, `./server`, `./interfaces`, `./lifecycle`; the shared lifecycle bundle `dist/lifecycle.js` holds the ONE runtime instance per face, ADR 0191) and additional `@ai-atomic-workflow/graph-fidelity-context`.
+
+**After**: The module SHALL split into two npm packages: base `@ai-atomic-workflow/graph-fidelity` (exports `./omp`, `./server`, `./interfaces` only; the R1 signal chain SHALL be consumed from the platform-hooks-sdk — no shared lifecycle module, no `./lifecycle` export) and additional `@ai-atomic-workflow/graph-fidelity-context` (docks through the SDK only).
 
 #### Scenario: Base zero-dep bundle
 
 - **WHEN** the base package builds
-- **THEN** the dist bundles contain no bare specifier (platform SDKs inlined or absent), satisfying the self-containment contract
+- **THEN** the dist bundles contain no bare third-party specifier (platform SDKs inlined or absent) and the adapter bundles contain no shared lifecycle module import
 
 #### Scenario: Context tree relocated
 
 - **WHEN** the additional package is built and inspected
-- **THEN** the `context-management` source tree lives under `packages/graph-fidelity-context/` with its `REFERENCE ONLY — R2 cost economy suspended (ADR 0175)` headers, and the base package contains no R2 runtime code or imports
+- **THEN** the context module tree lives under `packages/graph-fidelity-context/` as an ACTIVE module, the base package contains no R2 runtime code or imports, and the context dist bundles carry no bare third-party specifiers (deployment contract)
 
-### Requirement: Loading via manifest second entry
+#### Scenario: No lifecycle export surface
 
-The additional module SHALL load through a second platform manifest entry — OMP `omp.extensions` array member or opencode `plugin` array member. Disabled state = no entry, which means zero runtime imports of the additional module (ADR 0175 preserved).
-
-#### Scenario: Registered
-
-- **WHEN** the second manifest entry is present in a deployment
-- **THEN** the platform loads both modules and hooks run in registration order (platform-native multi-module semantics)
-
-#### Scenario: Unregistered (disabled)
-
-- **WHEN** the second manifest entry is absent
-- **THEN** no R2 code is loaded at runtime; the base module behaves exactly as before
+- **WHEN** the base package exports map is inspected
+- **THEN** `./lifecycle` is absent, and no bundle references `@ai-atomic-workflow/graph-fidelity/lifecycle`
 
 ### Requirement: Type-only docking
 
-The additional module SHALL consume base-package interface types type-only (erased at build). Runtime cooperation SHALL use platform channels — OMP shared EventBus / appendEntry, opencode shared client — never a bare runtime import of the base package (forbidden by the self-containment contract).
+**Before**: The additional module SHALL consume base-package interface types type-only (erased at build). Runtime cooperation SHALL use the shared lifecycle instance — a bare runtime import of the base lifecycle entry (`@ai-atomic-workflow/graph-fidelity/lifecycle`) per the deployment contract.
+
+**After**: The additional module SHALL dock through the platform-hooks-sdk contract directly (bind registry, canonical events, DeliveryContext). Runtime cooperation with the base package SHALL NOT use a shared instance — there is no shared lifecycle module; singleton ownership is module-local.
 
 #### Scenario: Docking compile-time verified
 
-- **WHEN** the additional package builds with type-only interface imports
-- **THEN** its bundle is self-contained; any runtime import of the base package fails the build/typecheck
+- **WHEN** the additional package builds with SDK type imports
+- **THEN** interface types are erased at build, and the bundle carries zero base-package runtime imports
+
+#### Scenario: No shared instance
+
+- **WHEN** the additional package source tree is inspected
+- **THEN** no import references the base lifecycle entry, and a scan test asserts zero base-package references
 
 ### Requirement: Reference tests keep running
 
-The relocated context-management tests SHALL stay green in the additional package (reference pins per ADR 0175 retention policy).
+**Before**: The relocated context-management tests SHALL stay green in the additional package; the dist-smoke test pins the bundle composition contract (shared instance, no bare third-party specifiers).
+
+**After**: The relocated context-management tests SHALL stay green in the additional package; the dist-smoke test pins the bundle composition contract (no bare third-party specifiers, zero base-package runtime references, SDK inlined).
 
 #### Scenario: Reference suite green
 
 - **WHEN** the additional package test suite runs
-- **THEN** the relocated reference tests pass unchanged in behavior
+- **THEN** the context-module tests pass unchanged in behavior, and the dist-smoke assertions verify the bundle composition contract without a shared instance

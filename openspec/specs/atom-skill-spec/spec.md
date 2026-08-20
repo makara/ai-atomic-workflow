@@ -41,7 +41,7 @@ SKILL.md format reference. Asset: `packages/graph-workflow/skills/atom-skill-spe
 
 ### Requirement: Context Requirements is a four-subsection machine-parseable contract
 
-The `## Context Requirements` section SHALL be a machine-parseable contract with exactly four subsections — `### From upstream` (node IDs), `### Reference skills` (skill names), `### Operation classes` (closed-set members of the High-Level Tool Registry the skill performs by default — optional, absent = no default classes), `### Files` (file globs) — each containing a simple list. Placeholder entries (e.g. `<configurable — …>`) SHALL be rejected; a skill with an unparseable contract SHALL fail validation. An unknown operation class SHALL fail validation naming the skill and the class. Skills SHALL NOT hardcode runtime output paths of any kind (the `.taskflow/outputs/` form no longer exists; the rule generalizes to filesystem-path references) or duplicate channel resolution inside their bodies — content reachable via declared channels SHALL be consumed from the handler-injected context (run state delivered with dispatch).
+The `## Context Requirements` section SHALL be a machine-parseable contract with exactly four subsections — `### From upstream` (node IDs), `### Reference skills` (skill names), `### Operation classes` (closed-set members of the operation-class registry the skill performs by default — optional, absent = no default classes), `### Files` (file globs) — each containing a simple list. Placeholder entries (e.g. `<configurable — …>`) SHALL be rejected; a skill with an unparseable contract SHALL fail validation. (Class vocabulary per tool-usage-contract scenario registry — HLT wording removed, ADR 0194.)
 
 #### Scenario: Contract parses into four lists
 
@@ -56,24 +56,23 @@ The `## Context Requirements` section SHALL be a machine-parseable contract with
 
 #### Scenario: Unknown operation class rejected
 
-- **WHEN** a skill declares an operation class outside the HLT closed set
+- **WHEN** a skill declares an operation class outside the closed operation-class set
 - **THEN** validation SHALL fail naming the skill and the unknown class
 
 #### Scenario: Skill body avoids channel duplication
 
 - **WHEN** a skill's contract declares a Reference skill or Files entry
 - **THEN** the skill body SHALL NOT re-load that reference itself or re-read those files directly as its primary mechanism — the handler-injected context SHALL be authoritative
-- **THEN** a graph-dispatch skill referencing a runtime output path (e.g. `.taskflow/…`) in its body SHALL be flagged
 
 ### Requirement: Operation classes feed handler injection
 
-The skill's `Operation classes` subsection SHALL be the default source for handler registry injection and class-based verification; a graph phase may override/complement it via `operations:`. The skill body SHALL NOT re-implement tool chains — the HLT Registry is the single chain source.
+The skill's `Operation classes` subsection SHALL be the default source for class-based verification; a graph phase may override/complement it via `operations:`. The skill body SHALL NOT re-implement tool chains — the scenario-hints registry is the single chain source. (No HLT registry exists, ADR 0194.)
 
 #### Scenario: Skill default drives injection
 
 - **WHEN** a skill declares `Operation classes: [locate, verify]` and the phase declares none
-- **THEN** the dispatch SHALL inject the registry entries for locate and verify
-- **AND** the skill body SHALL reference the registry rather than re-specify chains
+- **THEN** the dispatch SHALL verify the classes for locate and verify
+- **AND** the skill body SHALL reference the scenario-hints registry rather than re-specify chains
 
 ### Requirement: No self-repetition in the spec
 
@@ -82,6 +81,13 @@ atom-skill-spec SHALL follow its own no-self-repetition rule — each fact state
 #### Scenario: sibling-files single-sited
 
 Given packages/graph-workflow/skills/atom-skill-spec/SKILL.md When searching for the sibling-files path-resolution fact ("Sibling files deployed with skill — `<name>/<path>` relative to the skill's SKILL.md") Then it appears exactly once
+
+#### Scenario: no-op test governs skill content
+
+- **WHEN** an agent authors or edits a skill body
+- **THEN** every natural-language token SHALL pass the no-op test — deleting it changes behavior or meaning
+- **THEN** pep-talk, filler, hedging, and restated-rationale tokens SHALL be deleted
+- **THEN** a rule's rationale SHALL live in the ADR or domain docs, never inline
 
 ### Requirement: Invocation matrix complete
 
@@ -291,7 +297,7 @@ The skill spec SHALL require standard ASCII characters in prose wherever an equi
 
 ### Requirement: Raised Length Bands
 
-The skill spec SHALL use reference band <=1,500 words and general band 500-2,000 words (raised from <=1,000 / 500-1,500); bodies over 2,000 words SHALL be disclosure-split to siblings. Platform primitives (atom-kernel, atom-phase-handler — every-dispatch hot contracts, HLT content never migrated or simplified) SHALL use the platform-primitive reference band <=1,400 words.
+The skill spec SHALL use reference band <=1,500 words and general band 500-2,000 words; bodies over 2,000 words SHALL be disclosure-split to siblings. Platform primitives (atom-kernel, atom-phase-handler — every-dispatch hot contracts) SHALL use the platform-primitive reference band <=1,400 words.
 
 #### Scenario: Reference band margin
 
@@ -476,3 +482,37 @@ Files entries matching the platform convention layer (`DEFAULT_CONVENTIONS`: `./
 
 - **WHEN** a skill declares a non-convention file (e.g. `docs/adr/*.md`) and no dispatching phase channel covers it
 - **THEN** forward coverage SHALL report the missing channel — the obligation surface excludes only convention files
+
+### Requirement: Direct point, no explanation — content principle
+
+The skill system SHALL follow the user-mandated content principle "直接说重点，不解释" (state the point directly, do not explain): process descriptions SHALL be one sentence; a single-sourced rule SHALL appear exactly once and every other occurrence SHALL be a pointer to its home; explanatory annotations on structural markers (e.g. `<!-- none -->`) SHALL be omitted; natural-language output SHALL follow caveman full level.
+
+#### Scenario: process description one sentence
+
+- **WHEN** a skill documents a process step (entry, activation, loop mechanics)
+- **THEN** the step description SHALL be a single sentence stating action, ordering, and precondition
+- **THEN** rationale, history, and alternative considerations SHALL NOT appear in the step description
+
+#### Scenario: single-sourced rule referenced, never restated
+
+- **WHEN** a rule has an authoritative definition site (e.g. `atom-kernel` §Direct end, `atom-graph-spec` §Run Completion)
+- **THEN** every other occurrence SHALL be a pointer (`see <home> §X`), never a restatement
+
+#### Scenario: structural marker annotations omitted
+
+- **WHEN** a structural marker carries no information beyond its grammar (e.g. `<!-- none -->` in Context Requirements)
+- **THEN** explanatory text after the marker SHALL be omitted
+
+### Requirement: Spec-class skills accept limited explanation
+
+Spec-class skills (atom-skill-spec, atom-graph-spec) SHALL be exempt from the strictest reading of the no-explanation principle: format definitions themselves are content, so bounded explanation of format meaning is permitted. The exemption SHALL NOT license verbose prose — caveman full level still applies, and the no-op test still governs every token.
+
+#### Scenario: spec-class format explanation allowed
+
+- **WHEN** a spec-class skill explains the meaning of a format field
+- **THEN** bounded explanation is permitted as long as it is caveman-compressed and each token passes the no-op test
+
+#### Scenario: spec-class verbosity still rejected
+
+- **WHEN** a spec-class skill contains filler, pep-talk, or restated rationale
+- **THEN** the content SHALL be rejected per the no-op test

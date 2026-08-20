@@ -55,22 +55,22 @@ A node's report (its output-contract payload) is produced and consumed in the ex
 
 ### Requirement: Uniform phase channels — one rule for all types
 
-Phase-level `channels` SHALL accept all entry kinds (`node:<id>`, `skill:<name>`, file globs) for main, approval, and gate phases alike — no per-type restrictions, no full-type-inheritance carve-outs. Resolution SHALL follow one path: explicit prefix wins, then contract-table lookup, then glob shape, then error. The former `node:`-only restriction on approval/gate and its repeal (full-type inheritance) SHALL both be gone — there is a single rule, not a rule plus an exception.
+Phase-level `channels` SHALL accept all entry kinds (`node:<id>`, `skill:<name>`, file globs) for every phase — no per-type restrictions, no full-type-inheritance carve-outs (the former approval/gate restrictions and their repeal are both gone; there is a single rule). Resolution SHALL follow one path: explicit prefix wins, then contract-table lookup, then glob shape, then error.
 
 #### Scenario: Gate declares skill entry
 
-- **WHEN** a gate phase declares `channels: ["skill:atom-graph-spec"]` alongside its `jumps`
-- **THEN** schema parsing SHALL accept the phase and the entry SHALL resolve as a reference block — identical to a main phase
+- **WHEN** a phase declares `channels: ["skill:atom-graph-spec"]`
+- **THEN** schema parsing SHALL accept the phase and the entry SHALL resolve as a reference block — identical to any other phase
 
 #### Scenario: Approval declares file glob
 
-- **WHEN** an approval phase declares `channels: ["./notes.md"]`
-- **THEN** schema parsing SHALL accept the phase and the entry SHALL resolve as a file block — identical to a main phase
+- **WHEN** a phase declares `channels: ["./notes.md"]`
+- **THEN** schema parsing SHALL accept the phase and the entry SHALL resolve as a file block — identical to any other phase
 
 #### Scenario: Bare name fails identically everywhere
 
-- **WHEN** any phase type declares a bare-name channel entry matching no contract table and no glob shape
-- **THEN** resolution SHALL fail with the same error wording for main, approval, and gate
+- **WHEN** any phase declares a bare-name channel entry matching no contract table and no glob shape
+- **THEN** resolution SHALL fail with the same error wording for every phase
 
 ### Requirement: Promotion — node streams into the global channel
 
@@ -93,27 +93,27 @@ A graph SHALL lift a node stream into the global channel by declaring `context: 
 
 ### Requirement: Single judgment-domain formula
 
-The gate/approval judgment context SHALL be assembled by one formula shared by dispatch and load-time validation: direct dependsOn outputs ∪ phase `channels` entries ∪ global-context `node:` streams. A gate jump target SHALL be in scope for its retryCount bound only (snapshot data — always present at evaluation); a condition referencing a jump target's output fields SHALL be a load-time error directing the author to declare `channels: [node:<id>]`. A gate jump condition SHALL reference only nodes in that formula's node set; a reference outside it SHALL be a load-time error naming the phase and the node.
+The rework-condition context SHALL be assembled by one formula shared by dispatch: direct dependsOn outputs ∪ phase `channels` entries ∪ global-context `node:` streams. A rework target SHALL be in scope for its retryCount bound only (snapshot data — always present at evaluation); a condition referencing a target's output fields SHALL be a load-time error directing the author to declare `channels: [node:<id>]`. A main rework condition SHALL reference only nodes in that formula's node set; a reference outside it SHALL be a load-time error naming the phase and the node.
 
 #### Scenario: Condition references global-channel stream
 
-- **WHEN** a gate jump condition references a node promoted via graph `context:`
-- **THEN** validation SHALL accept the reference without a phase-level `channels` declaration
+- **WHEN** a main rework condition references a node promoted via graph `context:`
+- **THEN** the promoted output SHALL be present in the assembled context (the evaluating agent reads it from the session)
 
 #### Scenario: Jump target referenced beyond its retryCount bound
 
-- **WHEN** a gate jump condition mentions its own jump target in an output-field context (not a `<target> retryCount` bound)
-- **THEN** validation SHALL error naming the phase, the node, and the missing `channels: [node:<id>]` declaration
+- **WHEN** a main rework condition mentions its own rework target in an output-field context (not a `<target> retryCount` bound)
+- **THEN** the authoring surface (atom-graph-spec rework-decision rules) SHALL direct the author to declare `channels: [node:<id>]` — the engine reads zero prose (law L4), condition hygiene is agent-side
 
 #### Scenario: Jump target retryCount bound accepted
 
-- **WHEN** a gate jump condition references `<target> retryCount < N` for its own jump target
-- **THEN** validation SHALL accept the reference — the bound is snapshot data, always present at evaluation
+- **WHEN** a main rework condition references `<target> retryCount < N` for its own rework target
+- **THEN** the bound is snapshot data, always present at evaluation — the evaluating agent reads it from the snapshot
 
 #### Scenario: Condition out of scope errors
 
-- **WHEN** a gate jump condition references a node outside dependsOn, phase channels, and global-context node streams (and not a jump-target retryCount bound)
-- **THEN** validation SHALL error naming the phase, the node, and the missing declaration
+- **WHEN** a main rework condition references a node outside dependsOn, phase channels, and global-context node streams
+- **THEN** the authoring surface (atom-graph-spec rework-decision rules) SHALL flag the undeclared reference; audit runs agent-side (graph-maintain)
 
 #### Scenario: Validator and dispatch agree
 

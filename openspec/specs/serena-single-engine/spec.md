@@ -8,13 +8,13 @@ Core-class execution contract where serena is the sole tool: locate/read/write/v
 
 ### Requirement: Core classes SHALL be serena single-tool with no fallback
 
-Serena SHALL be the sole mutation + ground-truth engine for in-project targets. write/verify SHALL be serena sole-tool chains (create_text_file, replace_content, replace_in_files, replace_symbol_body, rename_symbol, insert_before/after_symbol, safe_delete_symbol, get_diagnostics_for_file, read_file). locate/read SHALL NOT be serena-headed on indexed targets (query plane owns locate; read locates via query plane when target unknown); on unindexed text (markdown/plain), locate SHALL use serena `search_for_pattern`. run SHALL use the platform shell (`bash`, rtk prefix per project constraints); serena `execute_shell_command` is not part of the tool surface. Out-of-project and special-type scenarios designate the platform-native surface (serena project-root-bound, strict UTF-8 — structural n/a). No fallback tool SHALL exist for serena-backed classes: serena unavailable (server down, project unactivated, LSP missing) SHALL produce a loud failure naming the missing dependency, never a silent degrade.
+Serena SHALL be the sole mutation + ground-truth engine for in-project targets. write/verify SHALL be serena sole-tool chains (create_text_file, replace_content, replace_in_files, replace_symbol_body, rename_symbol, insert_before/after_symbol, safe_delete_symbol, get_diagnostics_for_file, read_file). locate/read SHALL NOT be serena-headed on indexed targets (the find/read classes own locate; read locates via the find class when target unknown); on unindexed text (markdown/plain), locate SHALL use serena `search_for_pattern`. run SHALL use the platform shell (`bash`, rtk prefix per project constraints); serena `execute_shell_command` is not part of the tool surface. Out-of-project and special-type scenarios designate the platform-native surface (serena project-root-bound, strict UTF-8 — structural n/a). No fallback tool SHALL exist for serena-backed classes: serena unavailable (server down, project unactivated, LSP missing) SHALL produce a loud failure naming the missing dependency, never a silent degrade.
 
 #### Scenario: Core class executes via serena only
 
-- **WHEN** a step references a serena-backed mutation-plane tool on an in-project target
+- **WHEN** a step references a serena-backed write-class tool on an in-project target
 - **THEN** the tool SHALL execute through serena only
-- **AND** no non-serena tool SHALL appear in the serena-backed mutation-plane chain
+- **AND** no non-serena tool SHALL appear in the serena-backed write-class chain
 
 #### Scenario: Serena missing fails loudly
 
@@ -74,7 +74,7 @@ The run class SHALL execute through the platform shell (`bash`) with the project
 
 ### Requirement: Core-class index obligations are conditional
 
-`jcodemunch register_edit` SHALL be required for every mutation while the index is mounted — unconditional on query-plane usage. Mutation-plane verify SHALL NOT depend on jcodemunch: verification SHALL be serena diagnostics + re-read confirmation only. Absence of the index SHALL NOT block or violate a mutation-plane step (`n/a: jcodemunch not in use`).
+MODIFIED: `jcodemunch register_edit` SHALL be required for every mutation while the index is mounted — unconditional on find/read-class usage. The obligation SHALL be executed as the mounted MCP tool call `mcp__jcodemunch_register_edit {repo, file_paths, reindex?}` (agent-side); the write scenario hint block (ADR 0200 scenario-tool-hints) SHALL remind the agent to register on every serena write-tool result (the former standalone write-reindex hint folds into the block). Write/verify-class verification SHALL NOT depend on jcodemunch: verification SHALL be serena diagnostics + re-read confirmation only. Absence of the index SHALL NOT block or violate a write-class step (`n/a: jcodemunch not in use` / `n/a: not indexed`).
 
 #### Scenario: Verify passes without jcodemunch
 
@@ -85,20 +85,15 @@ The run class SHALL execute through the platform shell (`bash`) with the project
 #### Scenario: register_edit required while jcodemunch in use
 
 - **WHEN** the jcodemunch index is mounted and an execution edits files
-- **THEN** each edit SHALL be followed by `jcodemunch register_edit`
+- **THEN** each edit SHALL be followed by the `mcp__jcodemunch_register_edit` call with the edited paths (the write scenario hint block names the tool on every serena write result)
 - **AND** missing registration SHALL be a `violated` entry
 
-### Requirement: Enforcement view SHALL record the scenario-table contract
+#### Scenario: MCP toolized registration
 
-The enforcement view of registry entries SHALL remain deferred (per-platform application recorded in the view, not shipped as a generic-layer feature). The enforcement contract SHALL be scenario-table-driven: each tool call resolves (target path + type) -> scenario -> designated adapter; calls whose tool is not the scenario's adapter SHALL be denied naming the designated adapter. The seam-validation prototype (`.omp/extensions/hlt-policy.ts`) SHALL be treated as validation-only evidence — it SHALL NOT enter packages or formal docs as authoritative design; formal implementation SHALL be built per platform extension API without prototype inheritance.
+- **WHEN** an agent edits a file via a serena write tool while the index is mounted and the target is indexed
+- **THEN** the write scenario hint block fires naming the register_edit MCP tool, and the agent calls `mcp__jcodemunch_register_edit` with the edited paths
 
-#### Scenario: View stays deferred, contract recorded
+#### Scenario: Index absent
 
-- **WHEN** enforcement is described in a formal document
-- **THEN** the registry enforcement view SHALL read deferred (per-platform)
-- **AND** the document SHALL describe the scenario-table contract, never the prototype as authoritative
-
-#### Scenario: Adapter lifecycle documented in the report
-
-- **WHEN** the adapter prototype's lifecycle (arm on dispatch, disarm on terminal signals incl. agent_end fail-safe) is implemented
-- **THEN** the arch-review report SHALL record the implementation evidence
+- **WHEN** the index is not mounted or the target is not indexed
+- **THEN** the registration obligation reports `n/a: jcodemunch not in use` / `n/a: not indexed` and never blocks the mutation

@@ -8,7 +8,7 @@ Runtime assembly (handler/FSM/persistence composition). Asset: `packages/graph-s
 
 ### Requirement: Runtime assembly and config resolution
 
-System SHALL provide a `createRuntime(config?)` factory that assembles all layers (filesystem, database, FSM, handlers, registry) into a working `SchedulerRuntime`. Config SHALL be resolved with priority: programmatic override → environment variables → config.json → built-in defaults — environment variables SHALL override config.json values. Relative paths in config.json SHALL resolve against the project root (process working directory) — never against the config file location or a nested directory. All path-valued dbPath sources (override, environment, config.json) SHALL resolve relative values against the project root the same way; `:memory:` and absolute paths pass through unchanged.
+System SHALL provide a `createRuntime(config?)` factory that assembles all layers (filesystem, database, execution state machine, handlers, registry, MCP adapter) into a working `SchedulerRuntime`. The execution state machine is the embedded LangGraph.js runtime; the MCP adapter maps the 10-tool surface to the runtime's invoke/resume/goto/terminate operations. Config SHALL be resolved with priority: programmatic override → environment variables → config.json → built-in defaults — environment variables SHALL override config.json values. Relative paths in config.json SHALL resolve against the project root (process working directory) — never against the config file location or a nested directory. All path-valued dbPath sources (override, environment, config.json) SHALL resolve relative values against the project root the same way; `:memory:` and absolute paths pass through unchanged.
 
 #### Scenario: createRuntime assembles full stack
 
@@ -16,7 +16,7 @@ System SHALL provide a `createRuntime(config?)` factory that assembles all layer
 - **THEN** libsql connection SHALL be opened at the configured dbPath
 - **THEN** the parent directory of dbPath SHALL be created if missing (in-memory databases excluded)
 - **THEN** DDL migration SHALL run (idempotent)
-- **THEN** all layers (graph loader, FSM, phase handlers, persistence) SHALL be wired into a single ManagedRuntime — no agent-registry layer exists
+- **THEN** all layers (graph loader, execution runtime, checkpoint saver, phase handlers, MCP adapter) SHALL be wired into a single managed runtime — no agent-registry layer exists
 - **THEN** the returned `SchedulerRuntime` SHALL expose Promise-typed methods bridging Effect to caller
 
 #### Scenario: Config resolution merges sources
@@ -69,9 +69,16 @@ System SHALL provide a `createRuntime(config?)` factory that assembles all layer
 
 #### Scenario: Agent registry resolves handler and entry skill
 
-- **WHEN** dispatching any main/approval phase
+- **WHEN** dispatching any main phase
 - **THEN** `handlerSkill` SHALL be the constant `atom-phase-handler` — no project config or builtin registry consulted
 - **THEN** the phase's entry skill SHALL come from `phase.skill` (missing → configuration error per graph-phase-dispatch)
+
+#### Scenario: Adapter maps pull-based protocol
+
+- **WHEN** `graph_start` is called
+- **THEN** the adapter invokes the runtime to the first interrupt and returns the first ready node
+- **WHEN** `graph_advance` is called with the completed node
+- **THEN** the adapter resumes the runtime to the next interrupt/END and returns the next node or null
 
 ### Requirement: Composition flow passes artifact context via context channel
 
@@ -268,17 +275,17 @@ Each workspace `typecheck` script SHALL compile its own real TS sources — grap
 
 ### Requirement: Input-stage reset in the FSM
 
-The scheduler runtime SHALL implement one activation reset rule: on run start, and on any backward reset (gate branchTo / graph_jump) whose target is an input node, all input nodes SHALL reset to pending and SHALL be the only eligible nodes until the input stage completes; author nodes resume after. The prologue-specific reset branch (keyed on flattened in-degree-0 entry) SHALL be replaced by the general input-node rule.
+The scheduler runtime SHALL implement one activation reset rule: on run start, and on any backward reset (rework branchTo / graph_jump) whose target is an input node, all input nodes SHALL reset to pending and SHALL be the only eligible nodes until the input stage completes; author nodes resume after. The prologue-specific reset branch SHALL be replaced by the general input-node rule.
 
 #### Scenario: Input stage dispatches first
 
 - **WHEN** a run starts or a reset targets an input node
-- **THEN** resolveReady SHALL select only input nodes until all input nodes are done, then author nodes
+- **THEN** the entry nodes dispatch first by dependency topology (no synthesized input-node injection exists — activation facts live at the invocation boundary); readiness selects ready nodes per the dependency-satisfied rule
 
 #### Scenario: Injection at load
 
 - **WHEN** a graph loads
-- **THEN** default input nodes (`run-mode` when approval/gate consumers exist, `constraints` always) SHALL be injected unless the graph declares same-kind nodes
+- **THEN** no synthetic input nodes are injected (no activation prologue); graph-level constraints inject via the top-level `constraints` field at every dispatch
 
 ### Requirement: REQ-A1: LICENSE file SHALL exist at repository root
 
@@ -407,22 +414,50 @@ Executing `npm pack --dry-run` on both packages SHALL succeed (exit 0), and the 
 - **AND** the scheduler tarball SHALL be named `ai-atomic-workflow-graph-scheduler-0.1.0.tgz`
 - **AND** the workflow tarball SHALL be named `ai-atomic-workflow-graph-workflow-0.1.0.tgz`
 
-### Requirement: Approval route-completeness is enforced
+### Requirement: Concurrency SHALL be mutually exclusive per run
 
-A COMPLETE dispatch for an approval phase that declares branch-route `routing.actions` (containing `action: "continue"`) SHALL carry either a `branchTo` (route/node activation target) or `endRun: true` (explicit completion). A dispatch with neither SHALL fail with an invalid-state error and MUST NOT silently drain the run. Approval phases without declared `routing.actions` (default card: Accept + free input + AI options) keep their existing behavior — completing without `branchTo` drains normally.
+Concurrent execution requests against the same run SHALL be serialized — the adapter enforces a single-flight lock per run (stdio single process); a second advance while one is in flight SHALL fail with an invalid-state error, never execute concurrently.
 
-#### Scenario: branch-route approval missing a routing decision
+#### Scenario: Duplicate advance rejected
 
-- **WHEN** the agent completes a branch-route approval with neither `branchTo` nor `endRun`
-- **THEN** the transition fails with an invalid-state error (silent drain prevented)
-- **AND** the run stays running
+- **WHEN** two advance calls for the same run arrive without an intervening completion
+- **THEN** exactly one executes; the other fails with an invalid-state error — no double execution of a node
 
-#### Scenario: branch-route approval with branchTo activates the route
+### Requirement: Run recovery SHALL resume from last checkpoint
 
-- **WHEN** the agent completes a branch-route approval with `branchTo` pointing at a declared route id
-- **THEN** the route activates and its members become ready as before
+After a process restart, a previously running run SHALL resume from its last persisted checkpoint — no node is lost, no node executes twice.
 
-#### Scenario: default approval drains without branchTo
+#### Scenario: Crash recovery resumes the run
 
-- **WHEN** the agent completes an approval that declares no `routing.actions` and passes no `branchTo`
-- **THEN** the run drains naturally as before (unchanged behavior)
+- **WHEN** the process crashes mid-run and restarts
+- **THEN** the run's execution state is reconstructed from the last checkpoint and execution resumes from that point
+
+### Requirement: Runtime assembly SHALL avoid dead injection layers
+
+The runtime assembly (`scheduler-runtime.ts`) SHALL pass resolved configuration (`projectContext`, `dbPath`) directly through the adapter deps — the assembly SHALL NOT create, merge, or type a `ConfigService` `Context.Tag` layer that no effect consumes. Any injection layer whose Tag has zero producers is dead wiring and SHALL NOT exist.
+
+#### Scenario: Config delivered via adapter deps only
+
+- **WHEN** `createRuntime()` assembles the stack
+- **THEN** resolved config SHALL flow through the adapter deps path
+- **THEN** no `ConfigService` Context.Tag layer SHALL be created, merged into the env layer, or typed into the environment union
+
+#### Scenario: Dead layer absence
+
+- **WHEN** the scheduler source is scanned for the config injection layer
+- **THEN** no `config-service.ts` module and no `ConfigService` Tag consumption wiring SHALL exist
+
+### Requirement: FileSystem module SHALL own its implementation
+
+The `FileSystem` seam SHALL be a deep module: the interface (`FileSystem` Tag) and its behavior (multi-directory resolvePath existence-probe, dual-base resolveSchemaUri, YAML listing, readFile fallback) SHALL live in the same module (`src/filesystem.ts`). `scheduler-runtime.ts` SHALL only wire the layer — the layer factory SHALL NOT be a private implementation detail of the runtime assembly.
+
+#### Scenario: Interface and behavior co-located
+
+- **WHEN** the FileSystem seam is inspected
+- **THEN** `src/filesystem.ts` SHALL declare the Tag AND export the layer factory implementing it
+- **THEN** `scheduler-runtime.ts` SHALL import and wire the factory — no private duplicate implementation SHALL exist in the runtime assembly
+
+#### Scenario: Isolation-testable behavior
+
+- **WHEN** the FileSystem behavior is exercised in a unit test
+- **THEN** it SHALL be importable directly from `src/filesystem.ts` without assembling the runtime

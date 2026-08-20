@@ -1,6 +1,6 @@
 {
   "name": "@ai-atomic-workflow/graph-workflow",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Graph-Engineering for Real Engineers: Graphs define workflows; workflows build graphs. Based on mattpocock/skills.",
   "keywords": [
     "agent",

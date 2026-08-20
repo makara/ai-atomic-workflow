@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Closed-loop review + implementation (entry → review → implement → loop-gate). Assets: `packages/graph-scheduler/graphs/arch-review-loop.taskflow.yaml`; output `docs/reports/`.
+Closed-loop review + implementation (entry → review → implement → loop-gate). Assets: `packages/graph-scheduler/graphs/arch-review-loop.yaml`; output `docs/reports/`.
 
 ## Requirements
 
@@ -19,79 +19,78 @@ arch-review's scope-entry phase SHALL recommend `docs/reports/<YYYY-MM-DD>-arch-
 
 ### Requirement: Loop composition — input stage + machinery
 
-arch-review-loop SHALL be a three-stage composition: requirement (flow arch-review, dependsOn [] — the requirement production chain: scope-entry → arch-review report → review-accept) → adopt (flow adopt-with-docs, dependsOn [requirement], channels node:requirement/arch-review — the report is the adopt stage's input document) → implement (flow spec-implement, dependsOn [adopt], channels node:adopt/spec-propose + node:adopt/adopting — the produced change and the adoption record) → loop-gate → loop-accept. The top-level grill flow SHALL NOT exist; the top-level review flow id SHALL NOT exist; grill-inside-arch-review composition SHALL NOT exist (ADR 0099). The top-level loop-entry id SHALL NOT exist — its role merges into requirement/scope-entry (the requirement stage's input node). The stage id `refine` SHALL NOT exist (renamed `adopt`).
+MODIFIED: arch-review-loop SHALL be a three-stage flow with framework-hosted interactive entry/acceptance, expressed with `template: router` single-path nodes (subgraph composition via `use` is deleted — every stage graph runs as a sibling run launched by the frontend): requirement (framework-owned `startup` (main, `template: startup` — graph entry, full startup) → `scope-entry` (main, atom-scope-interview, dependsOn [startup]) → router node `template: router` with `template_args.paths: [arch-review]` (single candidate — auto-selects, launches the arch-review graph as a sibling run, passes the report path + requirement input via `graph_start` args, collects its handoff report) → the requirement accept loop is caller-declared on the same router node (`template_args.questions` — revise re-enters via the flow self-edge, accept exits the sequence) → `adopting` (main, grilling — the grilling consensus IS the adoption confirmation; the adoption goal + trace intent are confirmed in the grilling first-round frontier, absorbing the deleted adopt-scope interview, ADR 0247) → `adopt` (router `paths: [adopt-with-docs]`) → `implement` (router `paths: [spec-implement]`) → `round-report` (re-review + report fold-back) → re-entry loop (flow self-edge `round-report -->|remaining| scope-entry`, bounded). The adopt-scope phase is removed (adopt-scope-and-handler-blocks, ADR 0247): the adoption goal is the round scope + the accepted report's Top Recommendation, already confirmed by scope-entry and the requirement accept loop.
 
 #### Scenario: Loop round re-confirms scope
 
-- **WHEN** a backward reset targets requirement/scope-entry (loop-gate branchTo)
-- **THEN** the whole input stage SHALL reset and re-acquire — mode re-confirmed, constraints re-loaded, scope re-confirmed (per-round semantics, ADR 0075 D1 preserved as the general rule's corollary); the producer re-runs and the adopt stage re-runs as its downstream stage
+- **WHEN** a backward reset targets the framework `scope-entry` (flow condition re-entry)
+- **THEN** the whole input stage SHALL reset and re-acquire — constraints re-loaded, scope re-confirmed (per-round semantics, ADR 0075 D1 preserved); the arch-review sibling re-runs and the adopt stage re-runs as its downstream stage
 
 #### Scenario: No scope-entry echo
 
 - **WHEN** the loop's requirement stage executes
-- **THEN** the arch-review node SHALL read the entry output directly — no echo node exists
+- **THEN** the framework scope-entry output SHALL feed the arch-review sibling directly (passed via `graph_start` args) — no echo node exists
 
 #### Scenario: Grill decision stage runs serially each round
 
 - **WHEN** arch-review-loop activates (run start or loop jump-back)
-- **THEN** requirement/scope-entry SHALL run first, then the producer (arch-review report), then adopt/adopting (adoption conversation, serial after production) — consensus + ADR offers produced after the report
-- **AND** the adoption record SHALL flow into spec-extract via the implement flow's channels (node:adopt/spec-propose + node:adopt/adopting)
+- **THEN** framework requirement/scope-entry SHALL run first, then the arch-review sibling run (report), then the requirement accept loop on the router node, then the framework adopt-stage interactive nodes (adoption conversation, serial after production) — consensus + ADR offers produced after the report
+- **AND** the adoption record SHALL flow into the spec-implement sibling via the implement router's `graph_start` args
 
 #### Scenario: Three stages run in order
 
 - **WHEN** a loop round activates
 - **THEN** requirement production completes first, the adopt stage confirms the produced report and materializes the change, and only then the implement stage activates
 
+#### Scenario: Shared chain single-sourced
+
+- **WHEN** the graph's shared-chain nodes are read
+- **THEN** their task text SHALL reference the parameterized template content (`template: scope-entry` / `template: adopting`) — not byte-duplicated from `first-principles-dev`, and no `template: adopt-scope` declaration exists
+
+#### Scenario: Stage activation is the sibling run
+
+- **WHEN** a stage router node executes
+- **THEN** the selected graph SHALL run as a sibling run (`graph_start` → drive to `node: null` → collect handoff result)
+- **AND** the router SHALL NOT activate composing phases and SHALL NOT pass `branchTo` — every stage graph is standalone
+
+#### Scenario: Subgraph declaration does not constrain the framework
+
+- **WHEN** graph-maintain audits `arch-review-loop`
+- **THEN** the framework's own interactive nodes (scope-entry, requirement accept loop, adopt-stage hosting) SHALL NOT be flagged — the framework is `enabled`; stage graphs are standalone siblings whose `interaction: none` declarations constrain only their own files (no declaration propagates — composition is deleted)
+
+#### Scenario: Framework chain runs without accept nodes
+
+- **WHEN** the arch-review-loop graph runs
+- **THEN** the executed chain SHALL NOT contain review-accept / adopt-accept / adopt-scope phases; the requirement node SHALL present the accept/revise prompt and the revise choice SHALL re-enter the requirement node (flow self-edge), the accept choice SHALL proceed directly to adopting (no adopt-scope phase between)
+
+#### Scenario: Requirement accept loop bounded
+
+- **WHEN** the revise condition is reported on the requirement node
+- **THEN** the requirement node SHALL re-enter with retryCount incremented (never zeroed); the loop bound SHALL be the graph constraints prose + retryCount (agent-enforced)
+
+#### Scenario: Adoption goal confirmed by grilling
+
+- **WHEN** the adopting node executes after requirement accept
+- **THEN** the grilling first-round frontier SHALL include the adoption-goal topics (idea_goal + doc_trace_intent) confirmed by the user — no separate adopt-scope interview exists
+
 ### Requirement: Report-driven implementation
 
-The loop's implement stage SHALL be the spec-implement flow reading the produced change and the adoption record (channels node:adopt/spec-propose + node:adopt/adopting): change scope + ADR judgment — adr_created ECHOES the adoption record's decision (existence check, never re-derivation); no interview, no input-source detection, no spec generation.
+MODIFIED: the loop's implement stage SHALL be the spec-implement graph launched as a sibling run by the implement router node, receiving the produced change and the adoption record via `graph_start` args (change name + adr_created + decisions echo): change scope + ADR judgment — adr_created ECHOES the adoption record's decision (existence check, never re-derivation); no interview, no input-source detection, no spec generation. The adoption stage SHALL reuse the existing stage graphs via router launches: `adopt` (router `paths: [adopt-with-docs]`) then `implement` (router `paths: [spec-implement]`), activated serially after the framework-hosted adoption interaction (`adopting` — the grilling consensus IS the acceptance; adopt-scope and the accept nodes are deleted, ADR 0247). The "Auto mode advances with report scope" scenario keeps its historical name; its content confirms no auto execution (run mode is deleted, ADR 0215).
 
 #### Scenario: Auto mode advances with report scope
 
-- **WHEN** the loop runs in auto mode with a report Top Rec remaining
-- **THEN** the implement stage SHALL advance without any interview — spec-extract emits scope from the produced change, approvals auto-execute
+- **WHEN** a round has a report Top Recommendation remaining
+- **THEN** the implement stage SHALL advance — spec-extract emits scope from the produced change, with no interview and no auto-execution (run mode is deleted, ADR 0215)
 
 #### Scenario: ADR judgment reaches the track gate
 
-- **WHEN** the adoption record carries adr_created: true
-- **THEN** spec-extract SHALL echo it and the pipeline-accept recommendation SHALL select the detailed track
-- **AND** an implementation SHALL NOT reach the minimal track while a decision was recorded and not yet archived as an ADR
+- **WHEN** the implement stage completes
+- **THEN** the adr_created judgment from the adoption record SHALL reach the track gate — existence check, never re-derivation (delivered via `graph_start` args, echoed by spec-extract)
 
-### Requirement: Single-loop semantics
+#### Scenario: Adoption activates without a separate adopt-scope node
 
-arch-review-loop SHALL implement exactly ONE loop: after the implement flow completes, `loop-gate` re-enters the requirement stage — jump condition `run mode is auto AND requirement/arch-review output shows top_rec_remaining: true AND requirement/scope-entry retryCount < 8` → `requirement/scope-entry` (input-stage reset: mode re-confirmed, constraints re-loaded, scope re-confirmed; the round re-reviews implementation evidence and re-runs adopt + implement). A failed implementation is covered by the same condition (the report's top_rec_remaining is untouched mid-round). The `implement-loop-gate` node SHALL NOT exist in the pipeline; no inner/outer tier language SHALL appear in graph comments or task text. Ending the loop is always a human decision (loop-accept; auto mode ends when no Top Rec remains or the bound is exhausted).
-
-#### Scenario: Loop re-enters after failed implementation
-
-- **WHEN** the implement stage completes with archive not succeeded and the report still shows top_rec_remaining: true (auto mode, bound not exhausted)
-- **THEN** loop-gate SHALL jump to requirement/scope-entry — the round re-reviews implementation evidence, re-adopts, re-proposes, re-implements
-
-#### Scenario: Loop closes
-
-- **WHEN** the round bound is exhausted (requirement/scope-entry retryCount ≥ 8) or a content round completes with no re-loop
-- **THEN** loop-accept SHALL present the round-end decision (Loop again / Complete); auto mode ends automatically when ending is the recommendation
-- **AND** the no-Top-Rec case is NOT this scenario — it ends at the round-continue content gate (see Empty-round short-circuit)
-
-#### Scenario: Closed-loop invocation with existing report
-
-- **WHEN** arch-review-loop or arch-review starts with report_input: existing
-- **THEN** the entry SHALL confirm the report path exists, read its Top Rec, and never re-confirm the path afterwards — per-round scope confirmation applies to the review topic only
-
-### Requirement: Empty-round short-circuit via round-continue content gate
-
-`arch-review-loop` SHALL gate the adopt and implement stages behind a `round-continue` approval that declares branch-route routing — `continue` (target: `proceed` route) and `end` (declared action). The `adopt` and `implement` flows SHALL declare `route: proceed`; unselected-route members SHALL never activate.
-
-#### Scenario: Empty round ends at the content gate
-
-- **WHEN** the review report shows no remaining Top Recommendation (top_rec_remaining: false)
-- **THEN** `round-continue` SHALL recommend `end` (auto mode executes; manual mode confirms once)
-- **AND** adopt/implement route members SHALL remain pending — never activated
-
-#### Scenario: Content round proceeds via route
-
-- **WHEN** the review report shows a remaining Top Recommendation (top_rec_remaining: true)
-- **THEN** `round-continue` continue SHALL branchTo the `proceed` route, activating adopt + implement
-- **AND** child-declared routes (minimal-track / detailed-track) SHALL coexist with `proceed` (child route wins over flow propagation)
+- **WHEN** the adopting node completes with a non-empty change_name
+- **THEN** the adopt router SHALL activate directly (no adopt-scope or adopt-accept phase between); the adoption consensus echo (change_name + adr_created + decisions) SHALL pass via graph_start args
 
 ### Requirement: Improver journey entry point
 

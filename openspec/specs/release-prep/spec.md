@@ -30,7 +30,7 @@ Before any write, release-prep SHALL confirm every planned operation with the us
 
 - **WHEN** release-prep reaches the confirmation phase
 - **THEN** no file SHALL be modified before the user confirms all planned operations
-- **AND** the confirmation SHALL appear as cards in any run mode (never auto-gated)
+- **AND** the confirmation SHALL appear as cards, never auto-gated (the "in any run mode" wording is removed — run mode is deleted, ADR 0215)
 
 #### Scenario: Grilling round never skipped
 
@@ -77,3 +77,18 @@ README feature/module lists SHALL be checked against ground truth: graph registr
 - **WHEN** the README check completes
 - **THEN** every listed graph/skill SHALL exist in ground truth and every ground-truth graph/skill SHALL be listed where the README enumerates the family
 - **AND** version literals in READMEs SHALL match the proposed version
+
+### Requirement: release-review SHALL offer direct end
+
+The `release-review` confirmation node SHALL offer the direct-end option on its final card. When the user decides to stop the release round (nothing further to apply or review), choosing 「无内容可采纳（推荐）」 or 「结束本轮（direct end）」 SHALL end the run directly (`direct_end: true` → `graph_force_end`) — the final report still prints the tag/commit commands, but the run terminates instead of draining.
+
+#### Scenario: Release round ends directly
+
+- **WHEN** the user confirms at `release-review` that the round should end
+- **THEN** the final card SHALL present 「结束本轮（direct end）」
+- **AND** choosing it SHALL terminate the run via `graph_force_end`; the final report SHALL still print the user-executed tag/commit commands
+
+#### Scenario: Release confirmed — continue
+
+- **WHEN** the user confirms the release at `release-review`
+- **THEN** the run SHALL continue to completion as today — unchanged

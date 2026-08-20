@@ -6,44 +6,13 @@ Graph definition loading/validation/flattening/topology/contract checks/routing 
 
 ## Requirements
 
-### Requirement: Subgraph load failure SHALL propagate the original error
-
-During graph loading with registry (`loadGraphWithRegistry`), a subgraph referenced by a flow phase SHALL propagate its original load error (schema validation failures, file system errors) instead of being silently dropped and re-reported as a generic "not found" error.
-
-#### Scenario: Child graph schema validation fails
-
-- **WHEN** a flow phase references a child graph whose file fails schema validation
-- **THEN** the load SHALL fail fast with the original validation error (including violations)
-- **AND** the error SHALL NOT be reported as "not found in registry"
-
-#### Scenario: Child graph missing from registry and dirs
-
-- **WHEN** a flow phase references a child graph name that resolves nowhere (no registry entry, no taskflow dir match)
-- **THEN** the load SHALL fail with a `GRAPH_NOT_FOUND` error whose message reads "not found in registry or taskflow dirs"
-
-### Requirement: Subgraph resolution SHALL use registry-aware unified semantics
-
-Top-level and subgraph graph-name resolution SHALL share one resolution path: project registry override (explicit path) first, then taskflow-directory search as fallback. A project registry entry for a subgraph name SHALL take precedence over directory search.
-
-#### Scenario: Registry entry overrides subgraph resolution
-
-- **WHEN** a flow phase references a child graph name that has an explicit path entry in the project registry
-- **THEN** the entry's explicit path SHALL be used for loading
-- **AND** directory search SHALL NOT be consulted first
-
-#### Scenario: No registry entry falls back to directory search
-
-- **WHEN** a flow phase references a child graph name with no registry entry
-- **THEN** resolution SHALL fall back to taskflow-directory search
-- **AND** the resolution result SHALL match top-level graph loading behavior
-
 ### Requirement: Contract warnings in run metadata
 
 graph_start SHALL attach a contract-warning summary to the returned run metadata: count + truncated entries (each entry: phase prefix + warning text, capped length). Absent warnings SHALL yield an empty summary — field optional, backward compatible.
 
 #### Scenario: Warning summary visible at start
 
-- **WHEN** a graph with contract warnings (e.g. unbounded eval retry) is started
+- **WHEN** a graph with contract warnings (e.g. unbounded rework jump condition) is started
 - **THEN** graph_start response SHALL include the warning summary naming the phase and warning
 - **AND** entry text SHALL be truncated to a bounded length
 
@@ -78,7 +47,7 @@ The system SHALL verify, on every test run, that the contract tables in `atom-pi
 
 ### Requirement: fsmState vocabulary matches implementation
 
-The skill documentation's fsmState table SHALL list exactly the run-level states the FSM can produce: `idle`, `running`, `completed`, `terminated`. States the FSM never produces (`failed`, `paused`) SHALL NOT appear in the documented table.
+MODIFIED: the skill documentation's fsmState table SHALL list exactly the run-level states the FSM can produce: `idle`, `running`, `completed`, `terminated`. States the FSM never produces (`failed`, `paused`) SHALL NOT appear in the documented table. The node status guard list SHALL match `NodeStateSchema.status` exactly: `pending`, `active`, `done` — `aborted` is removed from the enum (the v22 force-end change removed the only writer; a status the schema allows but the runtime never produces SHALL fail the guard).
 
 #### Scenario: Stale state table fails the guard
 
@@ -88,9 +57,9 @@ The skill documentation's fsmState table SHALL list exactly the run-level states
 #### Scenario: Node status list matches schema
 
 - **WHEN** a skill document lists node status values
-- **THEN** the list SHALL match `NodeStateSchema.status` exactly: `pending`, `active`, `done`, `skipped`
-- **THEN** any extra value (e.g. `failed`, `blocked`) SHALL fail the guard
-- **THEN** the schema set SHALL also match the runtime FSM's actual production points (derived from `fsm/transition.ts` node-state writes) — a status the schema allows but the FSM never produces SHALL fail the guard
+- **THEN** the list SHALL match `NodeStateSchema.status` exactly: `pending`, `active`, `done`
+- **THEN** any extra value (e.g. `aborted`, `failed`, `blocked`) SHALL fail the guard
+- **THEN** the schema set SHALL also match the runtime FSM's actual production points — a status the schema allows but the FSM never produces SHALL fail the guard
 
 ### Requirement: skip parameter documented only when implemented
 
@@ -101,287 +70,327 @@ A skill document SHALL document the `skip` parameter of `graph_advance` only whe
 - **WHEN** a skill documents `graph_advance(..., skip?)` but `GraphAdvanceSchema` lacks a `skip` field
 - **THEN** the guard SHALL fail, naming the doc site and the missing schema field
 
-### Requirement: Route SHALL be declared per phase or inherited from flow
-
-Route membership SHALL be declared explicitly — the backend performs zero inference.
-
-#### Scenario: Phase-level route annotation
-
-- **WHEN** a phase declares `route: <id>`
-- **THEN** the phase belongs to route `<id>`; it activates only when route `<id>` is active and its dependencies are satisfied
-
-#### Scenario: Flow-as-route propagation
-
-- **WHEN** a gate/approval branch option targets a flow (or a phase declares a route inside a flow)
-- **THEN** all flattened children of the flow inherit the flow route unless they declare their own
-
-#### Scenario: Flow route requires declaration
-
-- **WHEN** a flow phase declares `route: <id>`
-- **THEN** it becomes a route: children inherit `<id>` unless they declare their own; a flow WITHOUT `route:` is plain composition — its children stay on the implicit default route and always run (routes are never inferred from composition)
-
-#### Scenario: Default route
-
-- **WHEN** a phase declares no route and is not inside a route-declaring flow
-- **THEN** it belongs to the implicit default route, which is always active
-
-### Requirement: Unselected route members SHALL never activate
-
-Unselected route members SHALL never activate — an unchosen branch route means the entire route's nodes are collectively ignored (case 1) — not a skipped state, never activated.
-
-#### Scenario: Unchosen branch route
-
-- **WHEN** an approval chooses branch option targeting route A while route B exists
-- **THEN** route A members activate as dependencies complete; route B members stay pending forever, never active, never dispatched
-
-#### Scenario: Dependency on inactive route
-
-- **WHEN** a node's dependency belongs to an inactive route
-- **THEN** the dependency does NOT count as satisfied (no vacuous satisfaction — implementation amendment); the graph must sequence through the decision node or use an `any`-join (branch-route join pattern) so the unselected route never blocks while the chosen route's terminal satisfies the join
-
-### Requirement: Approval branch options SHALL activate routes
-
-Branch-route scenarios (unique system-wide: minimal/non-minimal) SHALL be carried by approval options, which activate the target route.
-
-#### Scenario: Branch option with target
-
-- **WHEN** an approval declares a branch-route option with `target` and the option is chosen (manual) or recommended (auto)
-- **THEN** the target route activates; the decision records the option value
-
-#### Scenario: No branch options declared
-
-- **WHEN** an approval declares no branch-route options (the default)
-- **THEN** the approval presents Accept + free input + AI-generated options (retry/jump/end); no route activation is implied by mere presence of the approval
-
 ### Requirement: Node self-discovered no-work SHALL be normal completion
 
-Case 5: a node/flow entry that self-discovers no work during execution SHALL count as normal execution producing an empty output — not a skip, and no special status or event is produced. Current usage: doc-update composite flow entry reads the archive output to self-judge (archive_status: success); doc-trigger reads upstream events to self-judge. Production graph phases (graph-generate spec/implement) SHALL NOT use case-5 no-work self-judgment in place of topology — the condition SHALL land in the entry decision/gate/route selection.
+Case 5: a node/flow entry that self-discovers no work during execution SHALL count as normal execution producing an empty output — not a skip, and no special status or event is produced. Production graph phases SHALL NOT use case-5 no-work self-judgment in place of topology — the condition SHALL land in the entry decision.
 
 #### Scenario: Empty-task execution
 
-- **WHEN** a flow entry executes and finds no work (e.g. a doc-update flow entry whose upstream archive output shows no archive_succeeded)
+- **WHEN** a flow entry executes and finds no work
 - **THEN** the node completes normally with an empty-output declaration; downstream proceeds; no skip marker, no special status
 
 #### Scenario: Candidate actions resolved by entry decision
 
-- **WHEN** a production graph supports multiple candidate routes (e.g. spec-implement minimal/detailed track selection)
-- **THEN** the entry SHALL confirm the route once and exactly one writer path SHALL be active — no no-work peer phases self-judging in parallel (graph-generate single-writer convention)
+- **WHEN** a production graph supports multiple candidate tracks (e.g. spec-implement minimal/detailed track selection)
+- **THEN** the entry SHALL confirm the track once and exactly one writer path SHALL be active — no no-work peer phases self-judging in parallel (single-writer convention)
 
 ### Requirement: Branch decisions SHALL be applied by the backend without judgment
 
-The gate jump-condition evaluation context SHALL equal direct `dependsOn` outputs (auto-injected) + `channels` `node:` target outputs + snapshot (including retryCount) + run mode; a missing output SHALL be noted as `<id> has no output` (the condition evaluates false when referencing it). The `reads` field has been removed (schema field convergence).
+MODIFIED: the backend SHALL apply branch decisions mechanically — never judge them — and SHALL apply them EXCLUSIVELY: a resumed node's `Command({goto})` SHALL be the single source of the next activation set (no static-successor addition on resume). A main node's decision output (rework or branch decision) travels via `graph_advance` `branchTo`; the backend disambiguates by target state: terminal target (status `done` — `aborted` removed by headroom-estate-cleanup) → backward rework reset (target + downstream terminal nodes → `pending`, retry count incremented each, never zeroed, upstream kept); pending target → activation. The `end` decision action SHALL be applied mechanically too: the reported node completes and the graph routes to END (natural drain — run `completed`). No route mechanism exists — `branchTo` targets a node id only; `end` is a decision action, never a node target. No gate type exists — rework conditions live in main task text (IF/ELSE), evaluated inline by the executing agent; the evaluation result drives `branchTo` directly.
 
 #### Scenario: Hit — backward jump
 
-- **WHEN** a gate's `when` evaluates true and its `to` target is an upstream terminal node
-- **THEN** the backend resets the target and its downstream terminal nodes to pending (retryCount++ each, never zeroed), re-activates ready nodes; no forward activation happens
+- **WHEN** a main rework condition holds and its decision target is an upstream terminal node
+- **THEN** the backend resets the target + downstream terminal nodes to `pending` (retry count incremented each, never zeroed), re-activates ready nodes; no forward activation
 
 #### Scenario: No hit — pass through
 
-- **WHEN** no `when` evaluates true
-- **THEN** the gate completes with no routing side effect; downstream activates via dependency satisfaction
+- **WHEN** no rework condition holds (the decision carries no target)
+- **THEN** the node completes with no routing side effect; downstream activates via dependency satisfaction
 
 #### Scenario: Upstream auto-inject
 
-- **WHEN** a gate's jump condition references its direct dependsOn output
-- **THEN** that output SHALL be present in the evaluation context automatically (no `reads` declaration — the field is removed)
+- **WHEN** a main rework condition references its direct dependsOn outputs
+- **THEN** those outputs SHALL be auto-injected into the node context (no `reads` declaration — field removed)
 
 #### Scenario: Node-channel context
 
-- **WHEN** a gate declares `channels: [node:<id>]` and the condition references that node's output
-- **THEN** the output SHALL be injected via the shared channel resolver; missing output SHALL be noted and the condition evaluated conservatively (false)
+- **WHEN** a main node declares `channels: [node:<id>]` and its condition references that node's output
+- **THEN** the output SHALL be injected via the shared channel resolver; a missing output SHALL be noted as missing and the condition evaluates conservatively (no rework)
 
 #### Scenario: Reads context
 
-- **WHEN** a gate declares `reads: [<nodeId>]`
-- **THEN** schema validation rejects it loudly with a migration hint to `channels: [node:<id>]` (field removed — judgment context = direct dependsOn outputs + node: channels)
+- **WHEN** a node declares `reads: [<nodeId>]`
+- **THEN** schema validation SHALL loud-reject and hint migration to `channels: [node:<id>]` (field removed)
 
 #### Scenario: Forward branch activation
 
-- **WHEN** an approval branch-route option is chosen
-- **THEN** the backend activates the target route mechanically (no judgment)
+- **WHEN** a main branch decision is chosen (branchTo = node id of a pending node)
+- **THEN** the backend mechanically activates the target node (no judgment) and nothing else — unselected branch nodes stay `pending` (exclusive activation)
 
 #### Scenario: Retry branch resets upstream
 
-- **WHEN** a gate jump hits a terminal upstream target
-- **THEN** the backend resets the target + downstream terminal nodes (upstream kept), retryCount++ — mechanical, no judgment
+- **WHEN** a main rework decision targets a terminal upstream node
+- **THEN** the backend resets the target + downstream terminal nodes (upstream kept), retry count incremented — mechanical, no judgment, exclusive (no static-successor activation)
 
-### Requirement: Gate jump target SHALL be upstream with bounded rework
+#### Scenario: End decision completes mechanically
 
-The gate field closure SHALL drop the `node:`-only restriction on `channels`. A gate SHALL be allowed `channels` entries of any kind (`skill:`/glob/`node:`) and SHALL inherit graph-level entries of any kind; judgment context = direct dependsOn outputs + effective channels. The closure SHALL remain: id/type/dependsOn/route/jumps/channels/join; task/preText/routing/reads/agent/skill/use remain forbidden on gates. Gate jump semantics unchanged: `to` SHALL be an upstream terminal node, first matching `when` selects, hit → backward jump (retryCount++ never zeroed), no hit → pass through.
-
-#### Scenario: Gate with file channel accepted
-
-- **WHEN** a gate declares `channels: ["./judgment-notes.md"]` or inherits a `skill:` entry from graph level
-- **THEN** schema validation SHALL accept the phase
-- **THEN** the entry SHALL be part of the gate's judgment context
-
-#### Scenario: Gate closure otherwise unchanged
-
-- **WHEN** a gate declares `task`, `preText`, `routing`, `reads`, `agent`, `skill`, or `use`
-- **THEN** schema validation SHALL reject it loudly with a migration hint — unchanged
-
-#### Scenario: Retry bound
-
-- **WHEN** a gate `when` references the target's retryCount (e.g. `retryCount < 2`)
-- **THEN** the bound is enforced by the single counter; exhausted bound = no more jumps, pass through
-
-#### Scenario: Multiple jump targets
-
-- **WHEN** a gate declares multiple when/to pairs (different failures → different targets)
-- **THEN** the first matching when selects its target; no forward routing, no default, no parallel mode
-
-#### Scenario: Forbidden fields rejected
-
-- **WHEN** a gate declares task/preText/routing/reads/agent/skill/use
-- **THEN** schema validation rejects it loudly with a migration hint — non-node channel entries remain legal (full-type inheritance)
+- **WHEN** an advance resumes with `end: true`
+- **THEN** the backend marks the reported node `done` and completes the run (`completed`) without resuming the graph — no judgment, no target resolution
 
 ### Requirement: Graph definition loading and validation
 
-System SHALL load `.taskflow.yaml` files, validate them against the Taskflow schema, resolve flow phases (sub-graph composition) at load time via merge-at-load flattening, AND execute the full contract validation pass (bidirectional channel coverage, approval routing hygiene, retry/jump explicit-target checks, redundant-dependency rejection) on the flattened graph. Any contract violation SHALL fail loading with GraphDefinitionError — fail-fast at load, never deferred to dispatch.
-
-Flattening SHALL rewrite all three reference surfaces consistently: (a) downstream `dependsOn` edges referencing a flow phase SHALL be rewired to the flow's child terminal nodes; (b) child-phase routing/eval targets SHALL be prefixed with the flow phase id; (c) parent-phase routing/eval targets referencing a flow phase id SHALL be remapped to the flow's flattened entry node (the child's first phase). After flattening, every routing/eval target SHALL resolve to an existing phase id in the flattened graph — an unresolved target SHALL fail loading with GraphDefinitionError (never a silent no-op jump).
+MODIFIED: phase-level unknown keys SHALL fail loading with a schema-level error — PhaseSchema validates strictly (`.strict()`); any unknown phase key is rejected uniformly, the error naming the key. Top-level unknown keys remain preserved via passthrough, EXCEPT the `flow` key SHALL be a declared member (validated by the flow subset grammar — malformed entries fail loudly, never passthrough-swallowed). Flow edges SHALL be validated at load: every edge source/target SHALL resolve to a declared phase id (loud failure naming the edge and missing id). Subgraph composition (via `use`) SHALL NOT exist — every graph compiles standalone; nesting is the router sibling run. A phase declaring `template: startup` SHALL compile its task from the startup template; a phase declaring `template: router` SHALL compile its task from the router template with `template_args.paths` applied; a phase declaring `template: scope-entry` / `review-accept` / `adopt-scope` / `adopting` / `adopt-accept` SHALL compile its task from the matching per-node template (`template_args.terminal` applied for scope-entry) — the `framework-chain` factory form SHALL NOT exist (one template one file, ADR 0245).
 
 #### Scenario: Valid graph loads successfully
 
-- **WHEN** a `.taskflow.yaml` file exists at the resolved path and passes schema validation
-- **THEN** the graph SHALL be returned as a typed `Taskflow` with `name`, `version`, and `phases` array
-- **THEN** extra fields (not in schema) SHALL be preserved via passthrough
+- **WHEN** a YAML file exists at the resolved path and passes the workflow schema validation (including the required `name`)
+- **THEN** the graph SHALL be returned as a typed workflow with `name` (required), optional `description`/`$schema`/`version`/`flow`, and `phases` array
+- **THEN** extra top-level fields (not in schema) SHALL be preserved via passthrough
 
 #### Scenario: Invalid graph returns structured error
 
-- **WHEN** a `.taskflow.yaml` file fails schema validation (missing required fields, type mismatch, constraint violation)
+- **WHEN** a YAML file fails schema validation (missing required fields, type mismatch, constraint violation)
 - **THEN** the loader SHALL return a structured error with file path, violation details, and fix suggestions
 - **THEN** no exception SHALL be thrown
 
 #### Scenario: Flow phases are flattened at load time
 
-- **WHEN** a phase has `type: "flow"` with `use: "<graphName>"` referencing another `.taskflow.yaml`
-- **THEN** the flow phase SHALL be replaced inline with the referenced graph's phases
-- **THEN** `with` params SHALL be interpolated into the child graph's phase fields using `{key}` template expressions
-- **THEN** recursion depth SHALL be capped at `maxDepth` (default 5)
-- **THEN** `use` and `def` SHALL be mutually exclusive — exactly one required for flow type
+- **WHEN** a graph declares top-level `flow` edges
+- **THEN** the edges SHALL compile into the per-node transition table (node × condition → target) — a single flat StateGraph, no subgraph composition exists
+- **THEN** an edge referencing a phase absent from `phases` SHALL fail loading with a structured error naming the edge and the missing id
+
+#### Scenario: Composition cycle fails load
+
+- **WHEN** a graph's dependsOn edges form a cycle
+- **THEN** loading SHALL fail with a structured graph-definition error naming the cycle
+- **THEN** no run SHALL be created
+
+#### Scenario: Handoff terminals scoped to the current level
+
+- **WHEN** compilation synthesizes the root `__handoff`
+- **THEN** its `dependsOn` SHALL be the graph's terminal members only — every graph compiles standalone with its own single root `__handoff` (no per-level synthesized handoffs exist)
+
+#### Scenario: Composed handoff uses the session template
+
+- **WHEN** compilation synthesizes the root `__handoff` node
+- **THEN** the node task SHALL come from the zero-parameter handoff session template (`handoffTaskTemplate()`) — no report path is computed
+- **AND** the task text SHALL NOT contain a report path or a file-write instruction
 
 #### Scenario: Parent routing targets remapped at flatten
 
-- **WHEN** a parent-phase approval routing or eval action declares `target` equal to a flow phase id (e.g. `target: review`)
-- **THEN** flattening SHALL remap the target to the flow's flattened entry node id (e.g. `review/scope-detect`)
-- **THEN** the remapped target SHALL resolve in the flattened graph
+- **WHEN** a main rework decision declares a jump target equal to a node id
+- **THEN** the target SHALL resolve in the compiled graph — jump targets are node ids, restricted to the topological ancestor set ∪ `__handoff` (no composition remapping exists)
+
+#### Scenario: Standalone graph gains handoff terminal
+
+- **WHEN** a graph passes validation
+- **THEN** compilation SHALL append a `__handoff` main node depending on the graph's terminal phase
+- **AND** the node task SHALL come from the zero-parameter handoff session template (`handoffTaskTemplate()`) — no report path, no file-write instruction
+- **AND** the appended node SHALL NOT appear in source phases (inventory validation ignores it — validateGraphInventory is one-directional inventory→source)
+- **AND** the graph SHALL still load cleanly with zero warnings from the synthesized node
+
+#### Scenario: Composition remaps parent targets to handoff
+
+- **WHEN** a main rework decision targets a terminal node
+- **THEN** the reset scope SHALL include `__handoff` (downstream terminal closure) — the handoff resets to `pending` with the target
+- **AND** the terminal-successor rewiring SHALL route the graph's completion through `__handoff` before END
 
 #### Scenario: Unresolvable routing target fails load
 
-- **WHEN** after flattening any routing or eval target references a phase id absent from the flattened graph
-- **THEN** loading SHALL fail with GraphDefinitionError naming the phase and the missing target
+- **WHEN** a flow edge or jump target references a phase id absent from the compiled graph
+- **THEN** loading SHALL fail with a graph-definition error naming the phase and the missing target
 - **THEN** no run SHALL be created
 
 #### Scenario: Contract breach blocks run start
 
 - **WHEN** a graph with a contract violation is started via graph_start
-- **THEN** graph_start SHALL return GraphDefinitionError describing the phase and violation
+- **THEN** graph_start SHALL return a graph-definition error describing the phase and violation
 - **AND** no run SHALL be created for the invalid graph
 
 #### Scenario: Retry target warning surfaces at load
 
-- **WHEN** an approval retry/jump action lacks an explicit target (dependsOn[0] fallback path)
+- **WHEN** a main rework condition task line declares a rework condition (rework/return to/back to/jump back) without an explicit backtick target
 - **THEN** loading SHALL succeed
-- **AND** the load SHALL emit the deprecated-fallback warning
+- **AND** the load SHALL emit a warning that the operator resolves the target via PCL graph_jump (no decision-output target since branchTo removal)
 
-### Requirement: Topological ordering and dependency resolution
+#### Scenario: Deleted syntax fields fail load
 
-Activation judgment SHALL be route active ∧ dependencies satisfied; satisfied = dependencies terminal (join default — all) or at least one dependency done (`join: any` — track join: the chosen route's terminal satisfies, the unchosen route never completes and never blocks). `join` SHALL accept only the literal `'any'` — an explicit `join: 'all'` is a schema parse error (default is all, declaring it is redundant). `join: any` SHALL be used only for branch-route convergence — direct upstreams MUST span ≥2 different routes (validator-enforced). **No vacuous satisfaction** — depending on an unchosen route means the graph author SHALL sequence through a decision node or express it with an any-join. O(1) lookup table, zero closure inference.
+- **WHEN** a graph declares `join`, `route`, `routing.actions`, `template: loop`, or a phase `type` other than `main`
+- **THEN** loading SHALL fail with a schema-level error naming the removed field — no silent stripping
 
-#### Scenario: When guard references only direct upstream fields
+#### Scenario: Unknown phase key fails load
 
-- **WHEN** a gate jump condition references an upstream output
-- **THEN** the condition references observable fields of the declared judgment context (direct dependsOn ∪ channels node: targets ∪ jump targets — validator-enforced)
+- **WHEN** a phase declares a key not in the schema surface (a removed field like `jumps`/`mode`, or a legacy field like `topic`/`maxDepth`)
+- **THEN** loading SHALL fail with a schema-level error naming the unknown key — no per-field migration hint, no silent strip
 
-#### Scenario: Route-aware readiness
+#### Scenario: Top-level unknown keys preserved
 
-- **WHEN** resolveReady checks a pending node
-- **THEN** it activates iff the node's route is active and every dependency is terminal (or one is done under `join: any`)
+- **WHEN** a graph declares an unknown top-level key
+- **THEN** loading SHALL succeed and the key SHALL be preserved via passthrough
 
-#### Scenario: Track join without vacuous
+#### Scenario: Template task injected at load
 
-- **WHEN** a join node depends on two track flows (minimal/detailed) with `join: any`
-- **THEN** it waits for the CHOSEN track's terminal; the unselected track never completes and never blocks; the node never activates before the track decision fires
+- **WHEN** a phase declares `template: startup`
+- **THEN** its task text SHALL be injected from the registered startup template at load time (task = template output)
+- **AND** an explicit `task` on the same phase SHALL fail schema validation (template is the single source of the node's work)
 
-#### Scenario: topoLayers produces dependency-ordered layers
+#### Scenario: Router template args injected at load
 
-- **WHEN** a graph loads
-- **THEN** topoLayers yields dependency-ordered layers; cycles fail loudly
+- **WHEN** a phase declares `template: router` with `template_args: { paths: [openspec-apply, openspec-engineer] }`
+- **THEN** its task text SHALL be injected from the registered router template with the paths applied
+- **AND** an explicit `task` or `use` on the same phase SHALL fail schema validation
 
-#### Scenario: resolveReady returns nodes with satisfied dependencies
+#### Scenario: Per-node template task injected at load
 
-- **WHEN** readiness resolves
-- **THEN** a node returns iff its route is active and deps are terminal (or one done under `join: any`)
+- **WHEN** a phase declares `template: scope-entry` with `template_args: { terminal: round-report }`
+- **THEN** its task text SHALL be injected from the registered scope-entry template at load time (task = template output with the terminal applied)
+- **AND** an explicit `task` on the same phase SHALL fail schema validation (template is the single source of the node's work)
 
-#### Scenario: Approval readiness follows review conclusion
+#### Scenario: Framework-chain template rejected at load
 
-- **WHEN** a downstream node depends on an approval
-- **THEN** it waits for the approval decision
+- **WHEN** a phase declares `template: framework-chain`
+- **THEN** loading SHALL fail with a schema-level error naming the removed factory form (migration: declare the per-node template)
 
-#### Scenario: Redundant transitive dependencies rejected
+#### Scenario: Template node ordering enforced
 
-- **WHEN** a phase declares a redundant transitive dependency
-- **THEN** the validator rejects it (gate exemption removed — judgment context declares via channels node:, never by padding dependsOn)
+- **WHEN** a phase declares `template: startup` with non-empty `dependsOn`
+- **THEN** loading SHALL fail with a structured error naming the ordering violation (template nodes are graph entries — startup steps run before any other node's context assembly)
 
-#### Scenario: findUpstream traces transitive dependencies
+#### Scenario: Router node may sit mid-graph
 
-- **WHEN** validator/jump logic needs upstream
-- **THEN** findUpstream traces transitive dependsOn edges
+- **WHEN** a phase declares `template: router` with non-empty `dependsOn`
+- **THEN** loading SHALL succeed (routers select among candidate graphs after upstream context — no entry constraint)
 
-#### Scenario: Explicit join all rejected
+#### Scenario: Router paths validated as graph names
 
-- **WHEN** a phase declares `join: all`
-- **THEN** schema parsing SHALL fail (only the literal `any` is valid; absent = all)
+- **WHEN** a router template node's `template_args.paths` contains an entry that does not resolve to a graph
+- **THEN** loading SHALL fail with a structured error naming the entry
+- **AND** a non-graph path form (node id / prose route) SHALL be rejected
 
-#### Scenario: Single-route any-join rejected
+#### Scenario: Flow edge endpoint missing
 
-- **WHEN** a node declares `join: any` while all direct upstreams share one route (or all sit on the default route)
-- **THEN** contract validation SHALL error naming the phase and the reason (any-join converges branch routes — upstreams must span ≥2 distinct routes)
+- **WHEN** a flow edge references a phase absent from `phases`
+- **THEN** load SHALL fail loudly naming the edge and the missing id
+
+#### Scenario: Malformed flow syntax rejected
+
+- **WHEN** a flow entry does not parse under the subset grammar
+- **THEN** load SHALL fail loudly with the parse error — no silent drop
 
 ### Requirement: Schema single source of truth
 
-- node status SHALL be exactly the `NodeStateSchema.status` values: `pending`, `active`, `done`, `skipped`
-- All consumers SHALL reference this schema as the single authority — no duplicate node-status enums, no dead DTOs carrying stale node-status values
-- The status set SHALL match the runtime FSM's actual production points (no dead enum values the FSM never writes)
+MODIFIED: PhaseSchema keeps the peer-level `agent` field (advisory, priority-ordered sub-agent type preferences; consumed agent-side, engine passes through with zero judgment). `execution`, `position`, and `executionMode` remain removed. The `template` field SHALL be `z.enum(['startup', 'router', 'scope-entry', 'adopting']).optional()` — `adopt-scope` removed from the enum (adopt-scope-and-handler-blocks, ADR 0247: the adoption goal is confirmed by the framework's scope-entry + requirement accept loop + adopting grilling, so the second atom-scope-interview node is deleted), `loop` removed (loop semantics move to flow self-edges, graph-flow capability), the `framework-chain` factory entry replaced by the per-node templates (one template one file, ADR 0245), and `review-accept` / `adopt-accept` deleted by the accept-node consolidation (ADR 0246 — the adopting grilling consensus IS the adoption confirmation; the requirement confirmation is a caller-declared accept loop on the requirement router node). A graph declaring `template: adopt-scope` SHALL fail load with a schema-level error naming the key.
 
-#### Scenario: Phase schema defines all phase fields
+#### Scenario: Schema rejects removed fields
 
-- **WHEN** a phase definition is validated
-- **THEN** optional fields SHALL include: `dependsOn`, `agent`, `skill`, `channels` (agent-type), `preText` (approval-type), `task`, `routing`, `join`, `when`, `eval`, `use`
-- **THEN** removed fields (`topic`, `retry`, `with`, `def`, `maxDepth`, `context`) SHALL be rejected loudly with a delete hint — never silently stripped
+- **WHEN** phase-level validation runs on a phase declaring `execution`, `position`, or `executionMode`
+- **THEN** those keys SHALL be rejected as unknown fields
 
-#### Scenario: NodeState schema constrains valid states
+#### Scenario: Derived schema matches
 
-- **WHEN** a node state is validated
-- **THEN** `status` SHALL be one of: `pending`, `active`, `done`, `skipped`
-- **THEN** `retryCount` SHALL be a non-negative integer
-- **THEN** timestamps (`startedAt`, `completedAt`) SHALL be ISO 8601 strings or absent
+- **WHEN** the JSON Schema derived artifact is compared with the TS schema
+- **THEN** `execution` / `position` / `executionMode` SHALL be absent from both
+- **AND** the `agent` field SHALL be present in both
+- **AND** the `template` field (enum `['startup', 'router', 'scope-entry', 'adopting']`) and `template_args` (paths / terminal / questions) SHALL be present in both
+- **AND** the top-level `flow` field SHALL be present in both
 
-#### Scenario: Schema is the sole node-status authority
+#### Scenario: Peer-level agent field accepted
 
-- **WHEN** any module defines or validates node status values
-- **THEN** it SHALL reference `NodeStateSchema.status` — no hand-written copies
+- **WHEN** phase-level validation runs on a main phase declaring `agent: ['explore', 'scout']`
+- **THEN** the phase SHALL validate successfully
+- **AND** the declared agent array SHALL be exposed on the dispatch NodeDetail (`agent` field)
+
+#### Scenario: Template field accepted on entry
+
+- **WHEN** phase-level validation runs on a graph-entry phase declaring `template: startup` with empty `dependsOn` and no `task`
+- **THEN** the phase SHALL validate successfully
+
+#### Scenario: Router template accepted with args
+
+- **WHEN** phase-level validation runs on a phase declaring `template: router`, `template_args: { paths: [a, b] }`, and `dependsOn: [upstream]`
+- **THEN** the phase SHALL validate successfully
+
+#### Scenario: Per-node template accepted with args
+
+- **WHEN** phase-level validation runs on a phase declaring `template: scope-entry`, `template_args: { terminal: round-report }`, and `dependsOn: [upstream]`
+- **THEN** the phase SHALL validate successfully
+- **AND** `template: scope-entry` without `template_args.terminal` SHALL be rejected (terminal required with the template)
+
+#### Scenario: Framework-chain discriminator rejected
+
+- **WHEN** phase-level validation runs on a phase declaring `template: framework-chain` or `template_args: { node: scope-entry, terminal: round-report }` without the matching template
+- **THEN** schema validation SHALL reject the workflow naming the removed factory form
+
+#### Scenario: Template and use conflict rejected
+
+- **WHEN** a phase declares both `template` and `use`
+- **THEN** schema validation SHALL reject the workflow with both fields named (the template is the single source of the node's work; `use` composition is deleted)
+
+#### Scenario: Template and task conflict rejected
+
+- **WHEN** a phase declares both `template` and `task`
+- **THEN** schema validation SHALL reject the workflow with both fields named
+
+#### Scenario: template_args without router rejected
+
+- **WHEN** a phase declares `template_args` without the matching `template` (`router` requires `paths`; `scope-entry` requires `terminal`)
+- **THEN** schema validation SHALL reject the workflow naming the field and the missing template type
+
+#### Scenario: Loop template value rejected
+
+- **WHEN** a phase declares `template: loop`
+- **THEN** schema validation SHALL fail naming the removed value — loop SHALL be expressed as a flow self-edge
+
+#### Scenario: Flow field declared member
+
+- **WHEN** a graph declares a top-level `flow` array
+- **THEN** loading SHALL read it into the parsed graph definition for transition-table compilation (never passthrough-swallowed)
+
+#### Scenario: Accept templates rejected at schema level
+
+- **WHEN** a graph phase declares `template: review-accept` or `template: adopt-accept`
+- **THEN** graph load SHALL fail validation naming the enum member
+
+#### Scenario: Adopt-scope template rejected at schema level
+
+- **WHEN** a graph phase declares `template: adopt-scope`
+- **THEN** graph load SHALL fail validation naming the enum member
+
+#### Scenario: Router questions parameter accepted
+
+- **WHEN** a graph phase declares `template: router` with `template_args: { paths: [...], questions: [{ prompt, condition }] }`
+- **THEN** graph load SHALL succeed; the questions array SHALL be passed through to the router template text
+
+#### Scenario: Questions rejected on non-router templates
+
+- **WHEN** a graph phase declares `template_args.questions` without `template: router`
+- **THEN** graph load SHALL fail validation naming the non-router template
 
 ### Requirement: Retry and jump targets explicit
 
-The JUMP reset scope SHALL be the target + downstream terminal nodes (upstream kept).
+MODIFIED: the rework reset scope SHALL be the target + downstream terminal nodes (upstream kept), including the synthesized handoff node: a rework decision targeting an upstream node SHALL reset the handoff to `pending` with retry count incremented (never zeroed) as part of the downstream terminal closure. The reset SHALL persist cleared execution timestamps: reset node rows in the database carry NULL startedAt/completedAt, matching the in-memory snapshot — a status query after a rework SHALL NOT show stale timestamps on pending nodes. Retry count SHALL be tracked in run state (LangGraph `ReducedValue` auto-increment on re-entry), never zeroed. Rework SHALL NOT cross run boundaries — composition is compile-time nesting inside the single run; root rework targets are limited to nodes of the compiled graph (root members and namespaced composed members — no sibling-run target concept exists).
 
 #### Scenario: Jump reset scope
 
-- **WHEN** a gate jump or approval retry/jump targets node X
-- **THEN** X and every terminal node in X's downstream closure reset to pending with retryCount++ ; X's upstream stays terminal (inputs unchanged); route-activation flags set by gates inside the reset closure are cleared
+- **WHEN** a main rework decision targets node X
+- **THEN** X and every terminal node in X's downstream closure reset to pending with retry count incremented; X's upstream stays terminal (inputs unchanged)
+
+#### Scenario: Jump reset includes handoff
+
+- **WHEN** a main rework decision targets node X upstream of a completed `__handoff`
+- **THEN** X, the downstream terminal closure, and `__handoff` reset to `pending` with retry count incremented
+- **AND** the persisted rows carry NULL startedAt/completedAt (no stale completion values)
+
+#### Scenario: Rework target bounded to the compiled graph
+
+- **WHEN** a root-run node declares a rework target
+- **THEN** the target SHALL be a node of the compiled graph (root member or namespaced composed member) — a target outside the graph fails load
+
+#### Scenario: Jump reset clears timestamps persistently
+
+- **WHEN** a rework resets a previously completed node to pending
+- **THEN** the persisted row's startedAt/completedAt become NULL (not the stale completion values) — a later status query reconstructed from the database matches the reset's snapshot
 
 #### Scenario: Eval auto-retry carries target
 
-- **WHEN** a gate jump (rework) carries an explicit target
-- **THEN** the target is applied mechanically (retryCount++ on the reset closure)
+- **WHEN** a main rework decision carries an explicit target
+- **THEN** the target is applied mechanically (retry count incremented on the reset closure)
 
 #### Scenario: Retry with explicit target re-executes target
 
-- **WHEN** an approval retry/jump action carries a target
-- **THEN** the run jumps to it (target + downstream reset)
+- **WHEN** a main rework decision carries a target
+- **THEN** the run re-executes it (target + downstream reset)
 
 #### Scenario: Target-less retry or jump warns
 
@@ -390,12 +399,12 @@ The JUMP reset scope SHALL be the target + downstream terminal nodes (upstream k
 
 #### Scenario: Target resolves after flatten
 
-- **WHEN** a target names a flow
-- **THEN** flatten remaps retry/jump targets to the flow's entry node
+- **WHEN** a target names a composing phase
+- **THEN** composition remaps retry/jump targets to the subgraph's entry node
 
 ### Requirement: Maturity-declared scope entries
 
-A journey's scope entry SHALL declare its maturity by construction: raw journeys wire an interview entry (skill: atom-scope-interview — unconditional interview); sharpened/decided journeys wire an extract entry (task: read upstream artifact channel → scope fields; ADR judgment = existence check on docs/adr/index.md; adr_created echoes the upstream artifact's decision). In-degree-0 prefix entries (never composed with dependencies) SHALL carry `input: true` (input-stage membership); composed stage entries (inheriting composer dependsOn) SHALL NOT carry the flag — their reset semantics follow the stage. No node SHALL detect input source, branch on input state, or degrade its interview.
+A journey's scope entry SHALL declare its maturity by construction: raw journeys wire an interview entry (skill: atom-scope-interview — unconditional interview); sharpened/decided journeys wire an extract entry (task: read upstream artifact channel → scope fields; ADR judgment = existence check on docs/adr/index.md; adr_created echoes the upstream artifact's decision). No node SHALL detect input source, branch on input state, or degrade its interview. (Composition is deleted — no entry inherits a composer dependsOn, so every graph entry is in-degree-0 by construction; the historical `input: true` flag does not exist in the schema.)
 
 #### Scenario: Raw journey interviews
 
@@ -407,30 +416,15 @@ A journey's scope entry SHALL declare its maturity by construction: raw journeys
 - **WHEN** a graph declares an extract entry with an upstream artifact channel
 - **THEN** the node SHALL read the artifact, emit scope fields + ADR existence check, and SHALL NOT ask questions
 
+#### Scenario: Every entry is in-degree-0 by construction
+
+- **WHEN** a graph loads
+- **THEN** its entry node SHALL be in-degree-0 (no composer dependsOn exists — composition is deleted); no `input` flag exists in the schema (unknown-key rejection)
+
 #### Scenario: Composed entry skips the input flag
 
-- **WHEN** an entry is composed with a composer dependsOn (flattened in-degree > 0)
-- **THEN** it SHALL NOT declare `input: true` — the loader's flattened in-degree-0 check rejects flagged nodes with dependencies, and the flag would mis-reset the stage on rework
-
-### Requirement: Graph-level channels field in taskflow schema
-
-The `.taskflow.yaml` format SHALL declare a top-level `channels` field — an optional array of channel entries — alongside `name`, `version`, and `phases`. Entries SHALL follow graph-level entry rules: explicit `skill:`/`node:` prefix or file-glob shape; bare names SHALL be rejected at load. The field SHALL be documented in the graph format reference (atom-graph-spec) as the graph's ambient context layer.
-
-#### Scenario: Top-level channels declared
-
-- **WHEN** a graph file declares `channels: ["skill:atom-graph-spec"]` at top level
-- **THEN** schema validation SHALL accept the graph
-- **THEN** the entries SHALL be inherited by every flattened phase of the graph
-
-#### Scenario: Top-level bare name rejected
-
-- **WHEN** a graph file declares top-level `channels: ["atom-graph-spec"]` (bare name)
-- **THEN** load SHALL fail with GraphDefinitionError naming the entry and the missing prefix
-
-#### Scenario: Format reference documents the field
-
-- **WHEN** a graph author reads the format reference (atom-graph-spec §Channels)
-- **THEN** the top-level `channels` field, its entry rules, and the inheritance semantics SHALL be present
+- **WHEN** a graph loads with an entry that does not declare an `input` flag
+- **THEN** the graph loads normally — the flag does not exist in the schema (unknown-key rejection would fire if declared); the composed-stage case that previously skipped the flag no longer exists (composition is deleted, every entry is in-degree-0 by construction)
 
 ### Requirement: Config schema — project channels array
 
@@ -446,71 +440,23 @@ The project configuration (`.graph-scheduler/config.json`) SHALL accept a `chann
 - **WHEN** `.graph-scheduler/config.json` declares no `channels` field
 - **THEN** the project scope SHALL be empty and existing graph behavior SHALL be unchanged
 
-### Requirement: Flatten carries child graph-level channels
-
-Merge-at-load flattening SHALL carry a child graph's top-level channels into the flattened child phases as their inheritance layer. Flattening SHALL NOT rewrite skill:/glob graph-level entries (they resolve in the child's own scope); `node:` targets SHALL be rewritten like phase entries (child-sibling → prefixed, parent-level stays unprefixed). The parent's flow-level channels SHALL merge into entry children per the existing input-interface rule.
-
-#### Scenario: Child top-level channels flattened
-
-- **WHEN** a flow references a child graph declaring top-level `channels: ["./CONTEXT.md"]`
-- **THEN** each flattened child phase SHALL carry `./CONTEXT.md` in its inherited layer
-- **THEN** parent phases outside the flow SHALL NOT carry it
-
-#### Scenario: Flatten rewrites no skill/glob graph-level entries
-
-- **WHEN** flattening composes a child with top-level `channels: ["skill:atom-graph-spec"]`
-- **THEN** the entry SHALL appear unchanged (no flow-prefix rewrite) in the child phases' inherited layer
-
-#### Scenario: Child graph-level node ref prefixed like phase entries
-
-- **WHEN** a child declares top-level `channels: ["node:sibling"]` targeting its own phase
-- **THEN** the flattened child phase's inherited layer SHALL carry `node:<flow>/sibling`
-
 ### Requirement: Maker-graph conventions reference graph-generate
 
-Production-graph phase conventions SHALL name the concrete maker graph `graph-generate` (spec/implement phases via atom-graph-design / atom-graph-writer). Case-5 no-work self-judgment SHALL NOT be used by graph-generate's spec/implement phases (topology decides, per the single-writer convention).
+Production-graph phase conventions SHALL name the concrete maker graph `graph-generate` (spec/implement phases via atom-graph-design / atom-graph-writer). Case-5 no-work self-judgment SHALL NOT be used by graph-generate's spec/implement phases (topology decides, per the single-writer convention). Terminology: the phases' work SHALL be described as decided by the workflow graph — "DAG" wording retired.
 
 #### Scenario: graph-generate single-writer convention
 
 - **WHEN** a validator scans graph-generate for case-5 no-work self-judgment in spec/implement
-- **THEN** none SHALL be found — the phases' work is decided by the DAG (spec → spec-accept → implement → review → gate)
+- **THEN** none SHALL be found — the phases' work is decided by the workflow graph (spec → spec-accept → implement → review → gate)
 
 #### Scenario: Maker graph naming
 
 - **WHEN** graph-definition docs reference the maker journey graph
 - **THEN** they SHALL name `graph-generate`, never `graph-workflow`
 
-### Requirement: Route unreferenced by hardcoded routing action SHALL trigger a validator warning
-
-Graph load validation SHALL check every declared route for whether it is referenced by any approval's hardcoded routing action (`action: continue` + `target`). An unreferenced route SHALL produce a warning — its activation depends on AI dynamic recommendation (soft path); the author SHALL explicitly declare a routing action or delete the route. The check SHALL be warning-level (AI-dynamic activation remains legal) and SHALL NOT block loading.
-
-#### Scenario: Unreferenced route warns
-
-- **WHEN** a graph declares `route: implement` and no approval's hardcoded routing action target references it
-- **THEN** loading produces a warning: activation depends on AI dynamic judgment; the author SHALL declare a routing action or delete the route
-
-#### Scenario: Hardcoded reference does not warn
-
-- **WHEN** a route is referenced by some approval's hardcoded routing action target (e.g. minimal-track/detailed-track)
-- **THEN** no warning — activation is mechanical
-
-#### Scenario: Pure default-route graph produces zero warnings
-
-- **WHEN** a graph declares no route (or after redundant routes are deleted)
-- **THEN** no route warning — dependency ordering is guaranteed by dependsOn, and end is expressed by endRun
-
-### Requirement: Single-path ordering SHALL NOT be expressed with route
-
-A flow with only one active path SHALL use `dependsOn` for ordering (+ endRun to express termination) and SHALL NOT declare a route — route carries exclusive branch selection only (multiple routes mutually exclusive); a single-path route is a redundant activation mechanism (missing branchTo silently drains the flow).
-
-#### Scenario: Single-path flow without route
-
-- **WHEN** a flow is entered only after a single approval decision (implement mode), and the end path is expressed by the approval's `end` action
-- **THEN** the flow declares no route — the default route is always active, dispatch is mechanical after the approval completes, with zero branchTo dependency
-
 ### Requirement: Mandatory operation declarations on main phases
 
-Every main phase declares its operation classes from the closed hlt-classes set; undeclared main phases fail graph load.
+Every main phase SHALL declare its operation classes from the closed operation-class set (scenario registry per tool-usage-contract); undeclared main phases SHALL fail graph load. No HLT class table exists (ADR 0194).
 
 #### Scenario: Undeclared main phase rejected
 
@@ -524,17 +470,8 @@ Every main phase declares its operation classes from the closed hlt-classes set;
 
 #### Scenario: Closed set membership
 
-- **WHEN** a main phase declares an operation not in the closed hlt-classes set
+- **WHEN** a main phase declares an operation not in the closed operation-class set
 - **THEN** graph load fails with a validation error listing the valid classes
-
-### Requirement: No version field
-
-The graph definition schema has no `version` field; `version: 1` declarations are rejected at load.
-
-#### Scenario: Legacy version declaration
-
-- **WHEN** a taskflow YAML declares `version`
-- **THEN** graph load fails with a loud rejection
 
 ### Requirement: Engine validates shapes, not content
 
@@ -547,12 +484,12 @@ The engine's load-time contract checks are limited to machine facts: target reso
 
 #### Scenario: Unresolvable jump target
 
-- **WHEN** a gate jump targets a non-existent node
+- **WHEN** a main rework decision targets a non-existent node
 - **THEN** graph load fails with a loud rejection
 
 ### Requirement: Reserved `$` prefix rejected
 
-The phase schema SHALL reject any phase id starting with `$` — the activation prologue was removed (activation facts live at `graph_start` / pilot startup); any `$` id is rejected with a validation error naming the removed prefix. The `input: true` flag of the reverted input-node mechanism SHALL NOT exist in the schema.
+MODIFIED: the phase schema SHALL reject any phase id starting with `$` — the activation prologue was removed (activation facts live at `graph_start` / pilot startup); any `$` id is rejected with a validation error naming the removed prefix. The `input: true` flag of the reverted input-node mechanism SHALL NOT exist in the schema. Synthesized handoff ids SHALL use the reserved-safe `__handoff` suffix (never `$`-prefixed) — compilation post-schema is not bound by the source-id rejection but SHALL respect the reserved-prefix contract.
 
 #### Scenario: $-prefixed id rejected
 
@@ -563,3 +500,343 @@ The phase schema SHALL reject any phase id starting with `$` — the activation 
 
 - **WHEN** a graph declares any non-`$` node id
 - **THEN** validation accepts it like any node id
+
+#### Scenario: Synthesized handoff avoids the reserved prefix
+
+- **WHEN** compilation synthesizes the handoff node id
+- **THEN** the id SHALL use the `__handoff` suffix (no `$` prefix) and SHALL NOT be subject to the source-id `$` rejection
+
+### Requirement: Graph identity SHALL be schema-determined
+
+A graph definition SHALL be identified by successful WorkflowSchema validation — not by file suffix and not by dependency-edge (DAG) semantics. Any YAML document that validates is a graph; a document that fails validation is not. The `name` field SHALL be required; a document without a valid `name` SHALL NOT load as a graph. Dependency-edge acyclicity is a validation concern; graph identity is schema-determined regardless of topology shape.
+
+#### Scenario: Suffix-free YAML loads
+
+- **WHEN** a YAML file with an arbitrary filename passes schema validation
+- **THEN** it loads as a graph
+
+#### Scenario: Name-less YAML rejected
+
+- **WHEN** a YAML file omits `name`
+- **THEN** load fails with a name-required violation
+
+#### Scenario: Loop graph loads by schema identity
+
+- **WHEN** a graph declares runtime rework loops (main rework decisions targeting upstream terminals) and its dependsOn edges are acyclic
+- **THEN** the graph SHALL load and run — the loop capability is part of the engine contract, not a validation failure
+
+### Requirement: Graph schema self-description — $schema declaration
+
+The graph format SHALL accept an optional top-level `$schema` field — a URI string identifying the derived JSON Schema document the graph conforms to. Absent `$schema` SHALL validate against the default WorkflowSchema (backward compatible with existing files). When declared, the value SHALL be a URI that resolves to the derived JSON Schema document (`workflow.schema.json`): the load chain SHALL resolve the declaration relative to the declaring file's location and, failing that, against the package schemas dir; a declaration that resolves to no schema document SHALL fail at load with a loud error naming the declared URI. Malformed URIs SHALL fail at load. Shipped graph files SHALL declare the derived document in a form resolvable from the file's location (e.g. `../schemas/workflow.schema.json`).
+
+#### Scenario: $schema declared
+
+- **WHEN** a graph YAML declares `$schema` referencing the workflow JSON Schema and the URI resolves to the derived JSON Schema document
+- **THEN** the load chain resolves the declared schema identity and validates the document against WorkflowSchema
+
+#### Scenario: $schema declared but dangling
+
+- **WHEN** a graph YAML declares `$schema` with a URI that resolves to no schema document (e.g. a file-relative name pointing at a missing path)
+- **THEN** load fails with a loud error naming the declared URI
+
+#### Scenario: $schema absent
+
+- **WHEN** a graph YAML has no `$schema`
+- **THEN** it validates against the default WorkflowSchema (backward compatible)
+
+### Requirement: Version field — semver with major-mismatch rejection
+
+The graph format SHALL accept an optional top-level `version` field — the format version of the document in semver syntax (e.g. `1.0.0`). Non-semver values SHALL fail schema validation. A major-version mismatch against the engine's supported format version SHALL fail load with a loud rejection naming the mismatch — never silent degradation.
+
+#### Scenario: Valid semver version
+
+- **WHEN** a graph YAML declares `version: 1.0.0` with the engine's major version
+- **THEN** load succeeds
+
+#### Scenario: Major version mismatch
+
+- **WHEN** a graph YAML declares a major version the engine does not support
+- **THEN** load fails with a loud rejection naming the mismatch
+
+#### Scenario: Invalid version syntax
+
+- **WHEN** a graph YAML declares a non-semver `version`
+- **THEN** schema validation fails
+
+### Requirement: JSON Schema derived artifact
+
+The WorkflowSchema zod definition SHALL be the single source of truth for the graph format. A JSON Schema document SHALL be derived from it via zod v4 `toJSONSchema()` (draft 2020-12) and published at `schemas/workflow.schema.json`. The derived artifact SHALL NOT be hand-maintained (no dual-write); the generation channel SHALL produce the committed form directly — the generator SHALL normalize its output with the repository's prettier configuration (same formatter that touches committed JSON), and the drift guard SHALL compare the normalized derived document against the committed artifact. A prettier-formatted committed artifact SHALL NOT fail the guard.
+
+#### Scenario: Derived artifact matches source
+
+- **WHEN** the JSON Schema artifact is regenerated from the zod source via the generation channel
+- **THEN** it matches the committed `workflow.schema.json` byte-for-byte — both sides prettier-normalized, so a prettier-formatted committed artifact passes the snapshot test
+
+#### Scenario: Artifact out of sync fails
+
+- **WHEN** the zod source changes without regenerating the artifact
+- **THEN** the drift guard fails with the content-level diff — formatting differences alone SHALL NOT fail the guard
+
+### Requirement: Graph-level context field in workflow schema
+
+The workflow YAML format SHALL declare an optional top-level `context` field — an array of channel entries — alongside `name`, `description`, `$schema`, `version`, `phases`, and `inventory`. Entries SHALL follow graph-level entry rules: explicit `skill:`/`node:` prefix or file-glob shape; bare names SHALL be rejected at load. The field SHALL be documented in the graph format reference (atom-graph-spec) as the graph's ambient context layer. A top-level `channels` field SHALL remain rejected at load (renamed to `context` — loud rename contract).
+
+#### Scenario: Top-level context declared
+
+- **WHEN** a graph YAML declares a valid `context` array
+- **THEN** load succeeds and the entries form the graph's ambient context layer
+
+#### Scenario: Top-level channels rejected
+
+- **WHEN** a graph YAML declares top-level `channels`
+- **THEN** load fails with the rename rejection (use `context`)
+
+### Requirement: Graph inventory — node overview table
+
+The workflow YAML format SHALL declare an optional top-level `inventory` array — the graph's node overview table (dedicated schema key; the term "atom" SHALL NOT name the key). Each entry SHALL carry exactly `{ id, type, goal, constraints? }`:
+
+- `id` — the phase id the entry describes; SHALL exist in the `phases` array.
+- `type` — the phase type; SHALL match the referenced phase's declared type (`main` | `flow`). The `approval` / `gate` values are deleted (ADR 0215/0216).
+- `goal` — a **bounded compound sentence stating the atom's intent** (what the atom accomplishes — intent semantics per the platform task contract, OMP Goal), **including its execution mechanism when one exists**: connectors limited to `AND` / `THEN` / `IF` / `ELSE` / `OR` (structural keywords ALL-CAPS, prose `and`/`or` lowercase); ordinary nodes SHALL NOT exceed 5 steps; conditional goals SHALL NOT exceed 3 paths. Skill-bound main nodes SHALL name the executing skill in verb form (e.g. "Executes atom-scope-interview to acquire scope"); flow entries SHALL state "expands <use> subgraph". The gate-goal operand bound and the approval/gate decision-semantics clause are removed with the deleted types.
+- `constraints` (optional) — an array of one-sentence prose rules stating the atom's boundaries: general rules and explicit non-goals ("what the atom does NOT do / which approaches are NOT adopted"). SHALL NOT exceed 5 entries per atom (convention bound, localized from the platform constraint guidance "3–5 constraints / ≤5 constraint sentences"; user-calibratable). Rules prefer positive framing; explicit non-goals SHALL state the negation directly (e.g. "does not X" / "avoids Y"). `constraints` SHALL NOT introduce structural keywords — prose only, no new word-list members.
+
+A dedicated `skill` field SHALL NOT exist on inventory entries (removed — the phase-level `skill` field is the single source; the mechanism lives in the goal). A legacy `skill` key in an inventory entry SHALL be ignored — stripped at parse, no rejection, no migration hint.
+
+Consistency validation: the inventory consistency check SHALL run as part of the **post-flatten contract pass** (per source graph — each graph's inventory validated against its own phase declarations): every inventory entry SHALL be checked against its referenced phase — missing `id` or type mismatch SHALL produce a load **warning** (documented per entry); the graph SHALL still load (warning is not a rejection, and SHALL never be silent). `goal`/`constraints` content SHALL NOT be machine-validated (zero new validation axis — no bounds check, no case check, no constraint-content check; discipline = generation-time obligation + review). Inventory warnings SHALL flow through the contract-warning pipeline alongside all other contract warnings.
+
+#### Scenario: Inventory declared with matching entries
+
+- **WHEN** a graph YAML declares an `inventory` array whose entries all reference existing phases with matching type
+- **THEN** load succeeds with no inventory warnings
+
+#### Scenario: Inventory entry references a missing phase
+
+- **WHEN** an inventory entry references a phase id absent from the `phases` array
+- **THEN** load SHALL produce a documented warning per entry — the graph still loads
+
+#### Scenario: Inventory entry type/skill mismatch
+
+- **WHEN** an inventory entry declares a type that does not match its referenced phase
+- **THEN** load SHALL produce a documented warning — never silent
+
+#### Scenario: Legacy inventory skill key ignored
+
+- **WHEN** an inventory entry carries a legacy `skill` key
+- **THEN** the key SHALL be ignored — stripped at parse, no rejection, no migration hint
+
+#### Scenario: Compound description within bounds
+
+- **WHEN** a goal uses the bounded compound syntax
+- **THEN** connectors SHALL be ALL-CAPS structural keywords (AND/OR/IF/THEN/ELSE) and ordinary nodes SHALL NOT exceed 5 steps
+
+#### Scenario: Constraints carry rules and non-goals
+
+- **WHEN** an entry declares `constraints`
+- **THEN** the array SHALL hold one-sentence prose rules and explicit non-goals, SHALL NOT exceed 5 entries, and SHALL NOT introduce structural keywords
+
+#### Scenario: Constraint content never machine-validated
+
+- **WHEN** a graph loads with inventory entries
+- **THEN** goal/constraints content SHALL NOT be machine-validated (no bounds check, no case check, no constraint-content check)
+
+#### Scenario: Flow entry describes expansion
+
+- **WHEN** an inventory entry describes a flow phase
+- **THEN** the goal SHALL state "expands <use> subgraph"
+
+### Requirement: Graph-level constraints accepted at load
+
+The WorkflowSchema SHALL declare the top-level `constraints` field (`z.array(z.string()).optional()`) alongside `name`/`description`/`$schema`/`version`/`context`/`inventory`/`phases`, and graph loading SHALL read it into the parsed graph definition for dispatch assembly. The field SHALL NOT be silently consumed by object passthrough — declared member, zero behavior branching (no machine validation of content; no effect on topology). Absent field SHALL be an empty set.
+
+#### Scenario: Constraints loaded with graph
+
+- **WHEN** a graph YAML declares top-level `constraints`
+- **THEN** the parsed graph definition carries the constraint array in order, and dispatch assembly can access it
+
+#### Scenario: Absent field is empty set
+
+- **WHEN** a graph YAML has no top-level `constraints`
+- **THEN** the parsed definition carries an empty constraint set — no warning, no error
+
+#### Scenario: Undeclared keys not silently consumed
+
+- **WHEN** a graph YAML declares `constraints`
+- **THEN** the key is a recognized schema member — the silent-passthrough path for undeclared top-level keys does not apply to it
+
+### Requirement: Top-level interaction field — non-interactive declaration
+
+The WorkflowSchema SHALL declare an optional top-level `interaction` field (`z.enum(['none', 'enabled']).optional()`) alongside `name`/`description`/`$schema`/`version`/`context`/`inventory`/`constraints`/`phases`, and graph loading SHALL read it into the parsed graph definition. The field SHALL NOT be silently consumed by object passthrough — declared member, zero behavior branching (no machine validation of content, no effect on topology, no load-time enforcement). Absent field SHALL be `enabled`. The declaration SHALL constrain only the declaring graph's own file — it SHALL NOT propagate through composition (`use`) into a composed graph's effective interaction state, and a composed graph SHALL NOT inherit or union child declarations. The field SHALL be documented in the graph format reference (atom-graph-spec) as the graph's interaction declaration.
+
+#### Scenario: Absent interaction field defaults to enabled
+
+- **WHEN** a graph YAML declares no top-level `interaction` field
+- **THEN** the parsed graph SHALL read an effective value of `enabled`
+- **THEN** loading SHALL succeed with no warning
+
+#### Scenario: Explicit non-interactive declaration loads
+
+- **WHEN** a graph YAML declares `interaction: none`
+- **THEN** loading SHALL succeed and the parsed graph SHALL carry `interaction: none`
+- **THEN** no load-time enforcement SHALL occur — the backend performs zero judgment on node content
+
+#### Scenario: Invalid interaction value fails schema validation
+
+- **WHEN** a graph YAML declares `interaction` with a value outside `none`/`enabled` (e.g. `interaction: sometimes`)
+- **THEN** schema validation SHALL fail with a structured error naming the field and accepted values
+
+#### Scenario: Subgraph declaration does not affect composed graph
+
+- **WHEN** a framework graph composes a subgraph that declares `interaction: none` via a flow phase (`use`)
+- **THEN** the composed graph SHALL keep its own declared interaction value (absent → `enabled`)
+- **THEN** no union, no inheritance, no effective-view aggregation of child interaction declarations SHALL occur
+
+### Requirement: Subgraph constraints propagate through composition
+
+When a graph composes a subgraph via a flow phase (`use`), the subgraph's top-level `constraints` SHALL propagate into the composed graph's graph-layer constraint set — union semantics, no source prefix, symmetric with the inventory use-chain union (ADR 0183). A subgraph without top-level constraints SHALL contribute nothing. Propagated subgraph constraints SHALL ride every NodeDetail dispatch of the composed run exactly like the root graph's own constraints (`[graph]` prefix, injection order: root entries first, then subgraph entries in composition order).
+
+#### Scenario: Composed run injects subgraph constraints
+
+- **WHEN** a graph uses a subgraph that declares top-level `constraints` and a composed run dispatches a node from the subgraph's phases
+- **THEN** the NodeDetail carries both the root graph's `[graph]` entries and the subgraph's `[graph]` entries — no subgraph rule is silently dropped at flatten
+
+#### Scenario: Subgraph without constraints contributes nothing
+
+- **WHEN** a composed subgraph declares no top-level `constraints`
+- **THEN** the composed constraint set equals the root graph's own entries — empty subgraph contribution, no error, no warning
+
+#### Scenario: Nested composition propagates transitively
+
+- **WHEN** a subgraph itself composes a nested subgraph declaring constraints
+- **THEN** the nested constraints propagate to the outermost composed run (transitive union, depth-capped by the existing composition depth cap)
+
+### Requirement: Node activation and dependency resolution
+
+MODIFIED: activation judgment SHALL remain dependency-satisfied: satisfied = all direct dependencies terminal (AND join — the only join mode). Static dependency edges SHALL be acyclic — a cycle in dependsOn edges fails loading loudly with the cycle path. Redundant transitive dependencies SHALL be rejected. Readiness resolution SHALL be O(1) lookup, zero closure inference. The next-node set SHALL derive from the flow transition table: labeled edges = condition→target map, unlabeled edges = sequence default; a node without outgoing flow edges SHALL keep its dependsOn-derived successor set as the sequence default. Runtime loops SHALL be flow self-edges (bounded by constraint prose + retryCount), never dependency edges.
+
+#### Scenario: AND convergence is the only join mode
+
+- **WHEN** a phase has multiple dependencies
+- **THEN** it activates only after every dependency is terminal — no `join: any` exists
+
+#### Scenario: Load validates DAG acyclicity
+
+- **WHEN** a graph loads
+- **THEN** the contract pass validates dependency-edge acyclicity — a cycle fails loading loudly with the cycle path
+
+#### Scenario: Runtime rework loops are bounded and legal
+
+- **WHEN** a node is a flow self-loop head (a self-edge routes back on a condition)
+- **THEN** loading SHALL succeed (the loop is a flow transition, not a dependency edge)
+- **AND** the runtime loop SHALL be bounded by the constraint prose + retryCount (each self-edge pass increments the node's retryCount, never zeroed)
+
+#### Scenario: Redundant transitive dependencies rejected
+
+- **WHEN** a phase declares a redundant transitive dependency
+- **THEN** the validator rejects it — judgment context declares via channels node:, never by padding dependsOn
+
+#### Scenario: Flow edge activates its target
+
+- **WHEN** a node's flow table matches the reported condition
+- **THEN** exactly the matched edge's target activates; sibling flow targets stay pending
+
+#### Scenario: No flow edges — dependsOn default
+
+- **WHEN** a node declares no outgoing flow edges
+- **THEN** the dependsOn-derived successor set activates as before (sequence default)
+
+### Requirement: Completion choices SHALL contain graph nodes only
+
+The compile-time branch-target collection (`collectBranchTargets`) SHALL filter every gathered backtick token to the compiled graph's node set before it becomes a `completion.choices` entry — prose tokens (paths, glossary terms, plain identifiers that are not node ids) SHALL NOT surface as card options. The `rework` and `direct_end` fields SHALL keep their existing extraction (explicit backtick target / `direct end:` declaration). An unresolvable token that survives filtering SHALL be dropped, never offered.
+
+#### Scenario: Prose token excluded from choices
+
+- **WHEN** a phase task text contains a backticked word that is not a node id of the compiled graph
+- **THEN** the token SHALL NOT appear in `completion.choices`
+
+#### Scenario: Branch target kept
+
+- **WHEN** a phase task text contains a backticked node id that exists in the compiled graph
+- **THEN** the token SHALL appear in `completion.choices` (namespaced per composition)
+
+### Requirement: Resume continuation SHALL be exclusive
+
+A resumed node's decision SHALL determine the complete next activation set: the node function SHALL return `Command({goto})` for EVERY continuation (continue → its dependency-derived successor set or END; rework/branch → the target), and the graph SHALL NOT add static successors to a goto target on resume. A branch decision SHALL activate exactly the selected target — unselected branch nodes SHALL stay `pending` and SHALL NOT be interrupted or activated. A rework jump SHALL reset exactly the target + downstream terminal nodes — static successors of the jumped node SHALL NOT re-activate.
+
+#### Scenario: Branch selection activates only the chosen target (non-composing branch)
+
+- **WHEN** a decide node with dependency-derived successors alpha and beta is resumed with a branch decision for `alpha`
+- **THEN** the next interrupts SHALL be exactly `[alpha]`
+- **THEN** `beta` SHALL remain `pending` — never activated, never interrupted
+
+#### Scenario: Rework jump stays exclusive
+
+- **WHEN** a rework decision jumps to a node that has dependency-derived successors
+- **THEN** only the target node SHALL activate (reset scope = target + downstream terminal nodes → pending)
+- **THEN** the target's successors SHALL NOT activate as a side effect of the resume
+
+### Requirement: Compile product SHALL expose only consumed surfaces
+
+MODIFIED: the compiled graph SHALL NOT expose `meta.subgraphs` (boundary enumeration), `InterruptPayload.position`/`executionMode`, or cross-run delegation synthesis (subgraph dissolve → `<composing>/__delegate` + Pass 2 delegation node). The compile product SHALL expose: namespaced member ids, `composingTargets`/`resolveTarget` (branchTo naming a composing phase activates the subgraph entry), `levelOwnIds` terminal scoping, and per-level `__handoff` synthesis. Handoff synthesis SHALL use the zero-parameter session template (`handoffTaskTemplate()` — no report-path computation).
+
+#### Scenario: Subgraph members namespaced and dispatched
+
+- **WHEN** a composed graph compiles
+- **THEN** member ids SHALL be namespaced (`composingId/childId`) and SHALL appear in the run's dispatch sequence like peer nodes
+
+#### Scenario: Branch-to-composing-phase resolves
+
+- **WHEN** `branchTo` names a composing phase
+- **THEN** the scheduler SHALL activate the subgraph's entry node via `resolveTarget`
+
+#### Scenario: No delegation node synthesized
+
+- **WHEN** any subgraph compiles
+- **THEN** no `<composing>/__delegate` node SHALL be synthesized and no delegation task template SHALL be referenced
+
+#### Scenario: Handoff synthesized session-style
+
+- **WHEN** a graph or subgraph compiles
+- **THEN** its `__handoff` terminal SHALL be synthesized with the zero-parameter session contract task (no report path, no file-write instruction)
+
+### Requirement: use phases SHALL NOT accept an execution-mode declaration
+
+MODIFIED: `use` phases SHALL NOT accept an execution-mode declaration — the `execution` field remains removed. The peer-level `agent` hints field is restored for plain main phases (advisory sub-agent type preferences); composing (`use`) phases SHALL NOT declare `agent` — the subgraph agent deletion (round-12) is retained, enforced by a superRefine guard. `use` composition itself is retained: a `use` phase references another graph compiled in at load time (members namespaced `composingId/childId`, dispatched through the same advance loop as peer nodes). No composed/standalone distinction exists on the dispatch surface.
+
+#### Scenario: Use phase without execution field loads
+
+- **WHEN** a workflow declares a `use` phase without `execution` and `agent`
+- **THEN** the workflow SHALL load and compile — the subgraph members join the run with namespaced ids, dispatched like peer main nodes
+
+#### Scenario: Execution field rejected
+
+- **WHEN** a workflow declares `execution: subagent` or `execution: cross-run` on a `use` phase
+- **THEN** schema validation SHALL reject the workflow with the field named
+
+#### Scenario: Agent field rejected
+
+- **WHEN** a composing (`use`) phase declares an `agent` field
+- **THEN** schema validation SHALL reject the workflow with the field named
+- **AND** a plain main (non-`use`) phase declaring `agent` SHALL validate (peer-level advisory restored)
+
+### Requirement: Top-level description SHALL be the catalog single source
+
+The workflow YAML top-level `description` field SHALL be the single source for the graph's catalog description — registry entries SHALL NOT carry a description (registry is a pure index). Catalog consumers (graph_assets payload, drift checks) SHALL read the description from the loaded graph definition; an undeclared description SHALL yield an empty string, never a registry fallback. The field SHALL remain optional — no graph is required to declare it.
+
+#### Scenario: catalog description comes from the definition
+
+- **WHEN** a graph declares a top-level `description` and a catalog consumer queries the graph
+- **THEN** the consumer's description value is exactly the declared top-level description
+
+#### Scenario: undeclared description is empty, not a registry fallback
+
+- **WHEN** a graph declares no top-level `description`
+- **THEN** the catalog entry's description is empty even if a registry file (erroneously) carries one
+
+### Requirement: Load-time mermaid compliance for project graphs
+
+The load-time contract pass SHALL include a mermaid-format compliance check for project graphs: each project graph's declared `flow` block SHALL be parsed with the real mermaid flowchart parser. A non-conformant block SHALL NOT fail the load (the run is never blocked) — it SHALL be recorded as a load-time problem and delivered through the existing problems channel so `graph_assets` surfaces it to the frontend for repair. The check SHALL run only when the graph declares a `flow` block; builtin graphs are covered by the suite regression test instead (no runtime parse). The engine's deterministic subset parse SHALL remain the load authority (a subset-invalid block fails load loudly, unchanged).
+
+#### Scenario: Project graph flow block is not mermaid-valid
+
+- **WHEN** a project graph whose `flow` block fails the real mermaid parser is started
+- **THEN** the run starts (non-blocking), and the graph's `graph_assets` entry carries the mermaid-compliance problem
