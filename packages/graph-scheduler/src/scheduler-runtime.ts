@@ -1,16 +1,16 @@
 /**
  * Scheduler runtime — L3 application module.
  *
- * FSM Layer assembly: loads config → creates libsql
+ * Runtime layer assembly: loads config → creates libsql
  * connection → builds persistence, fileSystem, registryLoader,
- * 9-method Promise facade.
+ * LangGraph adapter, 10-method Promise facade (+ dispose).
  *
  * @module
  */
 
 import { Cause, Effect, Layer, ManagedRuntime } from 'effect';
 import Database from 'libsql';
-import { mkdirSync, readdirSync, readFileSync, statSync, type Dirent } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -52,79 +52,53 @@ export function createDefaultConfig(): SchedulerConfig {
   };
 }
 
-import { debugLog } from './debug.js';
-import { FileSystem, FileSystemError } from './filesystem.js';
-import { buildService, GraphRepository, makeRepositoryLayer, type RunSummaryItem } from './lib/db/repository.js';
-import { makeRegistryLoader, RegistryLoader } from './registry-loader.js';
-// API layer — direct Effect generators
-import { z } from 'zod/v4';
-import { graphAdvance, graphForceEnd, graphJump, graphStart, type NodeDetail } from './api/crud.js';
+import {
+  GraphAdapter,
+  type DispatchResult,
+  type IGraphSnapshot,
+  type NodeDetail,
+  type StartResult,
+} from './adapter.js';
+import { loadGraphWithRegistry } from './api/graph-loader.js';
 import { cleanAll, cleanCompleted, graphInit, type IGraphInitReport, type IGraphInitScan } from './api/maintenance.js';
-import { graphAssets, graphList, graphStatus, type GraphAsset } from './api/query.js';
-import type { IGraphSnapshot } from './api/snapshot.js';
-
-import type { ConfigError } from './types.js';
-
-/** Run summary — returned by graphList. */
-export interface RunSummary {
-  readonly runId: string;
-  readonly graphName: string;
-  readonly fsmState: string;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-}
+import { graphAssets, graphList, type GraphAsset } from './api/query.js';
+import { debugLog } from './debug.js';
+import { FileSystem, FileSystemError, makeWorkflowFileSystemLayer } from './filesystem.js';
+import { buildService, GraphRepository, makeRepositoryLayer } from './lib/db/repository.js';
+import { makeRegistryLoader, RegistryLoader } from './registry-loader.js';
+import type { ConfigError, RunSummary } from './types.js';
 
 /** Promise-typed facade over the FSM-driven graph-scheduling domain. */
 export interface SchedulerRuntime {
   /** Start a new graph run — returns runId + first node to execute. */
-  readonly graphStart: (
-    graphName: string,
-    args?: Record<string, unknown>,
-  ) => Promise<{
-    readonly runId: string;
-    readonly node: NodeDetail | null;
-    /** resolution source of the loaded graph — project | builtin | fallback */
-    readonly resolvedFrom: 'project' | 'builtin' | 'fallback';
-    /** absolute path the graph was loaded from */
-    readonly resolvedPath: string;
-    /** graph top-level description — purpose-focused identity text; absent when undeclared */
-    readonly description?: string;
-    /** load-time machine warnings (inventory consistency, description drift) — empty when clean */
-    readonly problems: string[];
-    /** run snapshot — entry dispatch carries it (jump nav + progress display) */
-    readonly snapshot: IGraphSnapshot;
-  }>;
+  readonly graphStart: (graphName: string, args?: Record<string, unknown>) => Promise<StartResult>;
 
   /** Advance a run — report node completion + get next node.
    *  Output NOT passed — lives in agent session or on-disk files.
-   *  Duration derived from timestamps — never reported. */
+   *  Duration derived from timestamps — never reported.
+   *  Dual channel (graph-flow): `condition` = flow-matched transition
+   *  (no match → loud error); `jump` = backward-only forced rework (target
+   *  ⊆ ancestors ∪ `__handoff`); `end: true` = direct-end (adapter-level
+   *  completion). No branchTo. */
   readonly graphAdvance: (
     runId: string,
     nodeId: string,
-    branchTo?: string,
-    endRun?: boolean,
-  ) => Promise<{
-    readonly snapshot: IGraphSnapshot;
-    readonly node: NodeDetail | null;
-  }>;
+    end?: boolean,
+    condition?: string,
+    jump?: string,
+  ) => Promise<DispatchResult>;
 
   /** Directed jump to target phase — reset target + downstream terminal nodes (upstream kept). */
-  readonly graphJump: (
-    runId: string,
-    targetPhaseId: string,
-  ) => Promise<{
-    readonly snapshot: IGraphSnapshot;
-    readonly node: NodeDetail | null;
-  }>;
+  readonly graphJump: (runId: string, targetPhaseId: string) => Promise<DispatchResult>;
 
-  /** Force-terminate a run — all unfinished nodes aborted, irreversible. */
-  readonly graphForceEnd: (runId: string) => Promise<IGraphSnapshot>;
+  /** Force-terminate a run — run terminated, irreversible; completed/terminated runs are a no-op. Returns the unified envelope { snapshot, node: null }. */
+  readonly graphForceEnd: (runId: string) => Promise<DispatchResult>;
 
   /** Query full run snapshot. */
   readonly graphStatus: (runId: string) => Promise<IGraphSnapshot>;
 
   /** List all runs — newest first, summary only. */
-  readonly graphList: () => Promise<RunSummary[]>;
+  readonly graphList: () => Promise<ReadonlyArray<RunSummary>>;
 
   /** Enumerate graph assets — merged registries with per-graph problems; read-only, never creates a run. */
   readonly graphAssets: () => Promise<ReadonlyArray<GraphAsset>>;
@@ -142,7 +116,6 @@ export interface SchedulerRuntime {
   readonly dispose: () => Promise<void>;
 }
 
-import { ConfigService } from './config-service.js';
 // Config schema — single source of truth for config.json validation
 import { ConfigFileSchema, type SchedulerConfig } from './schemas/index.js';
 export { ConfigFileSchema, type SchedulerConfig };
@@ -236,89 +209,6 @@ function resolveConfig(override?: Partial<SchedulerConfig>): ResolvedConfig {
 }
 
 /**
- * Create a FileSystem Layer that searches multiple workflow directories.
- *
- * Relative file paths are tried against each directory in order;
- * the first existing file wins. Absolute paths bypass directory search.
- * Directories searched: project dir first, built-in dir last (fallback).
- */
-function makeWorkflowFileSystemLayer(taskflowDirs: readonly string[]): Layer.Layer<FileSystem, never, never> {
-  const resolvePath = (filePath: string): string | null => {
-    if (path.isAbsolute(filePath)) return filePath;
-    for (const dir of taskflowDirs) {
-      const candidate = `${dir}/${filePath}`;
-      try {
-        // Existence probe only — the load chain re-reads the file anyway;
-        // a full readFileSync here would double-read every fast-path candidate.
-        if (statSync(candidate).isFile()) return candidate;
-      } catch {
-        // try next dir
-      }
-    }
-    return null;
-  };
-
-  const resolveSchemaUri = (uri: string, filePath: string): string | null => {
-    // Dual-base resolution: file-relative first (the declaring document's
-    // directory), then the package schemas dir (the derived artifact's home).
-    const bases = [path.dirname(filePath), path.join(PKG_ROOT, 'schemas')];
-    for (const base of bases) {
-      const candidate = path.resolve(base, uri);
-      try {
-        if (statSync(candidate).isFile()) return candidate;
-      } catch {
-        // try next base
-      }
-    }
-    return null;
-  };
-
-  const listYamlFiles = (): string[] => {
-    const out: string[] = [];
-    for (const dir of taskflowDirs) {
-      let entries: Dirent[];
-      try {
-        entries = readdirSync(dir, { withFileTypes: true });
-      } catch {
-        continue;
-      }
-      for (const e of entries) {
-        if (e.isFile() && /\.ya?ml$/.test(e.name)) out.push(`${dir}/${e.name}`);
-      }
-    }
-    return out;
-  };
-
-  return Layer.succeed(FileSystem, {
-    readFile: (filePath: string) =>
-      Effect.try({
-        try: (): string => {
-          // Absolute paths — use as-is (from registry resolution)
-          if (path.isAbsolute(filePath)) {
-            return readFileSync(filePath, 'utf-8');
-          }
-          // Relative paths — try each workflow dir in order
-          const errors: string[] = [];
-          for (const dir of taskflowDirs) {
-            const candidate = `${dir}/${filePath}`;
-            try {
-              return readFileSync(candidate, 'utf-8');
-            } catch (e) {
-              errors.push(`${candidate}: ${String(e)}`);
-            }
-          }
-          throw new Error(`Not found in any workflow dir: ${errors.join('; ')}`);
-        },
-        catch: (cause): FileSystemError =>
-          new FileSystemError(filePath, `File not found or unreadable: ${String(cause)}`, cause),
-      }),
-    resolvePath,
-    listYamlFiles,
-    resolveSchemaUri,
-  });
-}
-
-/**
  * Assemble the full FSM scheduler runtime.
  *
  * Opens a libsql connection, builds all domain layers, initializes DDL,
@@ -378,17 +268,8 @@ export function createRuntime(config?: Partial<SchedulerConfig>): Effect.Effect<
     const registryLoaderService = makeRegistryLoader(registryPaths, BUILTIN_REGISTRY_PATH);
     const registryLoaderLayer = Layer.succeed(RegistryLoader, registryLoaderService);
 
-    // Layer 2c: runtime config — project-level ambient context for dispatch merge
-    const configServiceLayer = Layer.succeed(ConfigService, {
-      context: resolved.context,
-      dbPath: resolved.dbPath,
-    });
-
-    // Compose: persistence + fs + registry + config
-    const envLayer = Layer.merge(
-      persistenceLayer,
-      Layer.merge(fileSystemLayer, Layer.merge(registryLoaderLayer, configServiceLayer)),
-    );
+    // Compose: persistence + fs + registry (config flows via adapter deps)
+    const envLayer = Layer.merge(persistenceLayer, Layer.merge(fileSystemLayer, registryLoaderLayer));
 
     const runtime = ManagedRuntime.make(envLayer);
 
@@ -402,7 +283,7 @@ export function createRuntime(config?: Partial<SchedulerConfig>): Effect.Effect<
      * Error with the Cause pretty-printed.
      */
     /** Env union the managed runtime provides — effects runnable through the facade. */
-    type SchedulerEnv = GraphRepository | FileSystem | RegistryLoader | ConfigService;
+    type SchedulerEnv = GraphRepository | FileSystem | RegistryLoader;
 
     const run = <A, E>(eff: Effect.Effect<A, E, SchedulerEnv>): Promise<A> =>
       runtime.runPromiseExit(eff).then((exit) => {
@@ -411,32 +292,34 @@ export function createRuntime(config?: Partial<SchedulerConfig>): Effect.Effect<
         throw failure._tag === 'Some' ? failure.value : new Error(Cause.pretty(exit.cause));
       });
 
-    // Build the Promise-wrapped facade
+    // Build the Promise-wrapped facade over the LangGraph adapter
+    const adapter = new GraphAdapter({
+      db,
+      repo: buildService(db),
+      loadGraph: (graphName: string) => run(loadGraphWithRegistry(graphName, resolved.context)),
+      projectContext: resolved.context,
+    });
+
     const schedulerRuntime: SchedulerRuntime = {
-      graphStart: (graphName: string, args?: Record<string, unknown>) => run(graphStart(graphName, args)),
+      graphStart: (graphName: string, args?: Record<string, unknown>): Promise<StartResult> =>
+        adapter.graphStart(graphName, args),
 
-      graphAdvance: (runId: string, nodeId: string, branchTo?: string, endRun?: boolean) =>
-        run(graphAdvance(runId, nodeId, branchTo, endRun)),
+      graphAdvance: (
+        runId: string,
+        nodeId: string,
+        end?: boolean,
+        condition?: string,
+        jump?: string,
+      ): Promise<DispatchResult> => adapter.graphAdvance(runId, nodeId, end, condition, jump),
 
-      graphJump: (runId: string, targetPhaseId: string) => run(graphJump(runId, targetPhaseId)),
+      graphJump: (runId: string, targetPhaseId: string): Promise<DispatchResult> =>
+        adapter.graphJump(runId, targetPhaseId),
 
-      graphForceEnd: (runId: string) => run(graphForceEnd(runId)),
+      graphForceEnd: (runId: string): Promise<DispatchResult> => adapter.graphForceEnd(runId),
 
-      graphStatus: (runId: string) => run(graphStatus(runId)),
+      graphStatus: (runId: string): Promise<IGraphSnapshot> => adapter.graphStatus(runId),
 
-      graphList: () =>
-        run(
-          Effect.gen(function* () {
-            const items = yield* graphList();
-            return items.map((item: RunSummaryItem): RunSummary => ({
-              runId: item.runId,
-              graphName: item.graphName,
-              fsmState: item.fsmState,
-              createdAt: item.createdAt,
-              updatedAt: item.updatedAt,
-            }));
-          }),
-        ),
+      graphList: () => run(graphList()),
 
       graphAssets: () => run(graphAssets()),
 

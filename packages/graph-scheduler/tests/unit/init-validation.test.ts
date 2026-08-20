@@ -85,6 +85,8 @@ describe('graph_init full-registry validation', () => {
     // no .graph-scheduler/config.json — only builtin graphs scanned
     const report = await runInit(join(fix.cwd, 'graphs'));
     expect(report.validation.config.exists).toBe(false);
+    // Every builtin graph now loads clean — the loop template is removed
+    // (flow self-edges); openspec-engineer + spec-implement load normally.
     expect(report.validation.errors).toHaveLength(0);
   });
 
@@ -98,6 +100,30 @@ describe('graph_init full-registry validation', () => {
     expect(schemaError).toContain('bad-schema.yaml');
     // the builtin graphs scan cleanly (valid headers) — no YAML parse noise
     expect(report.validation.errors.filter((e) => e.includes('YAML parse error'))).toHaveLength(0);
+  });
+
+  it('reports schema-unknown phase keys as per-graph problems (tolerant audit)', async () => {
+    writeGraph(fix, 'extra-fields', {
+      name: 'extra-fields',
+      phases: [{ id: 'p1', type: 'main', task: 'x', operations: [], routing: { actions: [] }, mode: 'auto' }],
+    });
+
+    const report = await runInit(join(fix.cwd, 'graphs'));
+    const problem = report.validation.graphProblems.find((g) => g.filePath.includes('extra-fields.yaml'));
+    expect(problem).toBeDefined();
+    expect(problem!.name).toBe('extra-fields');
+    expect(problem!.problems[0]).toContain('schema-unknown phase keys');
+    expect(problem!.problems[0]).toContain('routing');
+    expect(problem!.problems[0]).toContain('mode');
+    // the generic schema-error entry is NOT emitted for unknown-key graphs —
+    // the tolerant audit owns the report (notification → graph-maintain).
+    // The only schema-validation error present is the deferred builtin
+    // openspec-engineer (template: loop — a known schema violation, not an
+    // unknown-key graph); the fixture graph never produces one.
+    const schemaErrors = report.validation.errors.filter(
+      (e) => e.includes('schema validation failed') && !e.includes('openspec-engineer'),
+    );
+    expect(schemaErrors).toHaveLength(0);
   });
 
   it('is idempotent — repeated runs report identical state', async () => {

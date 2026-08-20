@@ -136,7 +136,7 @@ export function runScopeWarning(display: string): string {
  *
  * Returns the sole non-empty scope's reference unchanged (zero-copy fast
  * path — identity checks at callers keep working, mirroring
- * stripCrossRunChannels); undefined when every scope is empty.
+ * stripOutOfRunChannels); undefined when every scope is empty.
  */
 export function mergeChannelScopes(
   ...scopes: ReadonlyArray<readonly string[] | undefined>
@@ -160,7 +160,7 @@ export function mergeChannelScopes(
  * reference unchanged when nothing was stripped (identity check enables a
  * zero-copy fast path at the caller).
  */
-export function stripCrossRunChannels(
+export function stripOutOfRunChannels(
   channels: readonly string[] | undefined,
   runNodeIds: ReadonlySet<string> | undefined,
 ): { channels: readonly string[] | undefined; warnings: string[] } {

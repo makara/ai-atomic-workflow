@@ -1,14 +1,13 @@
 name: release-prep
+description: 'Pre-release preparation — deterministic version proposal from git tag history, grilling confirmation of every operation, apply + review as an inline flow loop.'
 $schema: ../schemas/workflow.schema.json
 version: 1.0.0
-# Node overview table (atom inventory). Bounded compound goals:
-# connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS (AND/OR/IF/
-# THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR operands,
-# conditional paths ≤ 3. Entry shape { id, type, goal, constraints? } — goal
-# states the atom's intent; mechanism lives in the goal (flow entries state
-# "expands <use> subgraph"). constraints: one-sentence prose rules — general
-# boundaries + explicit non-goals, ≤ 5 per atom, never machine-validated.
-# User-maintained.
+flow:
+  - 'propose --> plan-grill'
+  - 'plan-grill --> apply'
+  - 'apply --> release-review'
+  - 'release-review -->|fail| apply'
+  - 'release-review -->|pass| __handoff'
 inventory:
   - id: propose
     type: main
@@ -25,15 +24,16 @@ inventory:
     type: main
     goal: Executes release-prep-apply to bump versions and fold the changelog
     constraints:
-      - never executes git tag/commit/push — overwrite-style, idempotent
+      - git boundary per propose rule
   - id: release-review
-    type: approval
-    goal: Accept the release prep OR route rework; continue completes the run
+    type: main
+    goal: Confirms release readiness THEN reports the round condition (pass | fail — fail routes the flow self-edge re-entry; verify-fail re-runs apply)
     constraints:
-      - never executes tag/commit — the user runs them manually from the final report
+      - user executes tag/commit manually from the final report
+constraints:
+  - "loop bound: the flow self-edge re-entry (release-review -->|fail| apply) is bounded by the round condition 'pass' (release-ready) or the user's direct end; retryCount tracks re-entries (never zeroed)"
+  - 'round condition vocabulary: fail | pass — flow-defined, matched mechanically (zero machine validation axis; governance = graph-maintain flow audit + user maintenance)'
 phases:
-  # Proposal — read-only analysis (version from git tags, never package.json;
-  # deterministic + idempotent pre-tag; never git tag/commit/push).
   - id: propose
     type: main
     dependsOn: []
@@ -43,14 +43,11 @@ phases:
       Execute pre-release analysis per release-prep-analyze.
 
       Proposal rule: version derives from git tag history, never package.json;
-      deterministic + idempotent pre-tag. NEVER execute git tag/commit/push.
+      deterministic + idempotent pre-tag. Git boundary per inventory constraint.
 
       Output contract: last_tag, diff_summary, bump, proposed_version,
       tag_proposal, changelog_inventory, basis, idempotent.
 
-  # Confirmation — grilling exploration (encapsulation contract — upstream
-  # skill untouched; never auto-gated, never zero-question): every planned
-  # operation confirmed before any write.
   - id: plan-grill
     type: main
     dependsOn: [propose]
@@ -58,46 +55,58 @@ phases:
     operations: []
     task: |
       Execute grilling per grilling skill. Graph dispatch encapsulation
-      contract: MANDATORY question rounds — at least one round, whole
-      frontier per round, never zero-question, never auto-gated (cards in
-      any mode); output shape { decisions: [{ decision, rationale }],
-      shared_understanding: boolean } — never 'consensus'.
+      contract — per the single source (task-templates/contracts.ts
+      GRILLING_ENCAPSULATION_CONTRACT); never re-encode the body here.
 
       Confirm EVERY planned operation before any write: version value (from
       propose output — adjustable), version bump surfaces (release-line: root
       + workspace packages + marketplace manifests; presentation excluded),
       changelog fold scope, README targets, release boundary (working tree
-      only — tag/commit user-executed).
+      only).
 
       Output contract: confirmed_plan, decisions, shared_understanding.
 
-  # Writes — confirmed plan in, verified release-ready working tree out.
   - id: apply
     type: main
     dependsOn: [plan-grill]
     skill: release-prep-apply
     operations: [read, write, verify]
+    channels:
+      - node:plan-grill
     task: |
       Execute pre-release writes per release-prep-apply.
 
-      Apply the confirmed plan (node:plan-grill): overwrite versions on
-      release-line surfaces, fold CHANGELOG [Unreleased] -> [v<confirmed>]
-      per release-prep-apply's fold contract, sync README lists vs ground
-      truth. Overwrite-style, idempotent. NEVER execute git tag/commit/push.
+      Apply the confirmed plan (from plan-grill's confirmed_plan —
+      node:plan-grill channel): overwrite versions on release-line
+      surfaces, fold CHANGELOG [Unreleased] -> [v<confirmed>] per
+      release-prep-apply's fold contract, sync README lists vs ground
+      truth. Overwrite-style, idempotent. Git boundary per inventory
+      constraint.
 
       Output contract: surfaces_updated, changelog_written, readmes_updated,
       verify.
 
-  # Final approval — continue completes the run (report prints the tag/commit
-  # commands; user executes manually); jump re-runs a target phase.
   - id: release-review
-    type: approval
+    type: main
     dependsOn: [apply]
+    operations: []
     channels:
-      - node:plan-grill
+      - node:apply
     task: |
-      Release-ready?
+      Release-ready? (inline interview — human confirms at this boundary;
+      branch choice via IF/ELSE.)
 
-      Recommendation follows the apply verification: verify all pass →
-      continue (run completes — final report prints the tag/commit commands,
-      user executes them manually); any verify fail → jump to apply.
+      Recommendation follows the apply verification: IF all verify pass →
+      continue — the round completes (the final report prints the
+      tag/commit commands). IF any verify fails → report round_condition:
+      fail — the flow self-edge re-enters apply (report the failing
+      verifies). End the release round early — direct end (the final report
+      still prints the tag/commit commands).
+      direct end: end the round.
+
+      Round condition: report round_condition (pass | fail) — the
+      flow-defined round condition: 'fail' when any apply verify fails
+      (the flow self-edge re-enters apply); 'pass' when all apply verifies
+      pass (release-ready → drain); direct end → drain.
+
+      Output contract: round_condition (pass | fail).

@@ -152,8 +152,8 @@ describe('Schema validation (valid / invalid workflow YAML)', () => {
 
       phases: [
         { id: 'a1', type: 'main', skill: 'entry-agent-skill', task: 'step 1', operations: [] },
-        // approval — decision confirmation after the main step
-        { id: 'ap1', type: 'approval', task: 'decide', dependsOn: ['a1'] },
+        // decision confirmation after the main step
+        { id: 'ap1', type: 'main', task: 'decide', dependsOn: ['a1'], operations: [] },
       ],
     });
 
@@ -179,7 +179,7 @@ describe('Schema validation (valid / invalid workflow YAML)', () => {
     await expect(rt.graphStart('future-version', { mode: 'auto' })).rejects.toThrow(/major/);
   });
 
-  it('accepts unknown phase field (lenient — allows skill)', async () => {
+  it('rejects unknown phase field — strict schema, no lenient acceptance', async () => {
     writeFixtureFile(fix, 'bad-field.yaml', {
       name: 'bad-field',
 
@@ -187,9 +187,8 @@ describe('Schema validation (valid / invalid workflow YAML)', () => {
     });
 
     const rt = await createTestRuntime(fix);
-    // Own validator allows unknown fields — graph starts
-    const result = await rt.graphStart('bad-field', { mode: 'auto' });
-    expect(result.runId).toBeTruthy();
+    // Strict schema rejects the unknown key loudly (uniform, no per-field hint).
+    await expect(rt.graphStart('bad-field', { mode: 'auto' })).rejects.toThrow(/Schema validation failed/);
   });
 
   it('rejects missing phases array', async () => {

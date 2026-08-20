@@ -84,7 +84,6 @@ describe('WorkflowSchema — happy path', () => {
         {
           id: 'phase-1',
           type: 'main',
-          agent: ['default'],
           task: 'Execute task A',
           channels: ['file1.txt', 'file2.txt'],
           skill: 'custom-skill',
@@ -93,9 +92,10 @@ describe('WorkflowSchema — happy path', () => {
         },
         {
           id: 'phase-2',
-          type: 'approval',
+          type: 'main',
           task: 'Decide',
           dependsOn: ['phase-1'],
+          operations: [],
         },
       ],
     };
@@ -323,31 +323,45 @@ describe('WorkflowSchema — boundary', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Flow type phases
+// Subgraph composition deleted — use is an unknown key; flow type still rejected
 // ---------------------------------------------------------------------------
 
-describe('WorkflowSchema — flow type phases', () => {
-  it('accepts flow phase with use field', () => {
+describe('WorkflowSchema — subgraph composition deleted (use → template: router)', () => {
+  it('rejects flow type — closed enum is main only', () => {
     const raw = {
       phase: {
         id: 'skill-ops',
         type: 'flow',
-        use: 'skill-delete',
         dependsOn: [],
       },
     };
     const result = PhaseSchema.safeParse(raw.phase);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.use).toBe('skill-delete');
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects use on a main phase — subgraph composition deleted (graph-subgraph-route-unify)', () => {
+    const raw = {
+      phase: {
+        id: 'skill-ops',
+        type: 'main',
+        use: 'skill-delete',
+        dependsOn: [],
+        operations: [],
+      },
+    };
+    const result = PhaseSchema.safeParse(raw.phase);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((i) => i.message).join('\n');
+      expect(messages).toContain('use');
     }
   });
 
-  it('rejects flow phase with def inline — def removed, use mandatory', () => {
+  it('rejects legacy def on main — strict unknown-key rejection', () => {
     const raw = {
       phase: {
         id: 'inline-ops',
-        type: 'flow',
+        type: 'main',
         def: {
           phases: [{ id: 'nested', type: 'main', dependsOn: [], task: 'do work', operations: [] }],
         },
@@ -356,9 +370,13 @@ describe('WorkflowSchema — flow type phases', () => {
     };
     const result = PhaseSchema.safeParse(raw.phase);
     expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((i) => i.message).join('\n');
+      expect(messages).toContain('def');
+    }
   });
 
-  it('rejects flow phase with neither use nor def', () => {
+  it('rejects flow phase — flow type no longer exists', () => {
     const raw = {
       phase: {
         id: 'bad-flow',
@@ -370,16 +388,16 @@ describe('WorkflowSchema — flow type phases', () => {
     expect(result.success).toBe(false);
   });
 
-  it('accepts complete flow workflow with multiple flow phases (no with/def)', () => {
+  it('accepts a complete workflow with multiple plain main phases (no with/def/use)', () => {
     const raw = {
       name: 'orchestrated-workflow',
 
       phases: [
         { id: 'plan', type: 'main', dependsOn: [], task: 'plan work', operations: [] },
-        { id: 'skill-ops', type: 'flow', use: 'skill-delete', dependsOn: ['plan'] },
-        { id: 'doc-ops', type: 'flow', use: 'doc-sync', dependsOn: ['plan'] },
+        { id: 'skill-ops', type: 'main', dependsOn: ['plan'], task: 'run skill-delete', operations: [] },
+        { id: 'doc-ops', type: 'main', dependsOn: ['plan'], task: 'run doc-sync', operations: [] },
         { id: 'review', type: 'main', skill: 'code-review', dependsOn: ['skill-ops', 'doc-ops'], operations: [] },
-        { id: 'approve', type: 'approval', dependsOn: ['review'] },
+        { id: 'approve', type: 'main', dependsOn: ['review'], operations: [] },
       ],
     };
     const result = WorkflowSchema.safeParse(raw);
@@ -458,6 +476,51 @@ describe('WorkflowSchema — top-level constraints field', () => {
 
   it('rejects non-string constraint entries', () => {
     const result = WorkflowSchema.safeParse({ ...base, constraints: ['ok', 42] });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Top-level interaction field — { interaction?: 'none' | 'enabled' }
+// ---------------------------------------------------------------------------
+
+describe('WorkflowSchema — top-level interaction field', () => {
+  const base = {
+    name: 'g',
+    phases: [{ id: 'p1', type: 'main', task: 'run', dependsOn: [], operations: [] }],
+  };
+
+  it('absent field stays undefined — effective default enabled, no error', () => {
+    const result = WorkflowSchema.safeParse(base);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.interaction).toBeUndefined();
+    }
+  });
+
+  it('parses explicit interaction: none', () => {
+    const result = WorkflowSchema.safeParse({ ...base, interaction: 'none' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.interaction).toBe('none');
+    }
+  });
+
+  it('parses explicit interaction: enabled', () => {
+    const result = WorkflowSchema.safeParse({ ...base, interaction: 'enabled' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.interaction).toBe('enabled');
+    }
+  });
+
+  it('rejects values outside the enum', () => {
+    const result = WorkflowSchema.safeParse({ ...base, interaction: 'sometimes' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects non-string interaction values', () => {
+    const result = WorkflowSchema.safeParse({ ...base, interaction: 42 });
     expect(result.success).toBe(false);
   });
 });

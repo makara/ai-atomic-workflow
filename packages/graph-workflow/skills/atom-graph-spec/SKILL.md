@@ -1,17 +1,17 @@
 ---
 name: atom-graph-spec
-description: Reference for workflow YAML graph format specification - PhaseSchema, topology, gate rework jumps, join modes, channels, approval decision confirmation, branch routes, Run Mode. Use when writing or reviewing workflow graphs, mentions graph format, graph definition, PhaseSchema.
+description: Reference for workflow YAML graph format specification - PhaseSchema, topology, rework decisions, completion, channels. Use when writing or reviewing workflow graphs, mentions graph format, graph definition, PhaseSchema.
 argument-hint: none (reference skill)
 user-invocable: true
-version: 1.10.0
-last_updated: '2026-08-15'
+version: 1.12.0
+last_updated: '2026-08-20'
 ---
 
 > **Runtime constraints** - load `atom-phase-handler` for PhaseSchema reference.
 
 # Atom-Graph-Spec
 
-Reference spec for the workflow YAML graph format - PhaseSchema, topology, gate rework jumps, join modes, channels, approval routing, run mode, and the `$schema`/`version` self-description header contract (schema-determined identity, suffix-free).
+Reference spec for the workflow YAML graph format - PhaseSchema, topology, rework decisions, completion, channels, and the `$schema`/`version` self-description header contract (schema-determined identity, suffix-free).
 
 Intended consumers: `atom-graph-design`, `code-review`, `atom-graph-writer`.
 
@@ -19,13 +19,13 @@ Intended consumers: `atom-graph-design`, `code-review`, `atom-graph-writer`.
 
 **Invocation**: `user-invocable: true` with no `disable-model-invocation` = row-4 hybrid per the atom-skill-spec invocation matrix - model-invoked AND slash-invokable.
 
-**Reference layout**: schema field tables -> PHASESCHEMA.md; all YAML examples -> YAML-EXAMPLES.md; routing/run-mode detail -> ROUTING.md.
+**Reference layout**: schema field tables -> PHASESCHEMA.md; all YAML examples -> YAML-EXAMPLES.md; rework-decision + completion detail -> ROUTING.md.
 
 ---
 
 # Graph Schema
 
-Top-level fields (`name`, `description`, `version`, `inventory`, `phases`), per-phase fields (`id`, `dependsOn`, `skill`, `agent`, `operations`, `use`, `task`, `channels`, `route`, `jumps`, `routing`, `join`), flow phase fields, auto-supplied fields (`handlerSkill`, `skill`, `retryCount`), route field, approval routing action fields - full tables: see PHASESCHEMA.md §Top-Level Fields, §Phase Fields, §Flow Phase Fields, §Auto-Supplied Fields, §Route Field, §Approval Routing Actions. Loaded flow example: see YAML-EXAMPLES.md §Flow Phase Example.
+Top-level fields (`name`, `description`, `version`, `inventory`, `constraints`, `interaction`, `flow`, `phases`), per-phase fields (`id`, `dependsOn`, `skill`, `operations`, `task`, `channels`, `template`) - `type` is `main` only (the `flow` type is removed); `template` = builtin task-template reference — closed enum (`startup` \| `router` \| `scope-entry` \| `adopting`) (`template: router` = the one-shot selection declaration (sibling runs); the per-node templates = the framework-graph shared-chain texts (one template one file — `scope-entry` consumes `template_args.terminal`); the `framework-chain` factory and the `loop` template are removed — loop/rework semantics are top-level `flow` self-edges, `A -->|condition| A` inline bounded loops); `flow` = the graph's conditional-routing edges (mermaid subset `A --> B` / `A -->|condition| B`, compiled into the transition table); `startup` — entry node, mutually exclusive with `task` (the use field no longer exists), full startup when declared, bare otherwise); auto-supplied fields (`handlerSkill`, `skill`, `retryCount`) - full tables: see PHASESCHEMA.md §Top-Level Fields, §Phase Fields, §Auto-Supplied Fields. Nesting example: see YAM…
 
 ---
 
@@ -33,33 +33,32 @@ Top-level fields (`name`, `description`, `version`, `inventory`, `phases`), per-
 
 ## DependsOn Rules
 
-1. **Acyclic dependency edges** - dependsOn SHALL NOT form cycles. `A → B → A` invalid — the engine enforces this at load (a cycle fails loading loudly with the cycle path); no manual cycle check needed. Runtime rework loops (gate backward jumps, approval retry/jump) are bounded transitions, never dependency edges.
+1. **Acyclic dependency edges** - dependsOn SHALL NOT form cycles. `A → B → A` invalid — the engine enforces this at load (a cycle fails loading loudly with the cycle path); no manual cycle check needed. Runtime rework loops are `flow` self-edges (`A -->|condition| A` — transition-table re-entry, condition-matched), never dependency edges.
 2. **Minimal** - declare only direct dependencies. Transitive deps resolved implicitly.
-3. **Redundancy check** - `dependsOn: [A, B]` where `B` depends on `A` -> drop `A`. Only leaf deps needed. Judgment context is NOT a dependsOn concern - gate jumps and approval recommendations reference it (per §Jump Semantics), never implicit edges.
+3. **Redundancy check** - `dependsOn: [A, B]` where `B` depends on `A` -> drop `A`. Only leaf deps needed. Judgment context is NOT a dependsOn concern - rework conditions reference it, never implicit edges.
 4. **Entry nodes** - exactly one phase with `dependsOn: []`. Single entry point. Exception - orchestrators with multiple entry roots (entry-rooted flows) declare several zero-in-degree phases; dispatch follows declaration order (load-bearing).
 
-## Join Mode
+## Branching
 
-Semantics + schema rejection: see ROUTING.md §Join Mode Rules (single home).
-
-## Routes
-
-`route: <id>` marks branch membership; absent = implicit default route (always active). Branch-route detail: see ROUTING.md §Routes.
+Conditional decision points run via approval() inside main phases (atom-kernel §approval()); branch semantics = subgraph selection (`template: router` — IF/ELSE condition evaluated inline by the executing agent, the chosen graph launched as a sibling run via `graph_start`); loop/rework semantics = flow self-edges (top-level `flow` field — `A -->|condition| A` inline bounded loops, condition-matched re-entry on advance; backward rework to an ancestor rides the advance `jump` channel, backward-only). Branch options surface at dispatch via the machine-declared `completion` block on NodeDetail (choices / direct_end — see atom-phase-handler NODE-SCHEMA.md §NodeDetail). No decision node type exists; no routing actions exist; no `branchTo` (removed).
 
 ---
 
-# Routing Rules Summary
+# Run Completion
 
-- **Gate jumps** - `jumps: [{when, to}]`: natural-language rework conditions, first match wins; hit = backward jump resetting target + downstream terminals. Detail: see ROUTING.md §Gate Jump Conditions, §Jump Semantics.
-- **Approval routing** - default card + `routing` actions semantics: see ROUTING.md §Approval Decision Confirmation (single home).
+Runs end by natural drain (`node: null` -> fsmState `completed`) or `graph_force_end` (`terminated`); no endRun (removed); the direct-end decision (`completion` `direct_end` label) drains the run via natural drain. Detail + semantics: see ROUTING.md §Completion (single home).
+
+# Rework Decisions, Branching, and Channels
+
+- **Rework/loop decisions** - flow self-edges (top-level `flow` field): the loop-head phase declares `A -->|condition| A`; the node's task text evaluates the loop condition inline; the pilot advances with `graph_advance(runId, nodeId, condition)` — the transition table re-enters the node (bounded by the loop-head task text / constraints prose; the engine increments `retryCount` on condition re-entry). Backward rework to an ancestor rides the advance `jump` channel (backward-only, engine-guarded). No in-run backward reset exists as a node decision. Detail: see ROUTING.md §Rework Decisions + §Advance Channels.
+- **Branch decisions** - subgraph selection via `template: router`: IF/ELSE condition evaluated inline by the executing agent; the chosen graph launches as a sibling run. Branch options surface at dispatch via the machine-declared `completion` block on NodeDetail. Detail: see ROUTING.md §Rework Decisions, §Completion.
 - **Channels** - phase-level `channels:` context additions; `node:<id>` = read edge to a non-`dependsOn` stream; graph `context:` = global channel. Detail: see PHASESCHEMA.md §YAML channels Field.
-- **Run Mode** - per-activation auto-approve convention (auto executes AI recommendation; manual/absent -> card; interviews never gated): see §Activation (single site).
 
 ---
 
 # Context Requirements Convention
 
-Main and approval phases declare context requirements in four deterministic sections; context arrives as prompt blocks at dispatch. Placement in entry skills: after frontmatter Runtime constraints block, before `## Flow` (after `## Input` if present).
+Main phases declare context requirements in four deterministic sections; context arrives as prompt blocks at dispatch. Placement in entry skills: after frontmatter Runtime constraints block, before `## Flow` (after `## Input` if present).
 
 ## Four-Section Format
 
@@ -87,7 +86,7 @@ Entry skills declare:
 
 - **From upstream** - upstream phase node IDs -> `## Upstream: <nodeId>` blocks.
 - **Reference skills** - skill names -> `## Reference: <skill-name>` blocks.
-- **Operation classes** - closed-set members of the High-Level Tool Registry (atom-kernel §High-Level Tool Registry) the skill performs by default. Optional: absent = no default classes. Registry entries for the merged class set (skill default + phase `operations:`) accompany dispatch; tool usage is verified per declared class. Skill bodies reference the registry - never re-specify chains.
+- **Operation classes** - declared execution classes (skill default + phase `operations:`), evidence-only verification in the Tool usage check (no registry injection). Skill bodies reference atom-kernel §Tool Schemas for parameters - never re-specify chains.
 - **Files** - project file globs. Content arrives as `## File: <path>` blocks.
 
 ## Entry Annotation Grammar
@@ -113,18 +112,16 @@ Skill-side contract rules - single definition site (atom-skill-spec points here)
 
 # Activation
 
-Activation facts (run mode, constraints) live at the invocation boundary — never as graph nodes. Two facts, loaded per activation:
+Activation facts (constraints) live at the invocation boundary — never as graph nodes. One fact, loaded per activation:
 
 |Fact|Source|Behavior|
 |-|-|-|
-|Constraints load (project layer)|pilot startup|Compiled-artifact protocol - `.graph-scheduler/constraints.json` exists -> emit its `constraints` array verbatim (fast path, zero markdown I/O); missing -> caveman-compile `.graph-scheduler/constraints.md` `## Rules` into the artifact (`compiled_at` audit metadata) and emit. Existence = validity; deletion = reset; invalid JSON -> recompile. Session fact `{"constraints": [...]}`. Graph-layer constraints are NOT an activation fact - they arrive per dispatch as `NodeDetail.constraints` (`[graph]`-prefixed, scheduler-read from the loaded graph definition).|
-|Run mode|`graph_start` `args.mode`|`manual` \| `auto`, REQUIRED at invocation — absent -> `MODE_REQUIRED` response, no run created. The pilot asks the user before starting when no flag was passed (Manual recommended - absence NEVER auto). Session fact `{"mode": "manual"\|"auto"}`. Re-decided EVERY activation.|
+|Constraints load (project layer)|pilot startup|Session fact `{"constraints": [...]}` — protocol per CONTEXT.md `Constraint`; graph-layer constraints per-dispatch, not an activation fact.|
 
 Mechanics:
 
 - **No prologue nodes** - runs contain author phases only; `$`-prefixed ids are schema-rejected (the prefix is reserved; the activation prologue was removed).
-- **Activation rule** - facts are fixed per activation: a backward reset (gate branchTo or graph_jump) targeting an entry node re-runs the entry directly; mode and constraints are NOT re-asked (session facts persist for the run).
-- **Consumption** - the handler formats `## Run Mode:` / `## Constraints:` blocks from the session facts per dispatch (main/approval/gate alike). Missing facts -> degrade (manual mode, empty constraints) + warning - never blocks.
-- Flow composition needs no plumbing - nested graphs share the run activation; the mode applies at any nesting depth.
-- Graphs SHALL NOT declare a mode topic in entry task texts - the mode lives at the invocation boundary.
+- **Activation rule** - facts are fixed per activation: an operator `graph_jump` (PCL, graph-external — the operator-level backward reset) targeting an entry node re-runs the entry directly; constraints are NOT re-asked (session facts persist for the run).
+- **Consumption** - the handler formats the `## Constraints:` block from the session fact per dispatch (main). Missing fact -> degrade (empty constraints) + warning - never blocks.
+- Nested execution is router-sibling-only — a `template: router` node launches the chosen graph as a sibling run (`graph_start`), driven by the frontend; no compile-time composition plumbing exists.
 - Grilling nodes in graph dispatch carry an encapsulation contract in their task text (mandatory question rounds, never zero-question, never auto-gated — the upstream grilling skill body is never modified).

@@ -1,173 +1,193 @@
 import { z } from 'zod/v4';
 
-import { HLT_OPERATION_CLASSES } from '../hlt-classes.js';
-
 /**
- * Zod schema for a single phase/node definition within a workflow graph.
+ * Zod schema for a single phase/node definition within a workflow graph (v2).
  *
- * Core fields match types.ts Phase + graph-definition.ts WorkflowPhase.
- * join added for dependency resolution.
+ * Syntax v2 = LangGraph StateGraph transliteration: the phase type
+ * set is {main} only — the flow type is deleted; subgraph composition
+ * (`use`, compile-time assembly) is DELETED — nested execution is the
+ * `template: router` sibling run, launched by the frontend. Route
+ * membership (`route`), branch routing (`routing.actions`), and join
+ * modes (`join`) are deleted, and `branchTo` is removed — branch
+ * semantics = subgraph selection (`template: router`); loop/rework
+ * semantics = flow self-edges (top-level `flow` field — transition
+ * table interpretation, graph-flow capability); the `loop` template is
+ * removed; AND convergence is the only join mode.
  *
- * Route-first redesign: judgment is decision confirmation (approval),
- * rework is a backward jump (gate), ending is an action or natural drain —
- * no end node type, no forward gate routing, no parallel branches.
- * Schema field convergence: preText/reads removed (approval card text lives
- * in task; judgment context = direct dependsOn + channels node:).
- * Removed fields (no backward compat) — declared so legacy graphs fail loudly
- * with a rename hint instead of silent strip: branches/default/mode/when/
- * eval/preText/reads/constraints/runMode all keep loud rejection below.
- * Older removed fields (topic/retry/with/def/maxDepth/context) are not
- * declared — zod strips them silently.
+ * Unknown keys — strict rejection (no backward compatibility): ANY key
+ * outside the declared surface (removed fields like route/routing/join/
+ * mode/runMode/jumps/reads/constraints, or legacy fields like topic/retry/
+ * with/def/maxDepth/context) fails validation with a uniform error naming
+ * the key. No per-field migration hints, no silent stripping.
  */
 export const PhaseSchema = z
   .object({
     /** phase identifier — unique within a graph */
     id: z.string(),
-    /** phase type — closed enum: main/approval/gate dispatch types + flow composition */
-    type: z.enum(['main', 'approval', 'gate', 'flow']),
+    /** phase type — closed enum: main (inline execution + decision) */
+    type: z.enum(['main']),
     /** upstream phase ids this phase depends on */
     dependsOn: z.array(z.string()).readonly().optional(),
-    /** route membership — optional; flows propagate their id to children; absent = implicit default route (always active) */
-    route: z.string().optional(),
-    /** agent hints — priority-ordered sub-agent type preferences (main type, advisory) */
+    /** agent hints — priority-ordered sub-agent type preferences (advisory) */
     agent: z.array(z.string()).optional(),
-    /** operation classes — closed-set members of the High-Level Tool Registry (atom-kernel §High-Level Tool Registry); phase declaration overrides/complements the skill's Operation classes default (main type; declarative only — scheduler passes through, handler injects + verifies) */
+    /** operation classes — declared execution classes (declarative only — scheduler passes through, Tool usage check verifies evidence-only) */
     operations: z.array(z.string()).optional(),
     /** per-node execution skill — the skill that runs this phase's work */
     skill: z.string().optional(),
-    /** per-phase context additions — all entry kinds (skill:<name>, file globs, node:<id> read edges), uniform across main/approval/gate. Resolved against the execution skill's Context Requirements contract when one exists; node: entries read the named node's output stream. */
+    /** per-phase context additions — all entry kinds (skill:<name>, file globs, node:<id> read edges), uniform across phases. Resolved against the execution skill's Context Requirements contract when one exists; node: entries read the named node's output stream. */
     channels: z.array(z.string()).optional(),
-    /** task instruction text (main) / decision-card prompt (approval — first line = header, rest = card body) */
+    /** task instruction text — decision/confirmation text included when the phase carries inline interview semantics */
     task: z.string().optional(),
-    /** approval routing config — optional; only branch-route scenarios declare actions (default = Accept + free input + AI options) */
-    routing: z
+    /** builtin task-template reference — closed enum (`startup` | `router`
+     *  | `scope-entry` | `adopting`).
+     *  The node's task text is injected from the template registry at load
+     *  time (same mechanism as the handoff template family). Template types:
+     *  `startup` nodes are graph entries (mutually exclusive with `task` and
+     *  required to declare empty `dependsOn` — the startup template loads
+     *  the constraints session copy every downstream node's context is
+     *  assembled from, so it must run first); `router` nodes select among
+     *  candidate graphs (paths) and MAY sit mid-graph (`dependsOn` allowed
+     *  — the router needs upstream context to decide); the per-node
+     *  templates (`scope-entry` / `adopting`) carry the
+     *  framework-graph shared-chain task texts (arch-review-loop /
+     *  first-principles-dev dedup — one template one file;
+     *  `scope-entry` consumes the `terminal` data parameter; `adopting`
+     *  declares the nothing-to-adopt direct end and absorbs the
+     *  adoption-goal topics into its grilling first-round frontier). The
+     *  `review-accept` / `adopt-accept` templates are deleted
+     *  (accept-node consolidation — the adopting grilling consensus IS
+     *  the adoption confirmation; the requirement confirmation moves into
+     *  the requirement router node as a caller-declared accept loop via
+     *  the `questions` data parameter); the `adopt-scope` template is
+     *  deleted (adopt-scope-and-handler-blocks — the adoption goal is
+     *  already confirmed by scope-entry + the requirement accept loop +
+     *  the adopting grilling; the second atom-scope-interview node is
+     *  pure redundancy). The `framework-chain` factory template is
+     *  deleted — the `node` discriminator shape does not exist. The
+     *  `loop` template is removed — loop/rework semantics are flow
+     *  self-edges (top-level `flow` field), interpreted by the transition
+     *  table, never a task template (graph-flow capability). Subgraph
+     *  composition (`use`) is deleted; nesting is the frontend-launched
+     *  router sibling run. */
+    template: z.enum(['startup', 'router', 'scope-entry', 'adopting']).optional(),
+    /** template parameters — machine-declared arguments applied to the
+     *  template task text at load time. `paths` = the router template's
+     *  candidate graphs (subgraphs) the router may start — the ONLY path
+     *  form (paths are graphs; non-graph path forms are rejected);
+     *  `terminal` = the scope-entry template's per-graph terminal name
+     *  (round-report | fp-doc-update — interpolated data, never a
+     *  variant-selection discriminator); `questions` = the
+     *  router template's caller-declared extra judgment entries
+     *  `[{ prompt, condition }]` — the node has additional judgment and
+     *  corresponding flow edges; prompt content and condition vocabulary
+     *  come from the calling graph, never template semantics (accept-node
+     *  consolidation). Required with `template: router`
+     *  (`paths`) / `template: scope-entry` (`terminal`); rejected without
+     *  the matching template. The loop template_args shape (`graph` +
+     *  `until`) and the framework-chain `node` discriminator do not
+     *  exist. */
+    template_args: z
       .object({
-        actions: z.array(
-          z.object({
-            /** routing semantics — continue: proceed; end: complete the run; retry/jump: re-execute target */
-            action: z.enum(['continue', 'retry', 'jump', 'end']),
-            /** branch-route option target (continue) or re-run target (retry/jump) — node or route id */
-            target: z.string().optional(),
-            /** stable machine identifier — decision output carries it; AI recommendations reference it */
-            value: z.string().optional(),
-            label: z.string(),
-            description: z.string(),
-          }),
-        ),
+        paths: z.array(z.string()).min(1).optional(),
+        terminal: z.string().optional(),
+        questions: z
+          .array(
+            z
+              .object({
+                prompt: z.string(),
+                condition: z.string(),
+              })
+              .strict(),
+          )
+          .optional(),
       })
+      .strict()
       .optional(),
-    /** join mode — presence means any: 'any' = one dep sufficient; absent = all deps must complete (topology default). Explicit 'all' is rejected (redundant default). */
-    join: z.literal('any').optional(),
-    /** gate rework jumps — agent evaluates when against judgment context (direct dependsOn outputs + node: channels + snapshot + run mode); hit → backward jump to target (target + downstream reset, upstream kept) */
-    jumps: z
-      .array(
-        z.object({
-          /** natural-language condition — agent evaluates against judgment context + snapshot + run mode */
-          when: z.string().min(1),
-          /** backward jump target — MUST be an upstream terminal node (validator-enforced) */
-          to: z.string(),
-        }),
-      )
-      .readonly()
-      .optional(),
-    /** flow phase type — referenced graph name. */
-    use: z.string().optional(),
-    /**
-     * Removed fields (route-first redesign) — gate branch routing is gone:
-     * forward routing is an approval decision (branch-route options),
-     * rework is a backward jump (gate jumps). Declared so legacy graphs fail
-     * loudly instead of silent strip.
-     */
-    branches: z.unknown().optional(),
-    default: z.unknown().optional(),
-    mode: z.unknown().optional(),
-    /**
-     * Removed fields (branch-routing redesign) — when-guard and gate eval are
-     * replaced by gate jumps; declared so legacy graphs fail loudly.
-     */
-    when: z.unknown().optional(),
-    eval: z.unknown().optional(),
-    /**
-     * Removed fields (schema field convergence) — approval card static text
-     * merges into 'task' (first line = header); judgment context = direct
-     * dependsOn outputs (auto-injected) + 'channels' node: entries. Declared
-     * so legacy graphs fail loudly with a migration hint.
-     */
-    preText: z.unknown().optional(),
-    reads: z.unknown().optional(),
-    /**
-     * Removed fields (route-first redesign + project constraints channel) —
-     * project constraints inject via .graph-scheduler/constraints.md; run mode
-     * is a run attribute set at graph_start. Declared so legacy graphs fail
-     * loudly instead of silent strip.
-     */
-    constraints: z.unknown().optional(),
-    runMode: z.unknown().optional(),
   })
-  .refine(
-    (data) => {
-      if (data.type !== 'flow') return true;
-      return typeof data.use === 'string' && data.use.length > 0;
-    },
-    { message: 'flow type requires use' },
-  )
+  .strict()
   .superRefine((data, ctx) => {
-    // Field semantics split by phase type — one field, one meaning.
-    // Phase channels — uniform across main/approval/gate (two-scope context
-    // model): all entry kinds (skill:/glob/node:) legal for every type.
-    // Flow phases declare none — ambient context lives at graph level
-    // (`context:`), reads on the consuming phase.
-    if (data.type === 'flow' && data.channels !== undefined) {
+    // Template — builtin task-template reference: mutually exclusive with
+    // `task` (the template is the single source of the node's work — the
+    // `use` composition field no longer exists). Entry constraint applies
+    // to the `startup` template only — `router` template nodes sit
+    // mid-graph (they need upstream context to select among candidate
+    // graphs).
+    if (data.template !== undefined && data.task !== undefined) {
       ctx.addIssue({
         code: 'custom',
-        path: ['channels'],
-        message: `flow phase must not declare 'channels' (two-scope context model) — move ambient entries to the graph's top-level 'context:' and cross-level data reads to the consuming phase's 'channels: [node:<id>]'`,
+        path: ['template'],
+        message: `template phase must not declare 'task' — '${data.id}' declares both 'template' and 'task'; the template injects the task text at load time`,
       });
     }
-    if (data.type !== 'main' && data.agent !== undefined) {
+    if (data.template === 'startup' && data.dependsOn !== undefined && data.dependsOn.length > 0) {
       ctx.addIssue({
         code: 'custom',
-        path: ['agent'],
-        message: `'agent' is main-type only — agent hints are a priority hint array for sub-agent dispatch; ${data.type} phases must not declare it (flow phases flatten at load — the field would be silently stripped)`,
+        path: ['dependsOn'],
+        message: `startup template phase must be a graph entry — '${data.id}' declares 'template: startup' with non-empty 'dependsOn'; template nodes run before any other node's context assembly`,
       });
     }
-    // HLT operations — closed-set members only, main type only: phase
-    // declaration overrides/complements the skill's Operation classes
-    // default; the scheduler passes through, handler injects + verifies.
-    // Mandatory on main phases (phase-aware enforcement needs the
-    // allowed-set): undeclared -> loud load error; use [] for
-    // conversation-only phases (implicit always-allow: conversation +
-    // graph lifecycle + convention reads + compress).
-    if (data.type === 'main' && data.operations === undefined) {
+    // Template args — machine-declared parameters consumed by the router
+    // template (`paths` — candidate graphs, required with `template:
+    // router`) or the scope-entry template (`terminal` — the per-graph
+    // terminal name, required with `template: scope-entry`); rejected
+    // without the matching template. The framework-chain `node`
+    // discriminator does not exist (one template one file); the
+    // loop template_args shape does not exist (loops are flow self-edges).
+    if (data.template === 'router' && (data.template_args === undefined || data.template_args.paths === undefined)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['template_args'],
+        message: `router template phase must declare 'template_args.paths' — '${data.id}' declares 'template: router' without candidate graphs`,
+      });
+    }
+    if (
+      data.template === 'scope-entry' &&
+      (data.template_args === undefined || data.template_args.terminal === undefined)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['template_args'],
+        message: `scope-entry template phase must declare 'template_args.terminal' — '${data.id}' declares 'template: scope-entry' without the per-graph terminal name`,
+      });
+    }
+    if (data.template !== 'router' && data.template !== 'scope-entry' && data.template_args !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['template_args'],
+        message: `'template_args' requires 'template: router' or 'template: scope-entry' — '${data.id}' declares template_args without a parameterized template`,
+      });
+    }
+    if (data.template === 'router' && data.template_args !== undefined && data.template_args.terminal !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['template_args'],
+        message: `router template phase must not declare 'template_args.terminal' — '${data.id}' mixes router args with scope-entry args`,
+      });
+    }
+    if (data.template === 'scope-entry' && data.template_args !== undefined && data.template_args.paths !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['template_args'],
+        message: `scope-entry template phase must not declare 'template_args.paths' — '${data.id}' mixes scope-entry args with router args`,
+      });
+    }
+    if (data.template !== 'router' && data.template_args !== undefined && data.template_args.questions !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['template_args'],
+        message: `'template_args.questions' requires 'template: router' — '${data.id}' declares questions on a non-router template (caller-declared extra judgment is router-only, accept-node consolidation)`,
+      });
+    }
+    // Operations — declared operation classes; the scheduler passes through,
+    // Tool usage check verifies evidence-only. Mandatory on plain main phases
+    // (use [] for conversation-only); template nodes (task injected from the
+    // template registry) are exempt — they carry no authored execution of
+    // their own.
+    if (data.template === undefined && data.operations === undefined) {
       ctx.addIssue({
         code: 'custom',
         path: ['operations'],
-        message: `main phase must declare 'operations' — operation classes declare the phase's High-Level Tool Registry classes (closed set: ${HLT_OPERATION_CLASSES.join(', ')}); use [] for conversation-only phases`,
-      });
-    }
-    if (data.operations !== undefined) {
-      if (data.type !== 'main') {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['operations'],
-          message: `'operations' is main-type only — operation classes declare the phase's High-Level Tool Registry classes (closed set: ${HLT_OPERATION_CLASSES.join(', ')})`,
-        });
-      }
-      for (const op of data.operations) {
-        if (!(HLT_OPERATION_CLASSES as readonly string[]).includes(op)) {
-          ctx.addIssue({
-            code: 'custom',
-            path: ['operations'],
-            message: `'${op}' is not a registered High-Level Tool operation class — closed set: ${HLT_OPERATION_CLASSES.join(', ')}`,
-          });
-        }
-      }
-    }
-    if (data.type === 'approval' && data.jumps !== undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['jumps'],
-        message: `approval phase must not declare 'jumps' — rework jumps are gate-type; approval is the decision card (Accept + free input + AI options)`,
+        message: `main phase must declare 'operations' — declared operation classes (evidence-only Tool usage check); use [] for conversation-only phases`,
       });
     }
     // Skill names — plain names only, never URI-form (platform decoupling
@@ -177,95 +197,6 @@ export const PhaseSchema = z
         code: 'custom',
         path: ['skill'],
         message: `'skill' must be a plain skill name, not a URI — '${data.skill}' contains a URI scheme; skill references resolve by name per the skill-resolution convention`,
-      });
-    }
-    if (data.type === 'gate' && (data.jumps === undefined || data.jumps.length === 0)) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['jumps'],
-        message: `gate phase requires 'jumps' — a gate without rework jumps would be a silent pass-through; delete the gate or declare when/to pairs`,
-      });
-    }
-    if (data.type === 'gate') {
-      for (const key of ['task', 'routing', 'agent', 'skill', 'use'] as const) {
-        if (data[key] !== undefined) {
-          ctx.addIssue({
-            code: 'custom',
-            path: [key],
-            message: `gate phase must not declare '${key}' — gate is a backward-jump node with a closed field surface (id/type/dependsOn/route/jumps/channels/join)`,
-          });
-        }
-      }
-    }
-    if (data.type !== 'gate' && data.jumps !== undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['jumps'],
-        message: `'jumps' is gate-type rework routing — main/approval/flow phases must not declare it`,
-      });
-    }
-    // Removed fields — loud rejection with migration hint (no backward compat).
-    if (data.branches !== undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['branches'],
-        message: `'branches' is removed (route-first redesign) — forward branch routing is an approval branch-route decision; rework is a gate 'jumps' backward jump; delete this field`,
-      });
-    }
-    if (data.default !== undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['default'],
-        message: `'default' is removed (route-first redesign) — gates no longer route forward; delete this field`,
-      });
-    }
-    if (data.mode !== undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['mode'],
-        message: `'mode' is removed (route-first redesign) — no parallel branches exist; delete this field`,
-      });
-    }
-    if (data.when !== undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['when'],
-        message: `'when' is removed (route-first redesign) — gate rework conditions express via 'jumps' (when/to pairs); approval recommendations are agent-judged; delete this field`,
-      });
-    }
-    if (data.eval !== undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['eval'],
-        message: `'eval' is removed (route-first redesign) — gate auto-decisions express via 'jumps'; delete this field`,
-      });
-    }
-    if (data.preText !== undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['preText'],
-        message: `'preText' is removed (schema field convergence) — approval card static text merges into 'task' (first line = header, rest = card body); delete this field`,
-      });
-    }
-    if (data.reads !== undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['reads'],
-        message: `'reads' is removed (schema field convergence) — judgment context = direct dependsOn outputs (auto-injected) + 'channels' node: entries; use channels: [node:<id>] for cross-level references; delete this field`,
-      });
-    }
-    if (data.constraints !== undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['constraints'],
-        message: `'constraints' is removed at phase level (activation redesign) — graph-level rules go to the top-level 'constraints' field (graph content, injected per dispatch); project discipline loads at activation from .graph-scheduler/constraints.md (pilot, compiled-artifact protocol); delete this field`,
-      });
-    }
-    if (data.runMode !== undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['runMode'],
-        message: `'runMode' is removed (activation redesign) — run mode is passed to graph_start as args.mode (manual | auto); delete this field`,
       });
     }
     // '$' prefix is reserved — the activation prologue was removed (activation
@@ -278,6 +209,13 @@ export const PhaseSchema = z
       });
     }
   });
+
+/**
+ * Known phase-level field set — the strict schema surface. Single source for
+ * unknown-key detection (tolerant file audit in graph-maintain / maintenance
+ * health check); derived from the schema itself, never hand-maintained.
+ */
+export const PHASE_FIELD_KEYS: readonly string[] = Object.keys(PhaseSchema.shape);
 
 /** Inferred TypeScript type for a single phase definition. */
 export type Phase = z.infer<typeof PhaseSchema>;

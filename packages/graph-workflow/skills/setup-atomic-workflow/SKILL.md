@@ -24,7 +24,6 @@ Detect current state. Read `.graph-scheduler/` existence:
 
 - `config.json` - exists? parses? matches ConfigFileSchema shape (dbPath/taskflowDir/registryPaths - no agentRegistry)?
 - `graphs/` - exists? `registry.json` present?
-- `docs/` - exists? (attached-doc home for the maker journey - graph-generate writes `.graph-scheduler/docs/<name>.md`)
 - `constraints.md` - exists? `## Rules` section present?
 - project root signals - monorepo `packages/*`? existing `.graph-scheduler` elsewhere?
 
@@ -51,7 +50,6 @@ Copy seed files. Idempotency rule:
 - `.graph-scheduler/config.json` <- `./seeds/config.json` (when missing)
 - `.graph-scheduler/constraints.md` <- `./seeds/constraints.md` (when missing)
 - `.graph-scheduler/graphs/` directory - create when missing (empty)
-- `.graph-scheduler/docs/` directory - create when missing (empty; attached-doc home per §Step 1)
 
 Output inventory:
 
@@ -66,7 +64,7 @@ Re-read every written file. Verify:
 
 - JSON parses (config.json)
 - `## Rules` section present (constraints.md)
-- `graphs/` and `docs/` directories exist under `.graph-scheduler/`
+- `graphs/` directory exists under `.graph-scheduler/`
 - file content byte-identical to seed
 
 Parse failure -> report file path + error. Failed step, not silent pass.

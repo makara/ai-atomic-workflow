@@ -17,13 +17,17 @@
       "type": "string",
       "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
     },
-    "context": {
+    "channels": {},
+    "interaction": {
+      "type": "string",
+      "enum": ["none", "enabled"]
+    },
+    "flow": {
       "type": "array",
       "items": {
         "type": "string"
       }
     },
-    "channels": {},
     "inventory": {
       "type": "array",
       "items": {
@@ -34,7 +38,7 @@
           },
           "type": {
             "type": "string",
-            "enum": ["main", "approval", "gate", "flow"]
+            "enum": ["main"]
           },
           "goal": {
             "type": "string"
@@ -59,6 +63,12 @@
         "type": "string"
       }
     },
+    "context": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "phases": {
       "type": "array",
       "items": {
@@ -69,7 +79,7 @@
           },
           "type": {
             "type": "string",
-            "enum": ["main", "approval", "gate", "flow"]
+            "enum": ["main"]
           },
           "dependsOn": {
             "readOnly": true,
@@ -77,9 +87,6 @@
             "items": {
               "type": "string"
             }
-          },
-          "route": {
-            "type": "string"
           },
           "agent": {
             "type": "array",
@@ -105,73 +112,42 @@
           "task": {
             "type": "string"
           },
-          "routing": {
+          "template": {
+            "type": "string",
+            "enum": ["startup", "router", "scope-entry", "adopting"]
+          },
+          "template_args": {
             "type": "object",
             "properties": {
-              "actions": {
+              "paths": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "terminal": {
+                "type": "string"
+              },
+              "questions": {
                 "type": "array",
                 "items": {
                   "type": "object",
                   "properties": {
-                    "action": {
-                      "type": "string",
-                      "enum": ["continue", "retry", "jump", "end"]
-                    },
-                    "target": {
+                    "prompt": {
                       "type": "string"
                     },
-                    "value": {
-                      "type": "string"
-                    },
-                    "label": {
-                      "type": "string"
-                    },
-                    "description": {
+                    "condition": {
                       "type": "string"
                     }
                   },
-                  "required": ["action", "label", "description"],
+                  "required": ["prompt", "condition"],
                   "additionalProperties": false
                 }
               }
             },
-            "required": ["actions"],
             "additionalProperties": false
-          },
-          "join": {
-            "type": "string",
-            "const": "any"
-          },
-          "jumps": {
-            "readOnly": true,
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "when": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "to": {
-                  "type": "string"
-                }
-              },
-              "required": ["when", "to"],
-              "additionalProperties": false
-            }
-          },
-          "use": {
-            "type": "string"
-          },
-          "branches": {},
-          "default": {},
-          "mode": {},
-          "when": {},
-          "eval": {},
-          "preText": {},
-          "reads": {},
-          "constraints": {},
-          "runMode": {}
+          }
         },
         "required": ["id", "type"],
         "additionalProperties": false

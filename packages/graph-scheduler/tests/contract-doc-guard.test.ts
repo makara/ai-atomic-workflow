@@ -12,8 +12,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import type { IBaseNodeDetail, INodeDetail } from '../src/phase-handler/types.js';
 import { NodeStateSchema } from '../src/schemas/index.js';
+import type { IBaseNodeDetail, INodeDetail } from '../src/types.js';
 
 // ---------------------------------------------------------------------------
 // Fixture — skill docs (graph-workflow package)
@@ -77,9 +77,20 @@ function findTable(md: string, headerAnchor: string): Table | undefined {
 // ---------------------------------------------------------------------------
 
 function baseNodeDetailKeys(): Set<string> {
-  // `agent` is a main-type field documented in the base table — tolerated
-  // here (assertKeysCovered allows it via the type-specific whitelist).
-  return new Set(['nodeId', 'type', 'dependsOn', 'skill', 'agent', 'operations', 'retryCount']);
+  // `completion` is a main-type field documented in the base
+  // table — tolerated here (assertKeysCovered allows it via the
+  // type-specific whitelist).
+  return new Set([
+    'nodeId',
+    'type',
+    'dependsOn',
+    'skill',
+    'agent',
+    'operations',
+    'constraints',
+    'completion',
+    'retryCount',
+  ]);
 }
 
 function nodeDetailKeys(): Set<string> {
@@ -90,12 +101,11 @@ function nodeDetailKeys(): Set<string> {
     'skill',
     'agent',
     'operations',
+    'constraints',
     'task',
-    'topic',
-    'routingActions',
+    'template_args',
+    'completion',
     'channels',
-    'jumps',
-    'route',
     'retryCount',
   ]);
 }
@@ -110,12 +120,11 @@ function assertKeysCovered(keys: Set<string>): void {
     skill: true,
     agent: true,
     operations: true,
+    constraints: true,
     task: true,
-    topic: true,
-    routingActions: true,
+    template_args: true,
+    completion: true,
     channels: true,
-    jumps: true,
-    route: true,
     retryCount: true,
   };
   const baseRecord: Record<keyof IBaseNodeDetail, true> = {
@@ -123,23 +132,16 @@ function assertKeysCovered(keys: Set<string>): void {
     type: true,
     dependsOn: true,
     skill: true,
+    agent: true,
     operations: true,
+    constraints: true,
     retryCount: true,
   };
   const detailKeys = new Set(Object.keys(detailRecord));
   const baseKeys = new Set(Object.keys(baseRecord));
   for (const k of keys) {
     if (!detailKeys.has(k)) throw new Error(`contract-doc-guard: "${k}" is not an INodeDetail field`);
-    if (
-      !baseKeys.has(k) &&
-      k !== 'agent' &&
-      k !== 'task' &&
-      k !== 'topic' &&
-      k !== 'routingActions' &&
-      k !== 'channels' &&
-      k !== 'jumps' &&
-      k !== 'route'
-    ) {
+    if (!baseKeys.has(k) && k !== 'task' && k !== 'completion' && k !== 'channels' && k !== 'template_args') {
       throw new Error(`contract-doc-guard: "${k}" is not an IBaseNodeDetail field`);
     }
   }
@@ -230,29 +232,25 @@ describe('contract doc guard — atom-phase-handler NODE-SCHEMA.md', () => {
   });
 
   it('node status list matches runtime FSM production points (three-way)', () => {
-    // Derive the node-status set the FSM actually writes from transition.ts:
-    // only `status:` literals inside node-map object literals (`phases[...]` /
-    // `map[...]` assignments) count — run-level fsmState writes (state returns,
-    // persist_run_state effects, type annotations) are excluded.
-    const fsmSrc = readFileSync(join(__dirname, '..', 'src', 'fsm', 'transition.ts'), 'utf-8');
-    const produced = new Set<string>();
-    // Walk lines with a literal-state flag: once a node-map assignment opens
-    // (`phases[...] = {` / `map[...] = {`), collect status literals until the
-    // object closes (`};`). Run-level writes (state returns, effects, type
-    // annotations) never appear inside node-map literals.
-    let inNodeLiteral = false;
-    for (const line of fsmSrc.split('\n')) {
-      if (!inNodeLiteral && /(phases\[|map\[)[^=]*=\s*\{/.test(line)) {
-        inNodeLiteral = true;
-      }
-      if (inNodeLiteral) {
-        for (const m of line.matchAll(/'([a-z]+)'/g)) produced.add(m[1]);
-        if (/};/.test(line)) inNodeLiteral = false;
-      }
-    }
-
+    // v2 (syntax v2) — the FSM is an embedded LangGraph runtime; the node-status
+    // vocabulary is produced by the compiled node fns (src/compile.ts:
+    // 'done' on continue, 'pending' on rework reset). Force-end writes no
+    // per-node status (no per-node annotations — nothing consumes node
+    // status post-termination), so the adapter contributes 'active'
+    // only (buildNodeRows, dispatched-but-unresolved). No 'aborted' value
+    // exists in the type, schema, or any production point.
+    // Scan both files for the status literals; run-level fsmState writes
+    // ('completed'/'terminated'/'running'/'idle') are NOT node statuses and are
+    // excluded by the schema-set filter.
     const schemaSet = new Set(NodeStateSchema.shape.status.options as readonly string[]);
-    expect([...produced].sort(), 'FSM production points differ from NodeStateSchema.status').toEqual(
+    const produced = new Set<string>();
+    for (const file of ['compile.ts', 'adapter.ts']) {
+      const src = readFileSync(join(__dirname, '..', 'src', file), 'utf-8');
+      for (const m of src.matchAll(/'([a-z]+)'/g)) produced.add(m[1]);
+    }
+    // Node-status vocabulary only — the schema enum is the membership filter.
+    const nodeStatuses = new Set([...produced].filter((s) => schemaSet.has(s)));
+    expect([...nodeStatuses].sort(), 'FSM production points differ from NodeStateSchema.status').toEqual(
       [...schemaSet].sort(),
     );
 

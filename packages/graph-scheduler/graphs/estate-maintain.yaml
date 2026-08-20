@@ -1,15 +1,22 @@
 name: estate-maintain
+description: 'Estate maintenance graph — trigger-classified estate upkeep (domains-index / specs-sync / adr-align workstreams) closed by a consistency-gate + reverse-validation + deployment-mirror review.'
 $schema: ../schemas/workflow.schema.json
 version: 1.0.0
-# Node overview table (atom inventory). Bounded compound goals:
-# connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS (AND/OR/IF/
-# THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR operands,
-# conditional paths ≤ 3. Entry shape { id, type, goal, constraints? } — goal
-# states the atom's intent; mechanism lives in the goal (flow entries state
-# "expands <use> subgraph"). constraints: one-sentence prose rules — general
-# boundaries + explicit non-goals, ≤ 5 per atom, never machine-validated.
-# User-maintained.
+flow:
+  - 'startup --> entry'
+  - 'entry --> requirement'
+  - 'requirement --> domains-index'
+  - 'domains-index --> specs-sync'
+  - 'specs-sync --> adr-align'
+  - 'adr-align --> review'
+  - 'review -->|rework| entry'
 inventory:
+  - id: startup
+    type: main
+    goal: Runs the startup template — constraints session load + serena activation + jcodemunch indexing (full startup — doc-estate maintenance edits docs against code refs)
+    constraints:
+      - graph entry — dependsOn empty; entry depends on it
+      - no user questions — self-decide startup steps
   - id: entry
     type: main
     goal: Executes atom-scope-interview to classify the trigger THEN select workstreams
@@ -19,7 +26,7 @@ inventory:
     type: main
     goal: Runs grilling to confirm estate requirement decisions
     constraints:
-      - never auto-gated — cards in any mode
+      - never auto-gated
   - id: domains-index
     type: main
     goal: Executes atom-doc-maintain to update the domain index
@@ -40,36 +47,21 @@ inventory:
     goal: Reviews the maintenance pass with the consistency gate, reverse validation and mirror check
     constraints:
       - read-only gate — never fixes findings inline
-  - id: accept
-    type: approval
-    goal: Accept the pass OR route rework; end completes the run
-    constraints:
-      - routes only — never edits the estate
-# Estate maintenance graph — document estate upkeep with a consistency-gate
-# review. Entry classifies the trigger and selects workstreams; requirement
-# confirms user-proposed requirements (hub for every workstream); three
-# workstream nodes dispatch the estate skills in parallel from requirement;
-# review runs the gate + reverse-validation + read-only deployment-mirror
-# check; accept closes the pass.
+constraints:
+  - "rework bound: the rework re-entry (review -->|rework| entry) is bounded by the user's call — a fresh pass re-enters entry; a new run stays the operator's choice (PCL)"
 context:
-  # Three-tier channel model: conventions (CONTEXT.md, docs/domains.md) are
-  # platform-shipped; ADR/spec estate families arrive via config.json context
-  # (project layer) when the project declares them.
-  - skill:atom-domain-spec
-  - skill:atom-spec-maintain
-  - skill:atom-adr-maintain
-  - skill:atom-doc-maintain
-  - skill:atom-doc-lifecycle
   - skill:clean-ddd-hexagonal
   - skill:domain-modeling
   - skill:codebase-design
   - skill:caveman
 phases:
-  # Entry — trigger classification + workstream selection (event-derived,
-  # never interview-derived per estate-maintain spec).
-  - id: entry
+  - id: startup
     type: main
     dependsOn: []
+    template: startup
+  - id: entry
+    type: main
+    dependsOn: [startup]
     skill: atom-scope-interview
     operations: []
     task: |
@@ -87,22 +79,15 @@ phases:
 
       Output contract: trigger, workstreams, scope_complete.
 
-  # Requirement — user-request grilling confirmation (user-request trigger
-  # only; other triggers report a no-op scope, same contract as workstreams).
   - id: requirement
     type: main
     dependsOn: [entry]
     skill: grilling
     operations: []
     task: |
-      Execute grilling per grilling skill to analyze and confirm the
-      user-proposed domain-design requirements. Graph dispatch encapsulation
-      contract: MANDATORY question rounds — at least one round, whole
-      frontier per round, never zero-question, never auto-gated (cards in
-      any mode); output shape { decisions: [{ decision, rationale }],
-      shared_understanding: boolean } — never 'consensus'. End with the
-      mandatory closing question "Anything to add?" — shared_understanding
-      only after the user confirms the frontier is empty.
+      Execute grilling per grilling skill. Graph dispatch encapsulation
+      contract — per the single source (task-templates/contracts.ts
+      GRILLING_ENCAPSULATION_CONTRACT); never re-encode the body here.
 
       Scope from entry output: trigger — never re-detected. Non-user-request
       triggers SHALL report a no-op scope (zero requirements, zero decisions)
@@ -121,7 +106,6 @@ phases:
       Output contract: requirements [{statement}], decisions,
       shared_understanding, trigger.
 
-  # Workstreams — dispatched in parallel from requirement; each runs its estate skill.
   - id: domains-index
     type: main
     dependsOn: [requirement]
@@ -200,13 +184,13 @@ phases:
       Unselected workstreams (per entry output) SHALL report a no-op scope
       (zero findings) — never fabricated work.
 
-  # Review — consistency gate + reverse-validation + deployment mirror check.
   - id: review
     type: main
     dependsOn: [domains-index, specs-sync, adr-align]
     channels:
       - node:entry
       - node:requirement
+      - skill:atom-domain-spec
     operations: [locate, read, review]
     task: |
       Review the maintenance pass per the estate-maintain spec:
@@ -238,15 +222,10 @@ phases:
          the user deployment (~/.agents/skills); report residue as drift; NEVER
          edit deployment.
 
+      Completion (auto — no user confirm): gate_results clean AND no
+      deployment drift → the pass completes here (natural drain). Failures
+      surfaced — never silently patched; rework via the flow rework
+      condition ('rework' — re-enters entry for a fresh pass); a new run
+      stays the operator's choice (PCL).
+
       Output contract: gate_results, deployment_drift, review_verdict.
-
-  # Accept — human/auto gate closing the pass.
-  - id: accept
-    type: approval
-    dependsOn: [review]
-    task: |
-      Accept the maintenance pass?
-
-      Decision: Continue — accept the pass (changes recorded, gate results
-      reviewed). Loop again — re-run from entry (retry — rework happens on a
-      fresh pass). End — complete the pass (no rework; run ends).

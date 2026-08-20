@@ -20,7 +20,7 @@ import {
   normFile,
   REFERENCE_VOCABULARY,
   runScopeWarning,
-  stripCrossRunChannels,
+  stripOutOfRunChannels,
   stripPrefix,
 } from '../../src/context/resolve-channels.js';
 
@@ -159,38 +159,38 @@ describe('mergeChannelScopes', () => {
   });
 });
 
-describe('stripCrossRunChannels', () => {
+describe('stripOutOfRunChannels', () => {
   const runNodeIds = new Set(['scope-confirm', 'plan-parse']);
 
   it('returns input reference unchanged when nothing is stripped', () => {
     const channels = ['skill:atom-graph-spec', 'node:scope-confirm'];
-    const r = stripCrossRunChannels(channels, runNodeIds);
+    const r = stripOutOfRunChannels(channels, runNodeIds);
     expect(r.channels).toBe(channels);
     expect(r.warnings).toEqual([]);
   });
 
   it('strips out-of-run node: entries and warns', () => {
-    const r = stripCrossRunChannels(['node:loop-entry', 'node:scope-confirm'], runNodeIds);
+    const r = stripOutOfRunChannels(['node:loop-entry', 'node:scope-confirm'], runNodeIds);
     expect(r.channels).toEqual(['node:scope-confirm']);
     expect(r.warnings).toHaveLength(1);
     expect(r.warnings[0]).toContain('node:loop-entry');
   });
 
   it('lazy copy preserves prior entries when stripping mid-list', () => {
-    const r = stripCrossRunChannels(['skill:a', 'node:loop-entry', 'node:plan-parse'], runNodeIds);
+    const r = stripOutOfRunChannels(['skill:a', 'node:loop-entry', 'node:plan-parse'], runNodeIds);
     expect(r.channels).toEqual(['skill:a', 'node:plan-parse']);
     expect(r.warnings).toHaveLength(1);
   });
 
   it('skips stripping when runNodeIds is absent — validation paths', () => {
     const channels = ['node:loop-entry'];
-    const r = stripCrossRunChannels(channels, undefined);
+    const r = stripOutOfRunChannels(channels, undefined);
     expect(r.channels).toBe(channels);
     expect(r.warnings).toEqual([]);
   });
 
   it('handles undefined channels', () => {
-    const r = stripCrossRunChannels(undefined, runNodeIds);
+    const r = stripOutOfRunChannels(undefined, runNodeIds);
     expect(r.channels).toBeUndefined();
     expect(r.warnings).toEqual([]);
   });

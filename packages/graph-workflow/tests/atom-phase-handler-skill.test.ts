@@ -1,8 +1,8 @@
 /**
  * Content assertions - atom-phase-handler SKILL.md activation prologue
- * consumption: main/approval branches consume the $load-constraints /
- * $run-mode-confirm prologue outputs, shared ## Constraints Block Format,
- * Constraint check visibility.
+ * consumption: main/gate dispatch share the ## Constraints Block Format and
+ * Constraint check visibility; the decision-UI block is main-only (approval()
+ * single-form card, no run-mode block).
  *
  * Injection-rule details (cap/dedup) live in atom-graph-spec §Constraint
  * Layering (single source) - asserted there, handler side keeps the pointer.
@@ -14,6 +14,16 @@ import { describe, expect, it } from 'vitest';
 function loadSkill(): string {
   const skillPath = resolve(__dirname, '../skills/atom-phase-handler/SKILL.md');
   return readFileSync(skillPath, 'utf-8');
+}
+
+/** SKILL.md + sibling .md files (DECISION-CARDS.md etc.) — the full package contract surface. */
+function loadSkillPackage(): string {
+  const dir = resolve(__dirname, '../skills/atom-phase-handler');
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.md'))
+    .sort()
+    .map((f) => readFileSync(resolve(dir, f), 'utf-8'))
+    .join('\n');
 }
 
 function loadSpecSkill(): string {
@@ -63,32 +73,34 @@ describe('atom-phase-handler SKILL.md - project constraints + gate branch contra
   // ── Injection points ──────────────────────────────────────
 
   it('prepends constraints block to main branch inline task', () => {
-    const mainBranch = skill.slice(skill.indexOf('node.type = "main"'), skill.indexOf('node.type = "approval"'));
-    expect(mainBranch).toMatch(/run-mode block always; decision-UI block main-only/);
+    const mainBranch = skill.slice(skill.indexOf('node.type = "main"'), skill.indexOf('### gate type'));
+    expect(mainBranch).toMatch(/decision-UI block main-only; constraints block per §Constraints Block Format/);
     expect(mainBranch).toMatch(/constraints block per §Constraints Block Format/);
   });
 
-  it('prepends constraints block to approval pre-call text', () => {
-    const approvalSection = skill.slice(skill.indexOf('node.type = "approval"'));
-    expect(approvalSection).toMatch(
-      /Prepend `## Run Mode: <mode>` block \(always\) \+ constraints block \(per §Constraints Block Format, when constraints non-empty\) to pre-call text/,
-    );
+  it('main nodes prepend the decision-UI block (approval() single-form) + constraints block', () => {
+    // Surviving contract: no approval node type / run-mode block — the
+    // decision-UI block (approval() single-form card) is prepended to main
+    // node context alongside the constraints block.
+    const mainSection = skill.slice(skill.indexOf('### main type'), skill.indexOf('### gate type'));
+    expect(mainSection).toMatch(/decision-UI block main-only; constraints block per §Constraints Block Format/);
+    expect(skill).not.toMatch(/## Run Mode/);
   });
 
-  it('surfaces upstream CONSTRAINT VIOLATION markers in approval pre-call', () => {
-    const approvalSection = skill.slice(skill.indexOf('node.type = "approval"'));
-    expect(approvalSection).toMatch(/Surface upstream constraint violations/);
-    expect(approvalSection).toMatch(/\[CONSTRAINT VIOLATION: <nodeId> × N\]/);
+  it('surfaces CONSTRAINT VIOLATION markers in result table + decision-card pre-call', () => {
+    const checksSection = skill.slice(skill.indexOf('# Checks Block'));
+    expect(checksSection).toMatch(/surfaces in result table \+ decision-card pre-call/);
+    expect(skill).toMatch(/\[CONSTRAINT VIOLATION: <count>\]/);
   });
 
-  it('includes constraints + run mode in gate judgment context', () => {
-    expect(skill).toMatch(/## Run Mode: <mode>/);
+  it('includes constraints in gate judgment context (Run Mode block removed)', () => {
     expect(skill).toMatch(/## Constraints/);
+    expect(skill).not.toMatch(/## Run Mode: <mode>/);
   });
 
   it('documents the prologue degradation rule - missing output never blocks', () => {
     expect(skill).toMatch(/Source, paths, degrade: see CONTEXT-ASSEMBLY\.md §Activation Context Blocks/);
-    expect(skill).toMatch(/Mode semantics: atom-kernel §approval\(\)/);
+    expect(skill).toMatch(/`NodeDetail` has no `runMode`/);
   });
 
   // ── Verification visibility ───────────────────────────────
@@ -99,43 +111,56 @@ describe('atom-phase-handler SKILL.md - project constraints + gate branch contra
     expect(format).toMatch(/constraints: ok \| violation ×N/);
   });
 
-  it('surfaces CONSTRAINT VIOLATION marker in result table + approval pre-call', () => {
+  it('surfaces CONSTRAINT VIOLATION marker in result table + decision-card pre-call', () => {
     const format = skill.slice(skill.indexOf('# Constraints Block Format'));
     expect(format).toMatch(/CONSTRAINT VIOLATION: <count>/);
-    expect(format).toMatch(/result table \+ approval pre-call/);
+    expect(format).toMatch(/result table \+ decision-card pre-call/);
   });
 
-  // ── Gate jump contract ──────────────────────────────────
-  // Content pins for the gate dispatch branch (route-first): the contract is
-  // documentation-only for the agent side - completion() behavior is not
-  // unit-testable; these assertions keep the written contract honest.
+  // ── Loop/rework contract ────────────────────────────────
+  // Content pins for the single main dispatch path: in-run rework decisions
+  // are removed (no retry/jump node action, no branchTo); loop/rework =
+  // top-level `flow` self-edges (`A -->|condition| A` — inline bounded
+  // loops, condition-matched transition-table re-entry); backward rework
+  // rides the advance `jump` channel (backward-only); branch = `template:
+  // router` subgraph selection. The contract is documentation-only for the
+  // agent side — these assertions keep the written contract honest.
 
-  it('defines the gate jump with declaration-order evaluation and pass-through', () => {
-    const gateSection = skill.slice(skill.indexOf('node.type = "gate"'));
-    expect(gateSection).toMatch(/For each jump \(declaration order\)/);
-    expect(gateSection).toMatch(/first "true" selects the jump - stop evaluating/);
-    expect(gateSection).toMatch(/no hit -> pass through/);
+  it('defines loop/rework as flow self-edges, not an in-run decision or loop template', () => {
+    const pkg = loadSkillPackage();
+    expect(pkg).toMatch(/Flow Self-Edge Loop/);
+    expect(pkg).toMatch(/inline bounded loop/);
+    expect(pkg).toMatch(/condition-matched re-entry/);
+    expect(pkg).not.toMatch(/template: loop/);
+    expect(pkg).not.toMatch(/node\.type = "gate"/);
   });
 
-  it('documents the backward jump decision (target + label, mechanical reset)', () => {
-    const gateSection = skill.slice(skill.indexOf('node.type = "gate"'));
-    expect(gateSection).toMatch(/IApprovalDecision \{ action: "jump", target: <jump\.to>, label: <jump\.when> \}/);
-    expect(skill).toMatch(/resets target \+ downstream terminal nodes/);
+  it('documents rework decision removal — no retry/branchTo node action; backward rework rides the advance jump channel', () => {
+    const pkg = loadSkillPackage();
+    expect(pkg).toMatch(/# Rework Decision \(removed\)/);
+    expect(pkg).toMatch(/no in-run target routing/);
+    expect(pkg).toMatch(/operator `graph_jump` \(PCL, graph-external\) is the operator-level backward reset/);
+    expect(pkg).toMatch(/advance `jump` channel/);
+    expect(pkg).not.toMatch(/action: "jump", target: <rework target>/);
   });
 
-  it('defines the no-hit fallback as pass through (no default edge exists)', () => {
-    const gateSection = skill.slice(skill.indexOf('node.type = "gate"'));
-    expect(gateSection).toMatch(/action: "continue" \} \(no target - pass through/);
-    expect(gateSection).not.toMatch(/node\.default/);
+  it('defines continue-only node decisions (no default edge exists)', () => {
+    const pkg = loadSkillPackage();
+    expect(pkg).toMatch(/`action: 'continue'` always/);
+    expect(pkg).not.toMatch(/node\.default/);
   });
 
-  it('fails loud on empty/absent jumps (gate without jumps is a pass-through)', () => {
-    expect(skill).toMatch(/gate without rework jumps is a silent pass-through/);
+  it('documents the removed jumps field — rework is flow self-edges, not a gate field', () => {
+    const pkg = loadSkillPackage();
+    expect(pkg).not.toMatch(/`jumps`/);
+    expect(pkg).toMatch(/flow self-edges/);
+    expect(pkg).not.toMatch(/node\.type = "gate"/);
   });
 
-  it('documents judgment failure as conservative pass-through', () => {
-    const gateSection = skill.slice(skill.indexOf('node.type = "gate"'));
-    expect(gateSection).toMatch(/judge failure handling - single home: atom-kernel §judge\(\)\)/);
+  it('documents inline until-condition evaluation — no judge() primitive remains', () => {
+    const pkg = loadSkillPackage();
+    expect(pkg).not.toMatch(/judge\(\)/);
+    expect(pkg).not.toMatch(/judge failure handling/);
   });
 
   // ── Todo node-boundary lifecycle ─────────────────────────
@@ -144,9 +169,9 @@ describe('atom-phase-handler SKILL.md - project constraints + gate branch contra
     expect(skill).toMatch(/## Todo Lifecycle \(node boundary\)/);
   });
 
-  it('mandates dispatch clear before execution for every node type', () => {
+  it('mandates dispatch clear before execution (single main path)', () => {
     const dispatchRules = skill.slice(skill.indexOf('# Dispatch Rules'));
-    expect(dispatchRules.match(/Clear todo per §Todo Lifecycle \(dispatch clear\)/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(dispatchRules.match(/Clear todo per §Todo Lifecycle \(dispatch clear\)/g)?.length).toBeGreaterThanOrEqual(1);
   });
 
   it('mandates completion clear after report, unconditional on success/failure', () => {
@@ -162,18 +187,19 @@ describe('atom-phase-handler SKILL.md - project constraints + gate branch contra
     expect(lifecycle).not.toMatch(/todo rm/);
   });
 
-  it('approval flow delegates the mode to approval() and clears todo before return', () => {
-    // collapse: the handler assembles content, delegates the mode
-    // decision to the kernel approval() contract, maps to IApprovalDecision,
-    // keeps the decision in-session, clears todo, returns
-    const approvalSection = skill.slice(skill.indexOf('### approval type'));
-    expect(approvalSection).toMatch(/[Dd]elegate the mode decision to approval\(\)/);
-    expect(approvalSection).toMatch(/[Aa]ssemble card content \+ recommendation/);
-    expect(approvalSection).toMatch(/Map to IApprovalDecision/);
-    expect(approvalSection).toMatch(/[Kk]eep the decision in the session/);
-    expect(approvalSection).toMatch(
-      /[Cc]lear todo per §Todo Lifecycle \(completion clear\).*[Rr]eturn `\{ status: "done", output: "<json>", durationMs \}`/s,
-    );
+  it('approval flow: single-form card; continue-only decisions; todo cleared before return', () => {
+    // Surviving contract: approval() is a single-form card (always presented,
+    // never auto-executed) — the handler no longer delegates a mode decision
+    // or maps to IApprovalDecision; node decisions carry `action: 'continue'`
+    // (no branchTo, no retry), output/decision kept in the agent session
+    // (platform-persisted), todo cleared, then return. Decision routing
+    // (continue / end: true, operator graph_jump) lives in DECISION-CARDS.md.
+    const pkg = loadSkillPackage();
+    expect(pkg).not.toMatch(/delegate the mode decision to approval\(\)/i);
+    expect(pkg).not.toMatch(/Map to IApprovalDecision/);
+    expect(pkg).toMatch(/keep it in the agent session \(platform-persisted\)/);
+    expect(pkg).not.toMatch(/via `graph_advance` `branchTo`/);
+    expect(skill).toMatch(/[Cc]lear todo per §Todo Lifecycle \(completion clear\)/);
   });
 
   it('documents subagent propagation isolation', () => {
@@ -195,7 +221,7 @@ describe('atom-phase-handler SKILL.md - project constraints + gate branch contra
     const mainSection = rules.slice(rules.indexOf('### main type'));
     const clearIdx = mainSection.indexOf('Clear todo per §Todo Lifecycle (dispatch clear)');
     const assemblyIdx = mainSection.indexOf('Assemble inline context blocks');
-    const callIdx = mainSection.indexOf('Execute tool calls per atom-kernel §High-Level Tool Registry');
+    const callIdx = mainSection.indexOf('Execute tool calls per atom-kernel §Tool Schemas');
     const reportIdx = mainSection.indexOf('Report the node output');
     const completionClearIdx = mainSection.lastIndexOf('Clear todo per §Todo Lifecycle (completion clear)');
     expect(clearIdx).toBeGreaterThan(-1);
@@ -222,14 +248,15 @@ describe('atom-phase-handler SKILL.md - project constraints + gate branch contra
     expect(section).toMatch(/no Checks block -> all declared scenarios violated/);
   });
 
-  it('defines registry injection - merged class set (node operations ∪ skill Operation classes)', () => {
-    const section = skill.slice(skill.indexOf('## Registry Injection'));
+  it('declares operation classes - evidence-only (no registry injection)', () => {
+    const section = skill.slice(skill.indexOf('## Tool Usage Check Resolution'));
     expect(section).toMatch(
       /`?node\.operations`? \(wins on conflict\) \+ the dispatched skill's `### Operation classes`/,
     );
     expect(section).toMatch(/Block format \+ assembly: see CONTEXT-ASSEMBLY\.md §Main Inline Context Assembly step 4/);
     expect(section).toMatch(/No declared classes -> no assembly, no warning/);
-    expect(section).toMatch(/undeclared operations degrade to the atom-kernel core scenario rows/);
+    expect(section).toMatch(/declared classes resolve against the scenario-keyed hint registry keys/);
+    expect(section).toMatch(/no scenario coverage/);
   });
 
   it('prefixes [TOOL USAGE VIOLATION: N] on violated lines', () => {
@@ -237,9 +264,10 @@ describe('atom-phase-handler SKILL.md - project constraints + gate branch contra
     expect(section).toMatch(/\[TOOL USAGE VIOLATION: <count>\]/);
   });
 
-  it('surfaces tool-usage markers in approval pre-call', () => {
-    const approvalSection = skill.slice(skill.indexOf('node.type = "approval"'));
-    expect(approvalSection).toMatch(/\[TOOL USAGE VIOLATION: <nodeId> × N\]/);
+  it('surfaces tool-usage markers in the node output via §Markers', () => {
+    const markers = skill.slice(skill.indexOf('## Markers'));
+    expect(markers).toMatch(/\[TOOL USAGE VIOLATION: <count>\]/);
+    expect(markers).toMatch(/prefix output with the count/);
   });
 
   it('adds the Checks scan step to main dispatch rules', () => {
@@ -247,10 +275,10 @@ describe('atom-phase-handler SKILL.md - project constraints + gate branch contra
     expect(mainRules).toMatch(/Checks scan - assemble the `## Checks` block/);
   });
 
-  it('delegates main execution to atom-kernel §High-Level Tool Registry (HLT tool-call execution)', () => {
+  it('delegates main execution to atom-kernel §Tool Schemas + §Tool Discipline', () => {
     const mainRules = skill.slice(skill.indexOf('### main type'), skill.indexOf('## Main Inline Context Assembly'));
-    expect(mainRules).toMatch(/Main execution = HLT tool-call execution/);
-    expect(mainRules).toMatch(/Execute tool calls per atom-kernel §High-Level Tool Registry - registered invocation/);
+    expect(mainRules).toMatch(/Main execution = tool-call execution/);
+    expect(mainRules).toMatch(/Execute tool calls per atom-kernel §Tool Schemas/);
     expect(mainRules).not.toMatch(/execute `node\.task` inline/);
     expect(mainRules).not.toMatch(/HLT step execution/);
   });

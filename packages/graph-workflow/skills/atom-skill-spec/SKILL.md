@@ -78,6 +78,7 @@ Skills with `## Entry` are **entry skills** - invocation triggers execution, not
 
 - Core philosophy, author intent, background stories - "why" narrative.
 - Self-repetition - checklists, summaries duplicating body content. Each fact in one place.
+- Explanation beyond the point - state the point, don't explain (user principle). Process descriptions one sentence. Rationale lives in ADR or domain docs, never inline. Structural markers carry no annotation (`<!-- none -->` stays bare).
 
 Allowed: behavioral descriptions (what + how), rules, reference tables. "Why" -> ADR or domain docs.
 
@@ -148,6 +149,10 @@ Wrapper skill (delegates) SHALL declare: delegated skills, output contract, comp
 
 Rule lives in exactly one home - SKILL.md or one sibling. Duplication = violation. Pointer = only legal reuse. Every atom execution skill follows band-limited structure: SKILL.md = contracts + pointers, reference files = cold detail. Cold-detail distribution uniform across primitives. Each concept has exactly one authoritative definition site; other files reference by name, never restate. Restatement = defect.
 
+## Domain Spec Standards Mapping
+
+Spec standards per affected domain — deterministic mapping rule: graph -> atom-graph-spec, skill -> atom-skill-spec, doc -> atom-doc-maintain. Load each corresponding spec skill BEFORE writing; validate the implementation against its rule classes (deterministic rules -> validation errors, heuristic rules -> warnings) while writing. Single home for this mapping — other files reference, never restate.
+
 ## Co-location
 
 A concept's definition, rules, caveats under one heading - never scattered. Scattering fragments one meaning across many.
@@ -159,6 +164,10 @@ Prohibition paired with positive target ("X banned; do Y instead"). Vocabulary b
 ## No-op Test
 
 Every sentence passes no-op test - deletion changes behavior. Pep-talk deleted. Model-relative: disagreement settles by running the document, not debate.
+
+**Token-level**: every natural-language token passes no-op test - delete it, behavior or meaning changes. Process descriptions one sentence. Rationale never inline - ADR or domain docs own it.
+
+**Spec-class exception**: spec-class skills (atom-skill-spec, atom-graph-spec) accept bounded explanation - format definitions are content. Exception never licenses verbose prose: caveman full level + no-op test still govern every token.
 
 ## Lazy Creation + Scope Discipline
 

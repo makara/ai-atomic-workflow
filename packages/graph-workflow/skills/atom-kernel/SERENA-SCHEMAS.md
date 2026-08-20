@@ -48,7 +48,7 @@ Example: `{"name_path": "Order/process", "relative_path": "src/order.ts"}`
 |`depth`|no|number|Descendants depth. Default 0|
 |`max_answer_chars`|no|number|-1 default. Don't adjust unless forced|
 
-Example: `{"relative_path": "packages/graph-scheduler/src/fsm-transition.ts", "depth": 1}`
+Example: `{"relative_path": "packages/graph-scheduler/src/compile.ts", "depth": 1}`
 
 ### get_diagnostics_for_file - LSP errors/warnings
 

@@ -1,118 +1,125 @@
 name: arch-review-loop
+description: 'Architecture review loop — framework-hosted review, adoption, and implementation rounds with an inline flow loop.'
 $schema: ../schemas/workflow.schema.json
 version: 1.0.0
-# Node overview table (atom inventory). Bounded compound
-# goals: connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS
-# (AND/OR/IF/THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR
-# operands (retryCount bound not counted), conditional paths ≤ 3. Entry
-# shape { id, type, goal, constraints? } — goal states the atom's intent;
-# mechanism lives in the goal (flow entries state "expands <use>
-# subgraph"). constraints: one-sentence prose rules — general boundaries +
-# explicit non-goals, ≤ 5 per atom, never machine-validated. User-maintained.
+flow:
+  - 'startup --> scope-entry'
+  - 'scope-entry --> requirement'
+  - 'requirement -->|revise| requirement'
+  - 'requirement --> adopting'
+  - 'adopting --> adopt'
+  - 'adopt --> implement'
+  - 'implement --> round-report'
+  - 'round-report -->|remaining| scope-entry'
+  - 'round-report -->|complete| __handoff'
 inventory:
+  - id: startup
+    type: main
+    goal: Runs the startup template — constraints session load + serena activation + jcodemunch indexing (full startup for this long code-review loop)
+    constraints:
+      - graph entry — dependsOn empty; scope-entry depends on it
+      - no user questions — self-decide startup steps
+  - id: scope-entry
+    type: main
+    goal: Executes atom-scope-interview to confirm the review scope, requirement input, report input and output path THEN feeds the arch-review chain
+    constraints:
+      - never re-detects scope — round input comes from the prior round-report node output (flow self-edge re-entry) or the activation args
+      - report path user-owned — confirm, never guess
   - id: requirement
-    type: flow
-    goal: Expands arch-review subgraph
+    type: main
+    goal: Launches the arch-review graph as a sibling run (router template — single path auto-select) THEN presents the caller-declared accept/revise question (accept → adopting; revise → flow self-edge re-run)
     constraints:
-      - composition only — child rules live in the subgraph
-  - id: round-continue
-    type: approval
-    goal: Proceed IF a Top Recommendation remains, ELSE end the run
+      - router launch only — stage rules live in the arch-review graph
+      - accept loop = caller-declared questions data parameter (prompt/condition from the graph, never template semantics)
+  - id: adopting
+    type: main
+    goal: Runs grilling rounds to settle the adoption decisions (adoption goal + trace intent confirmed in the first-round frontier — absorbed from the deleted adopt-scope interview) THEN appends the record
     constraints:
-      - routes only — never re-runs the requirement phase
+      - never auto-gated
+      - never zero-question — whole frontier per round
+      - nothing to adopt (change_name empty) → direct end — the adopt stage never activates
   - id: adopt
-    type: flow
-    goal: Expands adopt-with-docs subgraph
+    type: main
+    goal: Launches the adopt-with-docs graph as a sibling run (router template — single path auto-select) THEN reports the produced change
     constraints:
-      - composition only — child rules live in the subgraph
+      - router launch only — stage rules live in the adopt-with-docs graph
   - id: implement
-    type: flow
-    goal: Expands spec-implement subgraph
+    type: main
+    goal: Launches the spec-implement graph as a sibling run (router template — single path auto-select) with the change name + adoption echo
     constraints:
-      - composition only — child rules live in the subgraph
-  - id: loop-gate
-    type: gate
-    goal: Jump back to scope-entry IF a Top Recommendation remains AND retry bound is not reached
+      - router launch only — stage rules live in the spec-implement graph
+      - inputs pass via graph_start args, never composed streams
+  - id: round-report
+    type: main
+    goal: Reports the round condition (remaining | complete) — the flow-defined re-entry decision for the inline loop
     constraints:
-      - machine judgment only — never decides beyond declared jump conditions
-  - id: loop-accept
-    type: approval
-    goal: Loop again IF re-review is needed, ELSE complete the run
-    constraints:
-      - routes only — never edits the report
-# Global channel — the review report stream is promoted into ambient context:
-# every decision/gate phase of the loop (round-continue, adopt, loop-gate,
-# loop-accept) reads it without per-phase declaration. The owning node skips
-# its own promoted stream.
+      - round condition = flow-defined vocabulary (remaining → flow self-edge re-entry; complete → drain) — never a next-node choice
+      - report only — never re-runs or re-launches work itself
+constraints:
+  - "loop bound: the flow self-edge re-entry (round-report -->|remaining| scope-entry) is bounded by the round condition 'complete' or the user's direct end; retryCount tracks re-entries (never zeroed)"
+  - 'loop bound: the flow self-edge re-entry (requirement -->|revise| requirement) is bounded by the accept condition (accept = sequence default exit) or the requirement retryCount (never zeroed)'
+  - 'round condition vocabulary: remaining | complete — flow-defined, matched mechanically (zero machine validation axis; governance = graph-maintain flow audit + user maintenance)'
+  - 'requirement accept vocabulary: revise | accept — flow-defined; revise re-enters the requirement node, accept exits via the unlabeled sequence default'
 context:
-  - node:requirement/present-candidates
+  - node:requirement
 phases:
-  # Three-stage loop: requirement (arch-review) → round-continue content gate →
-  # adopt (adopt-with-docs) + implement (spec-implement) on the proceed route;
-  # single loop-gate back to scope-entry.
-  - id: requirement
-    type: flow
-    use: arch-review
+  - id: startup
+    type: main
     dependsOn: []
+    template: startup
+  - id: scope-entry
+    type: main
+    dependsOn: [startup]
+    skill: atom-scope-interview
+    template: scope-entry
+    template_args:
+      terminal: round-report
 
-  # Content gate — branch-route decision: continue activates the proceed route
-  # (adopt + implement); end completes the run. Empty rounds (no Top
-  # Recommendation) end here — proceed members never activate.
-  - id: round-continue
-    type: approval
+  - id: requirement
+    type: main
+    template: router
+    template_args:
+      paths: [arch-review]
+      questions:
+        - prompt: 'Requirement ready? accept: proceed to adoption; revise: adjust the requirement input and re-run the arch-review review.'
+          condition: revise
+    dependsOn: [scope-entry]
+    channels: [node:scope-entry]
+
+  - id: adopting
+    type: main
     dependsOn: [requirement]
-    routing:
-      actions:
-        - action: continue
-          target: proceed
-          value: continue
-          label: Continue — adopt + implement the Top Recommendation
-          description: Top Recommendation remains — proceed through adopt and implement
-        - action: end
-          value: end
-          label: End — nothing remains
-          description: No Top Recommendation — finish the loop here
-    task: |
-      Proceed with the round?
+    skill: grilling
+    template: adopting
 
-      Recommendation: continue when the review reports a remaining Top
-      Recommendation (top_rec_remaining: true — branchTo proceed activates
-      adopt + implement); end when nothing remains (end action completes the
-      run — auto mode ends automatically).
-
-  # Adopt — report as input document (inherited via graph-level channels).
-  # Route: proceed — activated only by round-continue continue.
   - id: adopt
-    type: flow
-    use: adopt-with-docs
-    dependsOn: [requirement]
-    route: proceed
+    type: main
+    template: router
+    template_args:
+      paths: [adopt-with-docs]
+    dependsOn: [adopting]
+    channels: [node:adopting]
 
-  # Implement — produced change + adoption record as input; reads declared on
-  # spec-implement's entry (spec-extract) — composition read edges, no flow
-  # channels (two-scope context model).
-  # Route: proceed — activated only by round-continue continue.
   - id: implement
-    type: flow
-    use: spec-implement
+    type: main
+    template: router
+    template_args:
+      paths: [spec-implement]
     dependsOn: [adopt]
-    route: proceed
+    channels: [node:adopting]
 
-  # Loop gate — top Rec remains + bound → re-round from scope-entry. Pure
-  # machine judgment — run mode plays no part (consumption boundary).
-  - id: loop-gate
-    type: gate
+  - id: round-report
+    type: main
     dependsOn: [implement]
-    jumps:
-      - when: 'requirement/present-candidates output shows top_rec_remaining: true AND requirement/scope-entry retryCount < 8'
-        to: requirement/scope-entry
-
-  # Round-end — loop again (Top Rec remains + bound) or complete.
-  - id: loop-accept
-    type: approval
-    dependsOn: [loop-gate]
+    operations: []
     task: |
-      End the review loop?
+      Round condition?
 
-      Decision: Loop again — re-run from requirement/scope-entry (scope +
-      report input re-confirmed). Complete — loop finishes.
+      Report round_condition (remaining | complete): 'remaining' when the
+      round leaves open work (a Top Recommendation still open / a pending
+      entry in the report's Open Recommendations block) AND the user has not
+      direct-ended — the flow self-edge re-enters scope-entry.
+      'complete' otherwise (drain). Never a next-node choice.
+      direct end: end the round.
+
+      Output contract: round_condition (remaining | complete).

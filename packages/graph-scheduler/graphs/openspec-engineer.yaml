@@ -1,14 +1,13 @@
 name: openspec-engineer
+description: 'OpenSpec detailed implementation — spec synthesis, tickets, tdd implementation + review loop, lifecycle closure (archive + ADR fold + index).'
 $schema: ../schemas/workflow.schema.json
 version: 1.0.0
-# Node overview table (atom inventory). Bounded compound goals:
-# connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS (AND/OR/IF/
-# THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR operands,
-# conditional paths ≤ 3. Entry shape { id, type, goal, constraints? } — goal
-# states the atom's intent; mechanism lives in the goal (flow entries state
-# "expands <use> subgraph"). constraints: one-sentence prose rules — general
-# boundaries + explicit non-goals, ≤ 5 per atom, never machine-validated.
-# User-maintained.
+flow:
+  - 'to-spec --> to-tickets'
+  - 'to-tickets --> implement'
+  - 'implement --> implement-review'
+  - 'implement-review -->|fail| implement'
+  - 'implement-review -->|pass| openspec-archive'
 inventory:
   - id: to-spec
     type: main
@@ -26,28 +25,22 @@ inventory:
     goal: Runs implement to deliver the ticket slices test-first THEN verifies the suite
     constraints:
       - test-first — never ships without verification
+      - 're-entry: the flow self-edge implement-review -->|fail| implement re-runs the slice work (inline loop — retryCount bound + constraint prose)'
   - id: implement-review
     type: main
-    goal: Runs code-review over the implementation THEN reports findings
+    goal: Runs code-review over the implementation THEN reports findings and the review condition (pass | fail)
     constraints:
       - reports findings — never fixes inline
-  - id: implement-gate
-    type: gate
-    goal: Jump back to implement IF review fails AND retry bound is not reached
-    constraints:
-      - machine judgment only — never decides beyond declared jump conditions
-  - id: implement-accept
-    type: approval
-    goal: Accept the implementation IF review passes
-    constraints:
-      - routes only — never edits the implementation
+      - review condition = flow-defined vocabulary (fail → flow self-edge re-entry; pass → drain) — never a next-node choice
   - id: openspec-archive
     type: main
     goal: Executes atom-doc-lifecycle to close the workflow and archive the change
     constraints:
       - closes the workflow — never reopens settled records
+constraints:
+  - "loop bound: the flow self-edge re-entry (implement-review -->|fail| implement) is bounded by the review condition 'pass' or the retry bound (implement-review retryCount, never zeroed); past the bound the review drains to openspec-archive"
+  - 'review condition vocabulary: pass | fail — flow-defined, matched mechanically (zero machine validation axis; governance = graph-maintain flow audit + user maintenance)'
 phases:
-  # Spec — synthesize from the recorded ADR decision + change context.
   - id: to-spec
     type: main
     skill: to-spec
@@ -55,17 +48,18 @@ phases:
     operations: [read, write, run]
     task: |
       Synthesize the spec from the recorded ADR decision + change context per
-      to-spec skill. No interview. Change name — NEVER ask: {args.changeName}
-      → openspec list --json single active → spec_status: blocked + candidates.
-      Sketch seams (prefer existing, highest); seam confirmation via
-      approval() — per to-spec skill (auto mode auto-confirms).
+      to-spec skill. No interview.
+      Change name resolution — per the single source
+      (task-templates/contracts.ts CHANGE_NAME_RESOLUTION_RULE); never
+      re-encode the rule body here.
+      Sketch seams (prefer existing, highest); select the recommended seam
+      automatically — no confirmation.
       Write spec per to-spec template; publish to tracker with ready-for-agent
       label (none configured → docs/specs/).
 
       Output contract: spec_path, spec_status (published | blocked),
       seam_summary, change_name, adr_path.
 
-  # Tickets — split the spec into tracer-bullet slices.
   - id: to-tickets
     type: main
     skill: to-tickets
@@ -73,13 +67,12 @@ phases:
     operations: [read, write, run]
     task: |
       Break the spec into tracer-bullet tickets per to-tickets skill.
-      Draft vertical slices with blocking edges; breakdown confirmation via
-      approval() — per to-tickets skill (auto mode auto-approves); publish
-      in dependency order (local files when no tracker).
+      Draft vertical slices with blocking edges; publish the breakdown
+      automatically — no confirmation; in dependency order (local files
+      when no tracker).
 
       Output contract: ticket_count, ticket_paths, change_name (echo).
 
-  # Implement — tdd slices per implement skill (graph-mode patched).
   - id: implement
     type: main
     skill: implement
@@ -87,11 +80,10 @@ phases:
     operations: [read, write, run, verify]
     channels:
       - node:implement-review
-      - node:to-spec
     task: |
       Execute implement graph mode per implement skill. Read to-spec
-      output — seams come from seam_summary (already approved via
-      approval() — no re-confirmation); tdd red-green slices in frontier
+      output — seams come from seam_summary (selected automatically — no
+      confirmation); tdd red-green slices in frontier
       order, regular
       typecheck + single-file tests, full suite at the end. Re-run rounds:
       fix every implement-review finding FIRST, then continue.
@@ -100,19 +92,13 @@ phases:
       files during implementation; openspec archive is the sole
       spec-sync channel.
 
-      Spec standards per affected domain — deterministic mapping rule:
-      graph → atom-graph-spec, skill → atom-skill-spec, doc →
-      atom-doc-maintain. Determine the change's affected files (delta
-      spec domains / openspec instructions apply contextFiles), load each
-      corresponding spec skill BEFORE writing, and validate the
-      implementation against its rule classes (deterministic rules →
-      validation errors, heuristic rules → warnings) while writing.
+      Spec standards per affected domain — per atom-skill-spec §Domain Spec
+      Standards Mapping.
 
       Output contract: diff_summary, changed_files, progress_note,
       verification_path (the change's verification document path — derived
       from change_name, e.g. openspec/changes/<change>/verification.md).
 
-  # Review — dual-axis audit (spec + tickets + ADR contract).
   - id: implement-review
     type: main
     skill: code-review
@@ -120,58 +106,35 @@ phases:
     dependsOn: [implement]
     operations: [locate, read, review]
     channels:
-      - node:to-spec
-      - node:to-tickets
+      - node:implement
     task: |
       Dual-axis review of the implementation per code-review (use ## Agent
-      hints for axis sub-agents). Artifacts: spec (to-spec), tickets
-      (to-tickets), diff (implement), recorded ADR — implementation must
-      honor the decision. Spec: ticket acceptance criteria met; ADR honored.
+      hints for axis sub-agents). Artifacts: diff (implement), recorded ADR —
+      implementation must honor the decision. Spec: ticket acceptance
+      criteria met; ADR honored.
 
-      Spec standards per affected domain — deterministic mapping rule:
-      graph → atom-graph-spec, skill → atom-skill-spec, doc →
-      atom-doc-maintain. Determine the change's affected files, load each
-      corresponding spec skill, validate the implementation against its rule
-      classes (deterministic rules → validation errors, heuristic rules →
-      warnings) + repo coding standards.
+      Spec standards per affected domain — per atom-skill-spec §Domain Spec
+      Standards Mapping + repo coding standards.
 
-      Output contract: report (structured YAML, overall: pass | fail).
+      Output contract: report (structured YAML, overall: pass | fail),
+      review_condition (fail | pass) — 'fail' when the review reports
+      blocking findings within the retry bound (the flow self-edge
+      re-enters implement); 'pass' otherwise (drain to openspec-archive).
 
-  # Gate — bounded rework on FAIL (backward jump to implement).
-  - id: implement-gate
-    type: gate
-    dependsOn: [implement-review]
-    jumps:
-      - when: 'implement-review output shows overall: fail AND implement retryCount < 2'
-        to: implement
-
-  # Accept — decision confirmation.
-  - id: implement-accept
-    type: approval
-    dependsOn: [implement-gate]
-    channels:
-      - node:implement-review
-    task: |
-      Implementation approval
-
-      Decision: accept when the implementation passes review (reverse-
-      validated archive follows); revise/redo spec otherwise.
-  # Closure — lifecycle closure: reverse-validated archive + ADR
-  # decision-fold + index rebuild in one unit (detailed track).
   - id: openspec-archive
     type: main
-    dependsOn: [implement-accept]
+    dependsOn: [implement-review]
     skill: atom-doc-lifecycle
     operations: [read, run, archive]
     channels:
       - node:to-spec
-      - node:implement
+      - node:implement-review
     task: |
       Execute atom-doc-lifecycle close(): reverse-validate task completion
       against code evidence → archive → fold ADRs (adr_created: to-spec
       adr_path present → true; supersedes from the change's ADR metadata) →
       rebuild index → lifecycle validation. Change name: to-spec output
-      change_name (echo). Verification document: node:implement
+      change_name (echo). Verification document: node:implement-review
       verification_path field — tasks consume fields, never file globs.
 
       Output contract: archive_status (success | failed | blocked),

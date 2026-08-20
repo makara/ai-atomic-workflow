@@ -8,7 +8,7 @@ version: 1.0.0
 last_updated: '2026-08-09'
 ---
 
-> **Runtime constraints** - load `atom-kernel` for High-Level Tool Registry (operation classes).
+> **Runtime constraints** - load `atom-kernel` for tool schemas (operation classes).
 
 Pre-release writes - confirmed plan in, verified release-ready working tree out. Three write domains, each verified.
 
@@ -30,7 +30,7 @@ Pre-release writes - confirmed plan in, verified release-ready working tree out.
 
 ### Files
 
-<!-- none - project files are located + verified via operation classes, never channel-delivered -->
+<!-- none -->
 
 ## Entry
 

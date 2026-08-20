@@ -1,21 +1,12 @@
 name: arch-review
+description: 'Non-interactive requirement production graph — pure analysis chain (explore → first-principles → present-candidates) launched as a sibling run.'
 $schema: ../schemas/workflow.schema.json
 version: 1.0.0
-# Node overview table (atom inventory). Bounded compound goals:
-# connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS (AND/OR/IF/
-# THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR operands,
-# conditional paths ≤ 3. Entry shape { id, type, goal, constraints? } — goal
-# states the atom's intent; mechanism lives in the goal (flow entries state
-# "expands <use> subgraph"). constraints: one-sentence prose rules — general
-# boundaries + explicit non-goals, ≤ 5 per atom, never machine-validated.
-# User-maintained.
+interaction: none
+flow:
+  - 'explore --> first-principles'
+  - 'first-principles --> present-candidates'
 inventory:
-  - id: scope-entry
-    type: main
-    goal: Executes atom-scope-interview to confirm the review scope, report input and output path
-    constraints:
-      - never re-detects scope — scope comes from the activation
-      - report path user-owned — confirm, never guess
   - id: explore
     type: main
     goal: Runs improve-codebase-architecture Step 1 to walk the codebase THEN collect friction evidence
@@ -23,69 +14,21 @@ inventory:
       - read-only walk — no edits, no git ops
   - id: first-principles
     type: main
-    goal: Runs first-principles analysis over the explore digest THEN emits the rebuilt design
+    goal: Runs first-principles analysis over the requirement input AND the explore digest THEN emits the rebuilt design
     constraints:
       - pure analysis — no interview, no user questions
   - id: present-candidates
     type: main
-    goal: Executes improve-codebase-architecture Step 2 to compose findings THEN update the report in place
+    goal: Executes improve-codebase-architecture Step 2 to compose findings from the explore digest AND the first-principles output THEN update the report in place, preserving the upstream thinking chain
     constraints:
       - report updated in place — no path re-confirmation
       - never fabricates findings — evidence-backed only
-  - id: review-accept
-    type: approval
-    goal: Accept the requirement IF the report is complete AND evidence-backed, ELSE route rework
-    constraints:
-      - routes only — never edits the report
-# Graph-level ambient context — design vocabulary serves every main phase.
-# Three-tier channel model: conventions (CONTEXT.md, docs/domains.md) are
-# platform-shipped and absence-tolerant; project layout (ADR records) arrives
-# via config.json context when the project declares it.
 context:
   - skill:codebase-design
 phases:
-  # Requirement production — scope-entry → producer stage (explore →
-  # first-principles → present-candidates) → review-accept (loop composition
-  # composes this graph whole as its requirement stage).
-  - id: scope-entry
-    type: main
-    dependsOn: []
-    skill: atom-scope-interview
-    operations: []
-    task: |
-      Execute scope interview per atom-scope-interview.
-
-      Topics: scope (domain/feature/problem + focus dimensions), report
-      input (fresh | existing — report_path carries the confirmed path).
-
-      Behavior: confirm=mandatory; output path=user_owned (recommend
-      docs/reports/<YYYY-MM-DD>-arch-review-<topic>.md).
-
-      Loop jump-backs target this node.
-
-      Scope proposal: a report exists (report_input: existing, or the
-      previous round's report output (requirement/present-candidates) shows
-      round >= 1) AND the user gives no explicit new scope → MUST propose
-      scope = verify the implementation results against the report
-      (evidence-backed) and surface new problems; never re-propose the prior
-      round's scope verbatim.
-
-      Open Recommendations carry-over: read the report tail's Open
-      Recommendations block (fresh report → empty block). Pending entries
-      (un-adopted Top Recommendations from prior rounds) MUST be folded
-      into the new round's verification scope — each pending entry is
-      verified evidence-backed this round; never silently dropped.
-
-      Output contract: scope, focus, output, report_input
-      (fresh|existing), report_path, scope_complete.
-
-  # Producer stage — three main phases. Explore emits explore_digest;
-  # first-principles challenges assumptions, emits principles_output;
-  # present-candidates builds Problems/Solutions from the principles output
-  # and writes the markdown report.
   - id: explore
     type: main
-    dependsOn: [scope-entry]
+    dependsOn: []
     skill: improve-codebase-architecture
     operations: [locate, read]
     agent: [explore, scout, task, general]
@@ -93,13 +36,15 @@ phases:
       Execute Step 1 Explore per improve-codebase-architecture (use ## Agent
       hints for the sub-agent codebase walk).
 
-      Scope from scope-entry output: scope, focus, report_path, report_input —
-      never re-detected, never re-interviewed. Scope-before-scan: user-named
-      direction taken; otherwise walk recent-commit hot spots, read the
-      domain glossary (CONTEXT.md) and ADRs in the touched area, spawn a
-      sub-agent to walk the codebase, note friction organically: shallow
-      modules (interface nearly as complex as implementation), tightly
-      coupled seams, untested parts; apply the deletion test to suspects.
+      Scope from the launch args (passed by the framework's router node via
+      graph_start): scope, focus, report_path, report_input — never
+      re-detected, never re-interviewed.
+      Scope-before-scan: user-named direction taken; otherwise walk
+      recent-commit hot spots, read the domain glossary (CONTEXT.md) and
+      ADRs in the touched area, spawn a sub-agent to walk the codebase,
+      note friction organically: shallow modules (interface nearly as
+      complex as implementation), tightly coupled seams, untested parts;
+      apply the deletion test to suspects.
 
       Output contract: explore_digest (friction points / candidate areas,
       evidence-backed, compressed).
@@ -109,27 +54,15 @@ phases:
     dependsOn: [explore]
     skill: first-principles
     operations: [read]
+    channels:
+      - node:explore
     task: |
       Execute first-principles skill Steps 1–4 (no interview, no user
-      questions — pure analysis over the explore digest):
+      questions — pure analysis; process per the skill body).
 
-      Step 1 — Identify problem and current assumptions: state the review
-      problem, the current "truths" everyone accepts, analogies in use, and
-      hidden assumptions.
-      Step 2 — Break down to fundamental truths: classify each assumption
-      as Law of Nature (physics, math, biology — cannot change) or
-      Convention (industry practice, "best practice", historical precedent —
-      CAN change), with evidence; apply the physics test.
-      Step 3 — Find atomic components: decompose to the most basic level —
-      for architecture problems: atomic actions, atomic inputs, atomic
-      constraints.
-      Step 4 — Reason up from fundamentals: starting only from verified
-      truths, ask what is physically possible, what the theoretical minimum
-      is, what new combinations could work, what we would do starting from
-      scratch; produce the rebuilt design with fundamental requirements and
-      eliminated "requirements".
-
-      Input: explore_digest from node:explore.
+      Inputs: the requirement input ({args.requirementInput} — passed by the
+      launching router via graph_start args) + explore_digest from
+      node:explore (the evidence input).
 
       Output contract: principles_output (assumption list / law-vs-convention
       table with evidence / atomic components / rebuilt solution design,
@@ -142,6 +75,7 @@ phases:
     operations: [write, review]
     channels:
       - node:explore
+      - node:first-principles
     task: |
       Execute Step 2 Present candidates per improve-codebase-architecture,
       building Problems and Solutions from the first-principles output.
@@ -150,8 +84,21 @@ phases:
       (node:first-principles) — Problems derive from the assumption–fact gap
       (Step 2 table), Solutions rebuild from atomic components (Step 3–4);
       never echo conventions without first-principles grounding. Scope and
-      report contract from scope-entry: scope, focus, report_path,
-      report_input — never re-detected, never re-interviewed.
+      report contract from the launch args (passed by the framework's router
+      node via graph_start): scope, focus, report_path, report_input — never
+      re-detected, never re-interviewed.
+
+      Report skeleton — binding, fixed order, never drop a section:
+      §1 Explore evidence — explore_digest friction points / candidate
+      areas, evidence-cited.
+      §2 First-principles analysis — principles_output verbatim:
+      assumption list → law-vs-convention table with evidence → atomic
+      components → rebuilt design.
+      §3 Candidates — Problems/Solutions from the assumption–fact gap
+      (Step 2 table), findings cards, Top recommendation, Decision Request.
+      Pre-output verify: the written report SHALL contain all three
+      sections with upstream content; missing/incomplete → rewrite in
+      place, re-verify; never report the node with §2 absent.
 
       report_input fresh → write markdown (NOT HTML) report at report_path.
       report_input fresh AND report_path exists (round ≥ 2) OR existing →
@@ -175,18 +122,3 @@ phases:
 
       Output contract: report_path, round, implemented, new_findings, top_rec,
       top_rec_remaining, summary.
-
-  # Requirement accept — Continue → requirement ready; Loop again → retry
-  # scope-entry; End → end action.
-  - id: review-accept
-    type: approval
-    dependsOn: [present-candidates]
-    channels:
-      - node:scope-entry
-    task: |
-      Requirement ready?
-
-      Decision: Continue — requirement ready (report at report_path is the
-      requirement artifact; loop composition activates adopt). Loop again —
-      re-review round (retry scope-entry). End — no requirement. Top Rec
-      remains → Continue; none → End.

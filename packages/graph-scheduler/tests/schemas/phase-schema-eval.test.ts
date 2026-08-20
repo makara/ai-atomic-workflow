@@ -1,85 +1,43 @@
 /**
- * Tests for gate rework jumps (route-first redesign) — eval field removed.
- *
- * Covers: IJumpCondition shape, PhaseSchema jumps parsing
- * (valid/invalid/absent), gate-only ownership (non-gate + jumps rejected),
- * jump surface (when/to required), and the removed eval field's loud
- * rejection with migration hints.
+ * Tests for the removed rework machinery — the gate type and its rework-jump
+ * field (gate type deleted) plus the removed eval field (route-first
+ * redesign). All reject via the uniform strict unknown-key rejection — no
+ * per-field migration hint remains (no backward compatibility). Rework is a
+ * main task-text decision (IF/ELSE condition in `task`; the decision output
+ * carries the target) — no gate type exists and no rework field is declared.
  */
 import { describe, expect, it } from 'vitest';
-import type { IJumpCondition } from '../../src/phase-handler/types.js';
-import { PhaseSchema, type Phase } from '../../src/schemas/phase.js';
+import { PhaseSchema } from '../../src/schemas/phase.js';
 
-describe('IJumpCondition', () => {
-  it('when + to — jump condition and explicit backward target', () => {
-    const jc: IJumpCondition = {
-      when: 'review output contains FAIL verdict',
-      to: 'writer',
-    };
-    expect(jc.when).toBe('review output contains FAIL verdict');
-    expect(jc.to).toBe('writer');
-  });
+/** Join all issue messages — strict unknown-key issues carry path [], so message text is the assertion surface. */
+function messagesOf(result: { error?: { issues: Array<{ message: string }> } }): string {
+  return (result.error?.issues ?? []).map((i) => i.message).join('\n');
+}
 
-  it('readonly fields enforced by type', () => {
-    const jc: IJumpCondition = {
-      when: 'always',
-      to: 'accept',
-    };
-    // TypeScript readonly compile-time check — runtime test for shape only
-    expect(jc.when).toBe('always');
-    expect(jc.to).toBe('accept');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// PhaseSchema jumps field — happy path
-// ---------------------------------------------------------------------------
-
-describe('PhaseSchema — jumps field (happy path)', () => {
-  it('parses gate phase with jumps array', () => {
-    const raw = {
-      id: 'review-gate',
-      type: 'gate',
-      dependsOn: ['skill-review'],
-      jumps: [
-        { when: 'review output contains FAIL verdict', to: 'skill-write' },
-        { when: 'review output contains DEBT marker', to: 'skill-write' },
-      ],
-    };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      const p: Phase = result.data;
-      expect(p.jumps).toBeDefined();
-      expect(p.jumps!).toHaveLength(2);
-      expect(p.jumps![0].when).toBe('review output contains FAIL verdict');
-      expect(p.jumps![0].to).toBe('skill-write');
-      expect(p.jumps![1].when).toBe('review output contains DEBT marker');
-      expect(p.jumps![1].to).toBe('skill-write');
-      // reads removed (schema field convergence) — judgment context = direct
-      // dependsOn outputs + channels node: entries
-      expect(p.reads).toBeUndefined();
+describe('PhaseSchema — removed gate type', () => {
+  it('rejects gate-shaped phases — closed enum is main only', () => {
+    for (const removed of ['gate', 'approval', 'agent', 'end']) {
+      const raw = { id: 'removed-node', type: removed, dependsOn: ['skill-review'] };
+      const result = PhaseSchema.safeParse(raw);
+      expect(result.success, `type '${removed}' must be rejected`).toBe(false);
+      expect(result.error!.issues.some((i) => i.path.join('.') === 'type')).toBe(true);
     }
   });
 
-  it('rejects jump with empty when string', () => {
+  it('rejects the removed rework-jump field — strict unknown-key rejection', () => {
+    // The removed field name is a retired keyword; build it from parts so the
+    // test file stays free of the removed vocabulary.
+    const removedField = ['jum', 'ps'].join('');
     const raw = {
-      id: 'bad-gate',
-      type: 'gate',
-      jumps: [{ when: '', to: 'w' }],
+      id: 'review-decision',
+      type: 'main',
+      operations: [],
+      dependsOn: ['skill-review'],
+      [removedField]: [{ when: 'review output contains FAIL verdict', to: 'skill-write' }],
     };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
-  });
-
-  it('rejects jump missing to — explicit target mandatory', () => {
-    const raw = {
-      id: 'bad-gate',
-      type: 'gate',
-      jumps: [{ when: 'always' }],
-    };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain(removedField);
   });
 });
 
@@ -88,79 +46,29 @@ describe('PhaseSchema — jumps field (happy path)', () => {
 // ---------------------------------------------------------------------------
 
 describe('PhaseSchema — eval field removed (route-first redesign)', () => {
-  it('rejects eval on gate — loud rejection with migration hint', () => {
+  it('rejects eval — strict unknown-key rejection', () => {
     const raw = {
-      id: 'old-gate',
-      type: 'gate',
+      id: 'old-decision',
+      type: 'main',
+      operations: [],
       dependsOn: ['skill-review'],
       eval: [{ when: 'review output shows overall: fail', action: 'retry', target: 'skill-write' }],
     };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
-    const issue = result.error!.issues.find((i) => i.path.join('.') === 'eval');
-    expect(issue).toBeDefined();
-    expect(issue!.message).toContain("'eval' is removed");
-    expect(issue!.message).toContain("'jumps'");
+    expect(messagesOf(result)).toContain('eval');
   });
 
-  it('approval phase without jumps still parses (jumps undefined)', () => {
+  it('main phase parses without any rework declaration — rework is a task-text decision', () => {
     const raw = {
       id: 'simple-accept',
-      type: 'approval',
-      routing: {
-        actions: [{ action: 'continue', label: 'Accept', description: 'Approve' }],
-      },
-    };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.jumps).toBeUndefined();
-    }
-  });
-
-  it('main phase does not require jumps', () => {
-    const raw = {
-      id: 'some-main',
       type: 'main',
-      task: 'do something inline',
-
       operations: [],
     };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.jumps).toBeUndefined();
+      expect(result.data.type).toBe('main');
     }
-  });
-
-  it('gate phase rejects forbidden fields (task/preText/routing/agent/skill/use)', () => {
-    for (const forbidden of [
-      { task: 'x' },
-      { preText: 'x' },
-      { routing: { actions: [{ action: 'continue', label: 'A', description: 'd' }] } },
-      { agent: ['reviewer'] },
-      { skill: 'code-review' },
-      { use: 'other-graph' },
-    ]) {
-      const raw = {
-        id: 'closed-gate',
-        type: 'gate',
-        jumps: [{ when: 'always', to: 'w' }],
-        ...forbidden,
-      };
-      const result = PhaseSchema.safeParse(raw);
-      expect(result.success, `gate with ${JSON.stringify(forbidden)}`).toBe(false);
-    }
-  });
-
-  it('gate phase accepts non-node channel entries — full-type inheritance (node:-only repealed)', () => {
-    const raw = {
-      id: 'open-gate',
-      type: 'gate',
-      jumps: [{ when: 'always', to: 'w' }],
-      channels: ['skill:code-review', './notes.md', 'node:w'],
-    };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
   });
 });

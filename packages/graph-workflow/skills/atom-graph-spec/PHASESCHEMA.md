@@ -7,10 +7,14 @@
 |`name`|string|yes|Graph identifier - the identity field (schema-determined identity: any YAML passing WorkflowSchema validation IS a graph; the declared name is the identity, never the file name). Kebab-case. Non-empty - a document without a valid `name` does not load.|
 |`$schema`|string (URI)|no|Self-description header - URI reference to the derived JSON Schema document (`workflow.schema.json`, draft 2020-12). Optional: absent documents validate against the default WorkflowSchema (backward compatible). Malformed (whitespace-containing) values fail at load.|
 |`version`|string (semver)|no|Self-description header - format version of the document (semver, e.g. `1.0.0`). Non-semver fails schema validation; a major mismatch vs the engine's supported format major fails load with a loud rejection (never silent degradation).|
-|`description`|string|no|Purpose-focused free text - states what the graph does/produces (identity metadata, displayed in the pilot banner before the first node; carried by `graph_start`). Optional, non-enumerated, zero behavior branching - a description is identity for humans, never a machine-consumed directive.|
-|`inventory`|Inventory[]|no|Node overview table - dedicated schema key for the atom list (the term "atom" does NOT name the key). Each entry `{ id, type, goal, constraints? }`: `id` must exist in `phases`; `type` must match the phase declaration - mismatch = load warning via the post-flatten contract pass (per source graph), never blocking, never silent. No `skill` field - the phase-level `skill` field is the single source; a legacy `skill` key is ignored (stripped at parse, no rejection). The execution mechanism lives in the goal: skill-bound main nodes name the executing skill in verb form ("Executes atom-scope-interview to acquire scope"); flow entries state "expands <use> subgraph"; approval/gate entries carry decision semantics. `goal` = bounded compound intent sentence (what the atom accomplishes): connectors AND/THEN/IF-ELSE/OR - structural keywords SHALL be ALL-CAPS (`AND`, `OR`, `IF`, `THEN`, `ELSE`), distinct from ordinary prose `and`/`or`; conditional phrases use IF; ordinary nodes ≤ 5 steps; gates ≤ 3 AND/OR operands (retryCount bound NOT counted); conditional paths ≤ 3 - bounds are convention. `constraints` (optional) = array of one-sentence prose rules - general boundaries plus explicit non-goals ("does not X" / "avoids Y"); at most 5 per atom (convention bound, user-calibratable); general rules prefer positive framing, non-goals state the negation directly; prose only - no structural keywords, no new word-list members; content is never machine-validated (zero validation axis - discipline lives at generation time and review). The former `description` key is NOT accepted (no backward compatibility - stale entries fail schema validation). Bounds are convention, user-calibratable. Case discipline binds LLM-produced inventories (writer/design MUST comply at generation); user-hand-written entries are exempt - no machine validation axis. Flow entries: single entry stating "expands <use> subgraph"; effective atom surface = use-chain union (composing graphs do not duplicate child entries). Ownership: AI MAY generate when absent (writer tooling emits at creation); once present, user-only maintenance (or user-requested change - never silent); any graph-maintenance operation follows the inventory.|
-|`constraints`|string[]|no|Graph-level constraints - graph content behavior rules (same self-containment family as `inventory`: both travel with the graph file). One-sentence prose rules - general boundaries + explicit non-goals ("does not X" / "avoids Y"); ≤ 10 entries per graph (convention bound, user-calibratable); prose only, no structural keywords; content never machine-validated (zero validation axis - discipline at generation + review). Absent field = empty set (no warning, no error). Composed graphs union composed subgraphs' constraints (see ROUTING.md §Constraint Layering - composition clause). Injected into EVERY dispatched node as `[graph]`-prefixed `NodeDetail.constraints` entries (scheduler dispatch facts - unbypassable, works without a pilot), merged by the dispatch handler with `[project]`-prefixed project rules (activation session copy - see ROUTING.md §Constraint Layering). Phase-level `constraints` YAML field remains rejected (removed field).|
+|`description`|string|no|Purpose-focused free text - ONE concise intent line stating what the graph does/produces (identity metadata, displayed in the pilot banner before the first node; carried by `graph_start`; the catalog single source — ADR 0235). Optional, non-enumerated, zero behavior branching - a description is identity for humans, never a machine-consumed directive. The topology is declared in `phases` + `flow` + `inventory`, never restated in the description (F2 dedup, ADR 0244); header/per-phase comments duplicating it SHALL NOT be written.|
+|`inventory`|Inventory[]|no|Node overview table - dedicated schema key for the atom list (the term "atom" does NOT name the key). Each entry `{ id, type, goal, constraints? }`: `id` must exist in `phases`; `type` must match the phase declaration - mismatch = load warning via the contract pass (per source graph), never blocking, never silent. No `skill` field - the phase-level `skill` field is the single source; a legacy `skill` key is ignored (stripped at parse, no rejection). The execution mechanism lives in the goal: skill-bound main nodes name the executing skill in verb form ("Executes atom-scope-interview to acquire scope"); router entries state "Launches the <graph> graph as a sibling run (router template — single path auto-select)". `goal` = bounded compound intent sentence (what the atom accomplishes): connectors AND/THEN/IF-ELSE/OR - structural keywords SHALL be ALL-CAPS (`AND`, `OR`, `IF`, `THEN`, `ELSE`), distinct from ordinary prose `and`/`or`; conditional phrases use IF; ordinary nodes ≤ 5 steps; gates ≤ 3 AND/OR operands (retryCount bound NOT counted); conditional paths ≤ 3 - bounds are convention. `constraints` (optional) = array of one-sentence prose rules - general boundaries plus explicit non-goals ("does not X" / "avoids Y"); at most 5 per atom (convention bound, user-calibratable); general rules prefer positive framing, non-goals state the negation directly; prose only - no structural keywords, no new word-list members; content is never machine-validated (zero validation axis - discipline lives at generation time and review). The former `description` key is NOT accepted (no backward compatibility - stale entries fail schema validation). Bounds are convention, user-calibratable. Case discipline binds LLM-produced inventories (writer/design MUST comply at generation); user-hand-written entries are exempt - no machine validation axis. Router entries: single entry stating "Launches the <graph> graph as a sibling run (router template — single path auto-select)". The launched graph is a sibling run, not a composition - it carries its own inventory in its own file (no child entries are duplicated in the parent). Ownership: AI MAY generate when absent (writer tooling emits at creation); once present, user-only maintenance (or user-requested change - never silent); any graph-maintenance operation follows the inventory.|
+|`constraints`|string[]|no|Graph-level constraints - graph content behavior rules (same self-containment family as `inventory`: both travel with the graph file). One-sentence prose rules - general boundaries + explicit non-goals ("does not X" / "avoids Y"); ≤ 10 entries per graph (convention bound, user-calibratable); prose only, no structural keywords; content never machine-validated (zero validation axis - discipline at generation + review). Absent field = empty set (no warning, no error). Constraints load per-graph only. Injected into EVERY dispatched node as `[graph]`-prefixed `NodeDetail.constraints` entries (scheduler dispatch facts - unbypassable, works without a pilot), merged by the dispatch handler with `[project]`-prefixed project rules (activation session copy - see ROUTING.md §Constraint Layering). Phase-level `constraints` YAML field remains rejected (removed field).|
 |`phases`|Phase[]|yes|Phase list. Declaration order cosmetic - execution order resolved exclusively by dependsOn edges. List in dependency order for readability.|
+|`interaction`|`none` \| `enabled`|no|Graph interaction declaration - asserts AND forbids user-interaction features for THIS graph file (same self-containment family as `constraints`/`inventory`: travels with the graph file). `none` declares the graph has no user-interaction features and is not allowed to have any; `enabled` (absent = `enabled`) permits them. Zero backend behavior branching - no load-time enforcement, no content judgment (interaction lives in agent-side task prose and skills; the backend reads zero prose). The declaration constrains only the declaring graph's own file and is NOT aggregated into any effective view. Compliance is audited by graph-maintain (non-interactive compliance scan - task-text interaction tokens, interaction skills `atom-scope-interview`/`grilling`, `direct end:` declarations - plus LLM semantic review; violations convert to fix proposals under the approval gate).|
+|`flow`|string[]|no|Flow transitions - the graph's conditional-routing edges (mermaid subset: `A --> B` unlabeled sequence default, `A -->|condition|B` condition-matched). Compiled into the per-node transition table (node × condition → target) at load; condition values are flow-defined vocabulary (zero machine validation axis — governance is the graph-maintain flow audit + user maintenance, mirroring the inventory regime). Loop/rework semantics are self-edges (`A -->|fail|A`) — inline bounded loops, never a subgraph/task-template mechanism. Malformed entries and undeclared endpoints fail load loudly (never silent drop). Absent field = no flow edges — the node's advance defaults to its dependsOn-derived successor set. See §Flow Transitions.|
+
+**Canonical top-level key order** — `name → description → $schema → version → interaction → flow → inventory → constraints → context → phases`: the `flow` block SHALL be declared BEFORE the `inventory` block and the `constraints` block SHALL be declared AFTER the `inventory` block (graph-flow-layout rule; the derived JSON Schema mirrors the order). Builtin graphs SHALL declare a `flow` block (their transition surface — sequence/rework/self edges); graph-maintain audits flow presence + layout order.
 
 ## Phase Fields
 
@@ -19,73 +23,126 @@ YAML field names shown below. Scheduler resolves to internal NodeDetail fields a
 |Field (YAML)|NodeDetail|Type|Required|Purpose|
 |-|-|-|-|-|
 |`id`|`nodeId`|string|yes|Unique phase identifier. Kebab-case.|
-|`type`|`type`|string|yes|Phase type - closed enum: dispatch types `main`/`approval`/`gate` + composition type `flow` expanded at load time. See §Type Ownership Layers.|
+|`type`|`type`|string|yes|Phase type - closed enum: `main` only (the `flow` type is removed). See §Type Ownership Layers.|
 |`dependsOn`|`dependsOn`|string[]|yes|Upstream phase IDs. Empty `[]` for entry nodes.|
 |`skill`|`skill`|string?|`main`|Execution skill - the skill that runs this phase's work; serves as the channels contract source (dual-track). Optional: skill-less phases omit the field (no `skill: none` convention). Registry `skill` is the handler, never a dispatch target.|
-|`agent`|`agent`|string[]?|`main`|Agent hints - priority-ordered sub-agent type preferences (e.g. `[reviewer, task]`). Advisory: skills pick the first available type when they dispatch; absent -> platform default. Arrays may carry multi-platform spellings (e.g. `[reviewer, explore, task, general]`) - availability and the platform default resolve per atom-kernel §Platform Spellings. Arrives as `## Agent hints:` block.|
-|`operations`|`operations`|string[]?|`main`|Operation classes - closed-set members of the High-Level Tool Registry (atom-kernel §High-Level Tool Registry). Phase declaration overrides/complements the dispatched skill's `Operation classes` default (union semantics; phase wins on conflict). Absent = skill default. Values validated against the closed set at graph load - unknown class -> loud rejection. Declarative only: scheduler passes through to NodeDetail; verification handler-side. See §HLT Operations Declaration.|
-|`use`|-|string|`flow` type|Referenced graph name. Static constant - merge-at-load flattens. `{...}` dynamic expression -> error (Phase 2 deferred). Required for flow - the only flow field (def/with/maxDepth removed).|
-|`task`|`task`|string?|`main`, `approval`|Task instruction - executed inline (main) / full card prompt (approval - first line = header <=30 chars, remaining lines = card body; handler truncates as fallback and appends the generic "Free input overrides." sentence). Use block scalar `|` per §YAML Format Rules.|
-|`channels`|`channels`|string[]?|all|Phase-level context additions - uniform across main/approval/gate (all entry kinds legal, no per-type rules). Entry type derived from the dispatched skill's `## Context Requirements` contract when one exists (`skill:<name>` reference, `node:<id>` read edge to a node report, bare contract-table match, or file glob); no `skill` -> explicit `skill:`/`node:`/glob only, bare name errors. `node:<id>` entries are read edges to non-`dependsOn` node reports (delivered from the executing agent's session — the scheduler never stores content). Flow phases SHALL NOT declare `channels` (loud rejection). Ambient context lives in the graph top-level `context:` (global channel). Resolved deterministically (validate + runtime same implementation). See §YAML channels Field.|
-|`route`|`route`|string?|all|Route membership - declared route id. Flows propagate their id to children (flatten); absent = implicit default route (always active). See §Routes.|
-|`jumps`|`jumps`|Jump[]?|`gate`|Rework jumps - `[{when, to}]`: `when` is a natural-language condition (agent-judged), `to` an explicit BACKWARD target node id (upstream terminal - validator-enforced). Required non-empty on gate; forbidden on all other types (loud rejection).|
-|`routing`|`routingActions`|Route[]?|`approval`|Decision routing with nested `actions` array - declared ONLY in branch-route scenarios; each action declares `target` (node or route id) + `value` (stable machine id) + label/description. See §Approval Routing Actions. Approval card header derives from `task`'s first line (fallback `Decision Required`) - no separate topic field.|
-|`join`|`join`|`'any'` literal|any phase|`join: any` - phase fires when any upstream completes. Existence of `join` IS the any-mode declaration; absent = all. Schema + validator rules: see ROUTING.md §Join Mode Rules (single home).|
+|`operations`|`operations`|string[]?|`main`|Operation classes - declared execution classes (union of phase declaration and the dispatched skill's `Operation classes` default). Absent = skill default. Declarative only: scheduler passes through to NodeDetail; Tool usage check verification handler-side (evidence-only). See §Operations Declaration...|
+|`agent`|`agent`|string[]?|main|Agent hints - priority-ordered sub-agent type preferences for the node's own task() dispatch (advisory; first available wins, fallback platform default).|
+|`task`|`task`|string?|`main`|Task instruction - executed inline (main). Use block scalar `|` per §YAML Format Rules.|
+|`channels`|`channels`|string[]?|main|Phase-level context additions - uniform across main (all entry kinds legal, no per-type rules). Entry type derived from the dispatched skill's `## Context Requirements` contract when one exists (`skill:<name>` reference, `node:<id>` read edge to a node report, bare contract-table match, or file glob); no `skill` -> explicit `skill:`/`node:`/glob only, bare name errors. `node:<id>` entries are read edges to non-`dependsOn` node reports (delivered from the executing agent's session — the scheduler never stores content). Ambient context lives in the graph top-level `context:` (global channel). Resolved deterministically (validate + runtime same implementation). See §YAML channels Field.|
+|`template`|-|string?|main|Builtin task-template reference - closed enum (`startup` \| `router` \| `scope-entry` \| `adopting`). The node's task text is injected from the template registry at load time (same mechanism as the handoff template family). Mutually exclusive with `task` (the use field no longer exists); `router` is the nested-execution declaration (subgraph-only — graph names, never in-run targets); the per-node templates (`scope-entry` / `adopting`) carry the framework-graph shared-chain texts (arch-review-loop / first-principles-dev dedup — one template one file, ADR 0245; `scope-entry` consumes `template_args.terminal`, see §Node Templates). The `review-accept` / `adopt-accept` templates are deleted (accept-node consolidation — the adopting grilling consensus IS the adoption confirmation; the requirement confirmation is a caller-declared accept loop on the requirement router node via `template_args.questions`). The `framework-chain` factory template is DELETED — the `node` discriminator shape does not exist. The `loop` template is REMOVED — loop/rework semantics are flow self-edges (top-level `flow` field, §Flow Transitions). Template types: `startup` - graph entry (`dependsOn` SHALL be empty; the startup template loads the constraints session copy every downstream node's context is assembled from - it must run first; graph declares `template: startup` on its entry -> full startup (constraints load + serena `activate_project` + jcodemunch `index_folder`); absent -> bare startup (the pilot never runs the heavy steps on its own)); `router` - path-selection node (MAY declare `dependsOn` — sits mid-graph; REQUIRES `template_args.paths`; the paths are graphs started as sibling runs — see §Router Template); `scope-entry` - framework entry interview (REQUIRES `template_args.terminal`); `adopt-scope` / `adopting` - framework shared-chain nodes (zero-param, no template_args; `adopting` declares the nothing-to-adopt direct end).|
+|`template_args`|-|object?|main|Template parameters - machine-declared arguments applied to the template task text at load time, per-template: `template: router` consumes `{ paths: [<graph-name>, ...] }` = the candidate graphs (one-shot selection — sibling inputs pass via `graph_start` args; a non-graph path entry fails load); `template: scope-entry` consumes `{ terminal: <node-id> }` = the graph's terminal node name (round-report|fp-doc-update — interpolated data, never a variant-selection discriminator, ADR 0245); `template: router` MAY additionally consume `{ questions: [{ prompt, condition }] }` = caller-declared extra judgment entries — the node has additional judgment and corresponding flow edges; prompt content and condition vocabulary come from the calling graph, never template semantics (accept-node consolidation). Required with `template: router` (`paths`) / `template: scope-entry` (`terminal`); rejected without the matching template. The framework-chain `node` discriminator shape and the loop `{ graph, until }` shape do not exist — loops are flow self-edges (top-level `flow` field, §Flow Transitions). Carried on the NodeDetail (`template_args`) so the frontend assembles machine-declared options - never parsed from task text.|
 
-## Flow Phase Fields
+## Router Template (template: router)
 
-`type: flow` references a saved sub-graph via `use` (inline `def`, `with` params, `maxDepth` removed). Phase 1 (merge-at-load): loader flattens flow phases at graph load time. Zero runtime overhead - flow type invisible to FSM/API/agent after load.
+A `template: router` phase is a **path-selection node** (graph-router-template): it declares candidate paths as graphs and the executing agent selects and STARTS one. The router is the one-shot SELECTION nested-execution declaration — no in-run branch targets exist (branchTo removed; branching is subgraph selection).
 
-### Constraints
+### Declaration
 
-1. **use required** - flow phases SHALL declare `use`; schema rejects flow without it.
-2. **Static only** - `use: "graph-name"` - no `{...}` runtime expressions (Phase 2 deferred). Dynamic expression -> `FlowPhaseError`.
-3. **Depth cap** - constant 5 (field removed). One flow referencing another -> depth counter increments. Level 6 -> error.
-4. **Name collision** - child node ID prefixed with `<parentId>/`. Parent graph MUST NOT have existing `parentId/childId` nodes - detected at load time.
-5. **dependsOn semantics** - parent phase downstream depends on child graph terminals (nodes with no downstream in the child graph). Loader rewrites after flatten.
-6. **Registry required** - `use` name MUST exist in graph registry (`registry.json`). Unregistered graph -> load error.
-7. **Route propagation** - a flow declared as a route (`route: <id>`) propagates its id to children (children without their own `route` inherit the flow's). Branch-route flows MUST declare `route:` (see ROUTING.md §Routes). Children with their own `route` keep theirs.
+```yaml
+- id: track-accept
+  type: main
+  template: router
+  template_args:
+    paths:
+      - openspec-apply
+      - openspec-engineer
+  dependsOn: [spec-extract]
+```
 
-### Example
+### Semantics
 
-YAML: see YAML-EXAMPLES.md §Flow Phase Example.
+1. **Paths ARE graphs** - `template_args.paths` entries are graph names (registry-resolved). The ONLY one-shot selection form: paths are graph names (subgraph composition deleted). Non-graph path entries fail load.
+2. **Mid-graph allowed** - a router MAY declare `dependsOn` (it needs upstream context to decide — e.g. an echoed adoption judgment). The `startup` template's entry-only constraint does NOT apply.
+3. **Mutually exclusive** - `template` × `task` is rejected (the template is the single source of the node's work; the use field no longer exists).
+4. **Selection is agent-side** - the compiled task text instructs: exactly one candidate or a satisfied hard criterion (from the node context) → auto-select, zero card; otherwise → approval() card whose options are the candidate graphs (machine-declared `template_args.paths`, never task-text parsing) with the recommended graph marked.
+5. **Activation = sibling run** - the chosen graph starts via `graph_start` with the required args (report path / change name / adoption echo) from the node's context (driven to completion, result collected, reported). NO `branchTo` — router paths are never in-run branch targets. Downstream nodes depend on the router node and read its report via `channels: [node:<router>]`.
+6. **Caller-declared extra judgment (`questions`)** - when `template_args.questions` is present, the compiled task text additionally instructs: after collecting the sibling-run result, present each caller-provided prompt to the user; the user's choice is reported as the declared flow `condition` value on advance (transition-table routed — the edge vocabulary lives in the calling graph's `flow` block; a revise-style choice re-enters via the flow self-edge, bounded by the graph constraints prose + retryCount). The template encodes zero accept semantics — the node only knows it has additional judgment and corresponding flow edges. Absent `questions` → pure router behavior (selection + launch only). Example (requirement accept loop):
 
-After merge-at-load, `skill-ops` replaced by `skill-ops/scope-confirm` through `skill-ops/output-examples`. `review` depends on child terminals - `skill-ops/output-examples` (final child node).
+```yaml
+- id: requirement
+  type: main
+  template: router
+  template_args:
+    paths: [arch-review]
+    questions:
+      - prompt: 'Requirement ready? accept: proceed to adoption; revise: adjust the requirement input and re-run the arch-review review.'
+        condition: revise
+  dependsOn: [scope-entry]
+```
+
+## Node Templates (template: scope-entry / adopting)
+
+The per-node templates carry the framework-graph shared-chain node texts (arch-review-loop / first-principles-dev dedup — the scope-entry / adopting shared chain is single-sourced in the template registry). **One template one file**: each node template is a standalone module exporting exactly one template function; the factory pattern is banned (no single-file switch dispatch, no `node` discriminator). The `review-accept` / `adopt-accept` templates are deleted (accept-node consolidation — the adopting grilling consensus IS the adoption confirmation; the requirement confirmation is a caller-declared accept loop on the requirement router node); the `adopt-scope` template is deleted (adopt-scope-and-handler-blocks — the adoption goal is already confirmed by scope-entry + the requirement accept loop + the adopting grilling; the second atom-scope-interview node is pure redundancy, and the adopting grilling absorbs the adoption-goal topics into its first-round frontier). The per-graph divergence — the terminal node name referenced by scope-entry (round-report vs fp-doc-upd…
+
+### Declaration
+
+```yaml
+- id: scope-entry
+  type: main
+  dependsOn: [startup]
+  skill: atom-scope-interview
+  template: scope-entry
+  template_args:
+    terminal: round-report
+```
+
+Zero-param nodes declare the template only:
+
+```yaml
+- id: adopting
+  type: main
+  dependsOn: [requirement]
+  skill: grilling
+  template: adopting
+```
+
+### Semantics
+
+1. **One template one file** - `scope-entry` → `src/task-templates/scope-entry.ts`, `adopting` → `adopting.ts`; each module exports exactly one template function. The `framework-chain` factory and its `template_args.node` discriminator do not exist; the `review-accept` / `adopt-accept` / `adopt-scope` modules are deleted (accept-node consolidation + adopt-scope removal).
+2. **Data parameters only** - `template_args.terminal` (required with `template: scope-entry`) names the graph's terminal node (round-report | fp-doc-update) for scope-entry's round-input clause — interpolated data, never a variant-selection discriminator. `adopting` takes no template_args.
+3. **Mutually exclusive with `task`** - same rule as all templates: the template is the single source of the node's work.
+4. **Mid-graph allowed** - node-template phases sit mid-graph (`dependsOn` declared), like the router template.
+5. **Skill field stays** - the node keeps its `skill` (atom-scope-interview / grilling) — the template injects the task text; the skill drives execution.
+
+## Flow Transitions (top-level `flow`)
+
+The top-level `flow` array declares the graph's conditional-routing edges (graph-flow capability) — the transition table (node × condition → target). Subset grammar (deterministic, two written forms):
+
+- `A --> B` — unlabeled edge, the sequence default
+- `A -->|label| B` — labeled edge, condition-matched transition; the label is the flow-defined condition value
+
+### Declaration
+
+```yaml
+flow:
+  - spec-accept -->|pass| change-body
+  - spec-accept -->|fail| spec-accept # self-edge — inline bounded loop (condition-matched re-entry)
+  - change-body --> review
+```
+
+### Semantics
+
+1. **Transition table** - every labeled edge registers `(source × label → target)`; unlabeled edges are the source's sequence default; a node without flow edges routes by its dependsOn-derived successor set.
+2. **Condition advance** - the pilot advances with `graph_advance(runId, nodeId, condition: <value>)`; the value resolves via the node's transition table — no match is a loud error (missed-condition guard). No condition / no flow edges → sequence default.
+3. **Self-edge loop** - `A -->|fail| A` is the inline bounded loop (loop/rework semantics — never a subgraph/task-template mechanism): NOT satisfied → the node reports the re-entry condition (e.g. `fail`), the transition table re-enters `A`; satisfied → the node reports the exit condition (e.g. `pass`) routing downstream. The bound lives in the loop-head node's task text / the graph's constraints prose (engine-incremented — each re-entry edge pass increments the re-entered node's `retryCount` (never zeroed), the machine signal the agent-side bound check observes; see ROUTING.md §Rework Decisions).
+4. **Endpoint validation** - every edge's source and target MUST be declared phase ids — undeclared endpoints fail load loudly (compile-time, naming the edge).
+5. **Malformed entries fail load** - a line outside the subset grammar is a load error, never a silent drop.
+6. **Condition vocabulary** - labels are flow-defined vocabulary; zero machine validation axis on the vocabulary (governance = the graph-maintain flow audit + user maintenance, mirroring the inventory regime).
+7. **Mermaid-format compliance (ADR 0242)** - the subset grammar is a strict subset of the mermaid flowchart grammar: every edge form the engine accepts parses under the real mermaid parser. Compliance is verified two-track: builtin graphs — the suite regression test parses every builtin flow block with the real mermaid parser (dev axis, fails the suite on drift); project graphs — the load-time contract pass parses the flow block with the real mermaid parser; a non-conformant block surfaces as a load-time problem (never a load failure — the run is not blocked; the frontend sees it via `graph_assets` `problems`). Authoring guidance: flow edges SHALL be written in mermaid-valid subset form (`A --> B` unlabeled, `A -->|label| B` labeled, self-edges for loops) — chained edges (`A --> B --> C`) are mermaid-valid but outside the engine subset and SHALL NOT be authored.
 
 ## Auto-Supplied Fields
 
 Auto-supplied fields (NEVER write in YAML):
 
 - `skill` (string) - resolved from `skill` field; the execution skill for the phase's work.
-- `retryCount` (number) - runtime counter. 0-based. The node's own jump re-execution count; gate jump bounds reference the TARGET node's `retryCount` (single counter - see §Gate Jump Conditions).
+- `retryCount` (number) - runtime counter. 0-based. Incremented at jump reset only — the operator `graph_jump` and the advance `jump` channel — never zeroed. Incremented on flow re-entry (condition-matched): each pass through a re-entry edge (matched target equal to the reported node, or a target already completed) increments the re-entered node's `retryCount` — the bounded-loop counter (constraint prose + retryCount).
 
-The dispatch handler skill is the constant `atom-phase-handler` for main/approval/gate — agent-side knowledge, never carried in the payload (no `handlerSkill` NodeDetail field). Run mode is NOT a NodeDetail field - it arrives at activation (graph_start `args.mode`). Graph-level constraints ARE carried (`NodeDetail.constraints` — `[graph]`-prefixed dispatch facts); project constraints arrive via the pilot-loaded activation session copy. Phase-level `constraints`/`runMode` declared in YAML -> schema rejection with migration hints; `$`-prefixed ids -> schema rejection (activation prologue removed).
+The dispatch handler skill is the constant `atom-phase-handler` for main — agent-side knowledge, never carried in the payload (no `handlerSkill` NodeDetail field). Graph-level constraints ARE carried (`NodeDetail.constraints` — `[graph]`-prefixed dispatch facts); project constraints arrive via the pilot-loaded activation session copy. Unknown phase keys reject uniformly at schema parse (PhaseSchema `.strict()` — no per-field removed-field declarations remain, no migration hints, no silent stripping: removed fields like `route`/`routing`/`join`/`mode`/`jumps`/`reads` and legacy fields like `topic`/`maxDepth` are treated alike, the error naming the key); the `flow` phase type is removed (`type` accepts `main` only); `$`-prefixed ids -> schema rejection (activation prologue removed).
 
-## Route Field (all phase types)
+## Operations Declaration
 
-`route: <id>` marks phase membership in a named route. Routes are explicit route-first constructs - zero inference.
-
-|Field (YAML)|NodeDetail|Type|Purpose|
-|-|-|-|-|
-|`route`|`route`|string?|Route membership - declared route id. Absent = implicit default route (always active, never stored).|
-
-## Approval Routing Actions (branch-route only)
-
-YAML format uses `routing` with nested `actions` array. Each action maps to one approval() option. Written actions are declared ONLY for explicit branch-route selection - default card composition: see ROUTING.md §Approval Decision Confirmation (single home).
-
-|Field (YAML)|NodeDetail|Type|Purpose|
-|-|-|-|-|
-|`action`|`action`|`'continue' \| 'retry' \| 'jump' \| 'end'`|Routing semantics - continue (advance; branch-route target = node or route id), retry (re-execute target), jump (go to target node), end (complete the run - `graph_advance` `endRun`).|
-|`target?`|`target?`|string|Branch-route option target (`continue` - node or route id) or re-run target (`retry`/`jump` - node id). Routing targets SHALL be explicit.|
-|`value`|`value`|string|Stable kebab-case machine identifier - persisted decision output carries it; gate jump conditions and AI recommendations reference `decision value`, never label text.|
-|`label`|`label`|string|Option label displayed in approval()|
-|`description`|`description`|string|Option description displayed in approval()|
-
-No static default field exists - Run Mode auto executes the AI recommendation (judgment basis: §Jump Semantics + snapshot + run mode), never a declared action.
-
-## HLT Operations Declaration
-
-A main phase MAY declare `operations: [<tool-name>, ...]` - closed-set members of the HLT Registry. Semantics: union with the dispatched skill's `Operation classes` default (phase wins on conflict); absent = skill default alone. Validation: unknown class name -> loud rejection at graph load (no runtime fallback). Scheduler behavior: pass-through into NodeDetail - no scheduling effect; the handler assembles registry entries and performs class-based Tool usage verification per declared class.
+A main phase MAY declare `operations: [<class>, ...]` - declared execution classes. Semantics: union with the dispatched skill's `Operation classes` default (phase wins on conflict); absent = skill default alone. Scheduler behavior: pass-through into NodeDetail - no scheduling effect; the Tool usage check performs evidence-only verification per declared class (no registry injection).
 
 ## YAML channels Field - three-tier context model
 
@@ -99,7 +156,7 @@ Context delivery has three tiers, one field each:
 effective = [convention layer, config `context:` defaults, graph `context:`, phase `channels:`] - dedup, order preserved
 ```
 
-A phase-level `channels` entry type derives from the dispatched skill's contract - type comes from the contract tables, never guessed (main; the same resolution path serves approval/gate - uniform, no per-type rules):
+A phase-level `channels` entry type derives from the dispatched skill's contract - type comes from the contract tables, never guessed (main; the same resolution path serves every type - uniform, no per-type rules):
 
 |YAML channel entry|Type|Example|
 |-|-|-|
@@ -107,13 +164,13 @@ A phase-level `channels` entry type derives from the dispatched skill's contract
 |`node:<id>` (explicit prefix)|From upstream - cross-level legal|`node:plan-parse`|
 |bare entry in contract From upstream table|From upstream|`scope-confirm` (only when also a `dependsOn` node - else migrate to `node:` prefix)|
 |bare entry in contract Reference skills table|Reference skills|`atom-graph-spec`|
-|bare entry in contract Files table or glob shape (`*`, `?`, `[`, `/`)|Files|`.graph-scheduler/docs/x.md` (workflow artifact glob only; project globs -> config.json context)|
+|bare entry in contract Files table or glob shape (`*`, `?`, `[`, `/`)|Files|`.graph-scheduler/graphs/x.yaml` (workflow artifact glob only; project globs -> config.json context)|
 |entry duplicating a `dependsOn` node|redundant declaration -> warning|-|
 |entry matching nothing|error - no fallback search|-|
 
-**Graph/config-level entries** (`context:`) require an explicit `skill:`/`node:` prefix or a file-glob shape - a bare name is a load-time error (no execution-skill contract exists at those scopes). `node:` targets validate against the flattened node set at load; run-scope gating still applies at dispatch. A `node:` entry in `context:` **promotes** the named node's report into the global channel - every phase receives it as an ambient upstream block; the owning node skips its own promoted stream (self-read undefined). Flow phases SHALL NOT declare `channels` (schema rejection - move ambient entries to graph `context:`, data reads to the consuming phase). A child graph's `context:` applies to its own flattened phases; the parent's global channel reaches child phases via the dispatch merge - no flow-level propagation exists.
+**Graph/config-level entries** (`context:`) require an explicit `skill:`/`node:` prefix or a file-glob shape - a bare name is a load-time error (no execution-skill contract exists at those scopes). `node:` targets validate against the flattened node set at load; run-scope gating still applies at dispatch. A `node:` entry in `context:` **promotes** the named node's report into the global channel - every phase receives it as an ambient upstream block; the owning node skips its own promoted stream (self-read undefined). A launched graph's `context:` applies to its own phases; the launching router passes inputs via `graph_start` args - no cross-run channel propagation exists.
 
-The removed `preText`/`reads` fields are rejected globally - see §Gate Type (single home).
+The removed `preText`/`reads` fields are rejected globally - see §Auto-Supplied Fields (removed-fields list).
 
 ## Skill-Contract Channel Derivation
 
@@ -133,22 +190,13 @@ Phases whose work consumes a spec skill SHALL declare the executing `skill:` (e.
 
 ## Type Ownership Layers
 
-Phase types belong to one of two layers (documented ownership model - optional layer removed with the agent type, registry mechanism removed):
+Phase types belong to a single layer (documented ownership model - the composition layer was removed with the use field and the agent type):
 
 |Layer|Types|Dispatch|Disability|
 |-|-|-|-|
-|Base|`main`, `approval`, `gate`|Static handlers resolved by type (schema-enforced enum)|Never - FSM jump protocol, decision-card flow, gate rework jumps, and run completion marking depend on them|
-|Composition|`flow`|Load-time expansion (merge-at-load) - not a dispatch type|N/A - dispatch has no meaning for it|
+|Base|`main`|Static handler resolved by type (schema-enforced enum)|Never - dispatch and run completion marking depend on it|
 
-No custom project types - `type` is a closed enum (`main`/`approval`/`gate`/`flow`); unknown types fail schema parse.
-
-## Gate Type
-
-Gate phase (`type: gate`) = **pure rework node** - machine counterpart of `approval` (human card). Authority split: gate evaluates rework conditions (agent judgment), reports backward jump; approval asks the human. Both produce the same `IApprovalDecision` protocol; a gate hit carries `action: jump`, `target: <jump to>`, `label: <jump when>` (pilot routes it via `graph_advance` `branchTo` - the scheduler applies the reset); no hit carries `action: continue` with no target - pass through, zero forward effect.
-
-### Field Closure
-
-Gate SHALL declare exactly: `id`, `type`, `dependsOn`, `route?`, `jumps` (required, non-empty), `channels` (all entry kinds - uniform, same rule as every type; judgment context per §Jump Semantics), `join?`. Forbidden fields (`task`/`preText`/`routing`/`agent`/`skill`/`use`) SHALL be rejected by schema (loud rejection - superRefine pattern). `preText` and `reads` are rejected globally (removed fields - schema field convergence): approval card text lives in `task`; judgment references migrate to `channels: [node:<id>]`. `jumps` required and non-empty - a gate without rework jumps is a silent pass-through; delete the gate or declare when/to pairs.
+No custom project types - `type` is a closed enum (`main`); unknown types fail schema parse.
 
 ## YAML Format Rules
 
@@ -166,7 +214,7 @@ YAML: see YAML-EXAMPLES.md §Flow Sequences.
 
 ### Comments
 
-`#` comments document intent - jump conditions, phase purpose, routing rationale:
+`#` comments document intent - rework conditions, phase purpose, rework rationale:
 
 YAML: see YAML-EXAMPLES.md §Comments.
 
@@ -185,7 +233,7 @@ Register new graphs in the scheduler's graph registry. Without registration, `gr
    - **Input references covered** - every phase-output reference in task text must be covered by `dependsOn` (implicit) or `channels` (explicit `node:` entry).
    - **No runtime paths** - the `.taskflow/outputs/` form no longer exists (content flows via the agent session). References to it in task text are inert text — no validation check exists (path is gone); upstream arrives via declared inputs (dependsOn/channels).
    - **Claims match declarations** - upstream-reference wording must correspond to an actual declared channel or dependsOn edge (undeclared claims warn).
-3. **Gate jump conditions and approval recommendation criteria** - per project language conventions, referencing observable facts in phase outputs (output contract fields, approval decision values, target-node retryCount).
+3. **Rework conditions** - per project language conventions, referencing observable facts in phase outputs (output contract fields, decision values, target-node retryCount) and the graph's flow condition vocabulary (edge labels — consistent spelling across edges and the loop-head task text).
 
 ## Task Content Spec
 
@@ -196,14 +244,12 @@ Normative content rules for `task` text and graph comments - the structure a tas
 Main phase tasks SHALL contain exactly three content classes, in order:
 
 1. **Directive** - what to execute/produce, referencing the phase `skill`. One line suffices: `Execute <skill> graph mode per <skill> skill` or the produce-verb for skill-less phases.
-2. **Phase-local invariants** - facts the dispatched skill cannot know: consumed output fields by name, routing/route semantics, retry bounds, phase MUST/NEVER rules (e.g. workflow-done's incomplete-judgment check).
+2. **Phase-local invariants** - facts the dispatched skill cannot know: consumed output fields by name, retry bounds, phase MUST/NEVER rules (e.g. workflow-done's incomplete-judgment check).
 3. **Output contract** - machine-parseable emission fields. Exactly one block, canonical spelling:
 
 ```yaml
 Output contract: field_a, field_b (meaning)
 ```
-
-Approval tasks SHALL contain: header line (<=30 chars, card topic) + decision topic + phase-local criteria only. Gate tasks SHALL have no task (schema-enforced).
 
 ### Skill Dedup Deletion Test
 
@@ -215,7 +261,7 @@ Task text SHALL NOT contain content present in the dispatched skill, the handler
 
 ### Comment Rule
 
-Graph YAML comments SHALL declare topology intent only - one line per phase block, stating structural purpose (stage role, why a gate/route exists). Prose narration of phase behavior, graph flow, or task content SHALL NOT appear; ADR/doc references are prohibited (mirrors the why-only comment policy).
+Graph YAML comments SHALL declare topology intent only - one line per phase block, stating structural purpose (stage role, why a rework decision exists). Prose narration of phase behavior, graph flow, or task content SHALL NOT appear; ADR/doc references are prohibited (mirrors the why-only comment policy).
 
 ### Output Contract Spelling
 

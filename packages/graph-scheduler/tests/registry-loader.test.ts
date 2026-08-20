@@ -4,12 +4,13 @@
  */
 import { Effect, Layer } from 'effect';
 import { describe, expect, it } from 'vitest';
+import { TASKFLOW_FILE_PATTERN } from '../src/api/maintenance.js';
 import { FileSystem, FileSystemError } from '../src/filesystem.js';
 import { makeRegistryLoader } from '../src/registry-loader.js';
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-function validRegistry(graphs: Array<{ name: string; path: string; description?: string }>): string {
+function validRegistry(graphs: Array<{ name: string; path: string }>): string {
   return JSON.stringify({ graphs });
 }
 
@@ -21,7 +22,7 @@ function mockFsLayer(files: Record<string, string>): Layer.Layer<FileSystem, nev
       return Effect.fail(new FileSystemError(path, `ENOENT: file not found: ${path}`));
     },
     resolvePath: (filePath: string) => (filePath in files ? filePath : null),
-    listYamlFiles: () => Object.keys(files).filter((f) => /\.ya?ml$/.test(f)),
+    listYamlFiles: () => Object.keys(files).filter((f) => TASKFLOW_FILE_PATTERN.test(f)),
     resolveSchemaUri: (uri: string, _filePath: string) => (uri in files ? uri : null),
   });
 }
@@ -176,17 +177,26 @@ describe('makeRegistryLoader', () => {
     expect(result.path).toMatch(/valid\.json$/);
   });
 
-  it('registry entry with description is loaded correctly', async () => {
+  it('skips registry entries carrying removed metadata fields (description/tags) — strict pure-index schema', async () => {
     const loader = makeRegistryLoader(PATHS, 'reg1.json');
     const layer = mockFsLayer({
       'reg1.json': JSON.stringify({
-        graphs: [{ name: 'a', path: 'a.json', description: 'Test graph A' }],
+        graphs: [
+          { name: 'a', path: 'a.json', description: 'Test graph A' },
+          { name: 'b', path: 'b.json', tags: ['maker'] },
+          { name: 'c', path: 'c.json' },
+        ],
       }),
       'reg2.json': validRegistry([]),
     });
 
     const result = await runSuccess(loader.registry.pipe(Effect.provide(layer)));
-    expect(result.get('a')!.description).toBe('Test graph A');
+    // description/tags entries fail the strict schema and are skipped —
+    // only the two-field entry survives.
+    expect(result.get('a')).toBeUndefined();
+    expect(result.get('b')).toBeUndefined();
+    expect(result.get('c')).toBeDefined();
+    expect(result.get('c')!.path).toMatch(/c\.json$/);
   });
 
   // ── Fresh reads ────────────────────────────────────────────────

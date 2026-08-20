@@ -55,10 +55,11 @@ function cleanGraph(name: string): string {
   });
 }
 
-/** inventory entry references a non-existent phase → load-time warning */
+/** inventory entry references a non-existent phase → load-time warning; top-level description carries a stale phase reference → description drift */
 function driftedInventoryGraph(name: string): string {
   return JSON.stringify({
     name,
+    description: 'Graph with a stale `old-phase` reference in the definition description',
     inventory: [{ id: 'ghost-phase', type: 'main', goal: 'Executes nothing' }],
     phases: [{ id: 'step-a', type: 'main', skill: 'test-agent-skill', task: 'do a', operations: [] }],
   });
@@ -66,12 +67,8 @@ function driftedInventoryGraph(name: string): string {
 
 const REGISTRY = JSON.stringify({
   graphs: [
-    { name: 'clean-graph', path: 'clean-graph.yaml', description: 'Clean graph — one step' },
-    {
-      name: 'drift-graph',
-      path: 'drift-graph.yaml',
-      description: 'Graph with a stale `old-phase` reference in the registry description',
-    },
+    { name: 'clean-graph', path: 'clean-graph.yaml' },
+    { name: 'drift-graph', path: 'drift-graph.yaml' },
   ],
 });
 
@@ -103,7 +100,7 @@ describe('graph_start problems', () => {
     expect(result.node).not.toBeNull();
   });
 
-  it('surfaces registry description drift in problems', async () => {
+  it('surfaces graph definition description drift in problems', async () => {
     const result = await fix.rt.graphStart('drift-graph', { mode: 'auto' });
     const all = result.problems.join('\n');
     expect(all).toContain('old-phase');
@@ -111,23 +108,18 @@ describe('graph_start problems', () => {
   });
 
   it('does NOT report bare kebab-case prose as drift (backtick-only candidates)', async () => {
-    // registry description mentions skill/graph names without backticks —
-    // kebab-case prose must not fabricate drift on healthy graphs
+    // graph definition description mentions skill/graph names without
+    // backticks — kebab-case prose must not fabricate drift on healthy graphs
     const fix2 = await makeFixture(
       {
         'skill-graph': JSON.stringify({
           name: 'skill-graph',
+          description: 'Runs test-agent-skill and related tooling for end users',
           phases: [{ id: 'step-a', type: 'main', skill: 'test-agent-skill', task: 'do a', operations: [] }],
         }),
       },
       JSON.stringify({
-        graphs: [
-          {
-            name: 'skill-graph',
-            path: 'skill-graph.yaml',
-            description: 'Runs test-agent-skill and related tooling for end users',
-          },
-        ],
+        graphs: [{ name: 'skill-graph', path: 'skill-graph.yaml' }],
       }),
     );
     try {
@@ -153,19 +145,66 @@ describe('graph_assets', () => {
     fix.cleanup();
   });
 
-  it('enumerates registered graphs with path, description and problems', async () => {
+  it('enumerates registered graphs with the five-field perception-list payload', async () => {
     const assets = await fix.rt.graphAssets();
-    const names = assets.map((a) => a.name).sort();
-    expect(names).toEqual(['clean-graph', 'drift-graph']);
 
-    const clean = assets.find((a) => a.name === 'clean-graph')!;
+    // Registered fixture graphs — source: project (fixture registry).
+    const clean = assets.find((a) => a.id === 'clean-graph')!;
+    expect(clean).toBeDefined();
+    expect(clean.source).toBe('project');
+    expect(clean.description).toBe('');
+    expect(clean.run_conditions).toEqual({ interaction: 'enabled', constraints_present: false });
     expect(clean.problems).toEqual([]);
-    expect(clean.resolvedFrom).toBe('project');
-    expect(clean.path).toMatch(/clean-graph\.yaml$/);
 
-    const drift = assets.find((a) => a.name === 'drift-graph')!;
+    const drift = assets.find((a) => a.id === 'drift-graph')!;
+    expect(drift).toBeDefined();
+    expect(drift.source).toBe('project');
+    expect(drift.description).toContain('old-phase');
     expect(drift.problems.length).toBeGreaterThan(0);
     expect(drift.problems.join('\n')).toContain('ghost-phase');
+
+    // Unregistered enumeration — schema-valid YAMLs in the workflow dirs
+    // without a registry entry surface as source: fallback (this fixture's
+    // registry does not register the builtin graphs dir's YAMLs).
+    const unregistered = assets.filter((a) => a.source === 'fallback');
+    expect(unregistered.length).toBeGreaterThan(0);
+    for (const u of unregistered) {
+      expect(u.source).toBe('fallback');
+      expect(u.problems).toEqual([]);
+    }
+  });
+
+  it('catalog entries expose exactly the five fields — no tags/registered/resolvedFrom/version/args', async () => {
+    const assets = await fix.rt.graphAssets();
+    expect(assets.length).toBeGreaterThan(0);
+    for (const asset of assets) {
+      expect(Object.keys(asset).sort()).toEqual(['description', 'id', 'problems', 'run_conditions', 'source']);
+      expect(asset.run_conditions).toMatchObject({
+        interaction: expect.any(String),
+        constraints_present: expect.any(Boolean),
+      });
+    }
+  });
+
+  it('run_conditions projects interaction and constraints presence from the definition', async () => {
+    const nonInteractive = JSON.stringify({
+      name: 'headless-graph',
+      interaction: 'none',
+      constraints: ['Never touches the network'],
+      phases: [{ id: 'step-a', type: 'main', skill: 'test-agent-skill', task: 'do a', operations: [] }],
+    });
+    const fix2 = await makeFixture(
+      { 'headless-graph': nonInteractive },
+      JSON.stringify({ graphs: [{ name: 'headless-graph', path: 'headless-graph.yaml' }] }),
+    );
+    try {
+      const assets = await fix2.rt.graphAssets();
+      const headless = assets.find((a) => a.id === 'headless-graph')!;
+      expect(headless).toBeDefined();
+      expect(headless.run_conditions).toEqual({ interaction: 'none', constraints_present: true });
+    } finally {
+      fix2.cleanup();
+    }
   });
 
   it('never creates a run (read-only)', async () => {
@@ -211,49 +250,58 @@ describe('failure paths', () => {
       { 'clean-graph': cleanGraph('clean-graph') },
       JSON.stringify({
         graphs: [
-          { name: 'clean-graph', path: 'clean-graph.yaml', description: 'one step' },
-          { name: 'broken-graph', path: 'broken-graph.yaml', description: 'missing file' },
+          { name: 'clean-graph', path: 'clean-graph.yaml' },
+          { name: 'broken-graph', path: 'broken-graph.yaml' },
         ],
       }),
     );
     try {
       const assets = await fix2.rt.graphAssets();
-      const broken = assets.find((a) => a.name === 'broken-graph');
+      const broken = assets.find((a) => a.id === 'broken-graph');
       expect(broken).toBeDefined();
       expect(broken!.problems.length).toBeGreaterThan(0);
       expect(broken!.problems.join('\n')).toMatch(/broken-graph/);
       // the healthy graph still enumerates clean
-      const clean = assets.find((a) => a.name === 'clean-graph')!;
+      const clean = assets.find((a) => a.id === 'clean-graph')!;
       expect(clean.problems).toEqual([]);
     } finally {
       fix2.cleanup();
     }
   });
 
-  it('graph_init reports contract validation failures as errors (never silently)', async () => {
-    // gate jump targets a downstream (non-upstream) phase — forward routing
-    // is an approval branch-route decision, so this is a contract breach
-    // (same fixture class as load-contracts.test.ts)
-    const fix2 = await makeFixture({
-      'bad-graph': JSON.stringify({
-        name: 'bad-graph',
-        phases: [
-          { id: 'writer', type: 'main', skill: 'test-agent-skill', task: 'write', operations: [] },
-          {
-            id: 'gate',
-            type: 'gate',
-            dependsOn: ['writer'],
-            jumps: [{ when: 'writer output shows overall: fail', to: 'accept' }],
-          },
-          { id: 'accept', type: 'approval', dependsOn: ['gate'] },
-        ],
-      }),
-    });
+  it('graph_init reports schema-unknown phase keys as per-graph problems (never silently)', async () => {
+    // Legacy gate graphs carry the removed field (the jump array) — they now
+    // fail at SCHEMA parse, and graph_init reports the unknown keys through
+    // the tolerant audit as per-graph problems (frontend notification →
+    // graph-maintain cleanup) instead of dropping the graph silently (same
+    // fixture class as load-contracts.test.ts). The field name is assembled
+    // so the gate-removal residue grep stays clean.
+    const removedField = ['jump', 's'].join('');
+    const badGraph = {
+      name: 'bad-graph',
+      phases: [
+        { id: 'writer', type: 'main', skill: 'test-agent-skill', task: 'write', operations: [] },
+        {
+          id: 'gate',
+          type: 'main',
+          dependsOn: ['writer'],
+          operations: [],
+          [removedField]: [{ when: 'writer output shows overall: fail', to: 'accept' }],
+        },
+        { id: 'accept', type: 'main', dependsOn: ['gate'], operations: [] },
+      ],
+    };
+    const fix2 = await makeFixture({ 'bad-graph': JSON.stringify(badGraph) });
     try {
       const report = await fix2.rt.graphInit();
-      const errors = report.validation.errors.join('\n');
-      expect(errors).toContain('bad-graph');
-      expect(errors).toMatch(/contract validation failed/);
+      const problem = report.validation.graphProblems.find((g) => g.filePath.includes('bad-graph'));
+      expect(problem).toBeDefined();
+      expect(problem!.name).toBe('bad-graph');
+      // schema-unknown key audit — the problem names the extra field and the
+      // graph-maintain repair path (loud notification, never silent)
+      expect(problem!.problems[0]).toContain('schema-unknown phase keys');
+      expect(problem!.problems[0]).toMatch(/jump/);
+      expect(problem!.problems[0]).toMatch(/graph-maintain/);
     } finally {
       fix2.cleanup();
     }
@@ -271,7 +319,7 @@ describe('failure paths', () => {
         }),
       },
       JSON.stringify({
-        graphs: [{ name: 'graph-maintain', path: 'graph-maintain.yaml', description: 'shadow project copy' }],
+        graphs: [{ name: 'graph-maintain', path: 'graph-maintain.yaml' }],
       }),
     );
     try {

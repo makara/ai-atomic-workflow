@@ -33,8 +33,8 @@ describe('three-tier channel model — graph-level context', () => {
   });
 
   it('accepts workflow artifact glob in graph context', () => {
-    const { errors } = validateGraphContracts(baseGraph({ context: ['.graph-scheduler/docs/x.md'] }), 'g.yaml');
-    expect(errors.some((e) => e.includes('.graph-scheduler/docs/x.md'))).toBe(false);
+    const { errors } = validateGraphContracts(baseGraph({ context: ['.graph-scheduler/graphs/x.yaml'] }), 'g.yaml');
+    expect(errors.some((e) => e.includes('.graph-scheduler/graphs/x.yaml'))).toBe(false);
   });
 
   it('accepts skill: and node: context entries', () => {

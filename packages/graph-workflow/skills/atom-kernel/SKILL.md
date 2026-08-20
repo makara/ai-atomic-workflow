@@ -1,16 +1,16 @@
 ---
 name: atom-kernel
-description: Platform primitives - task() dispatch, approval() decision UI (mode-aware, absorbs question(), 8 card rules), interview() consensus, judge(), graph-scheduler tool detection, High-Level Tool Registry (closed scenario-keyed tool set + schemas). Use when dispatching sub-agents, presenting decisions, executing main-phase work, authoring execution skills, or mentions high-level tool, HLT registry, tool call, tool schema, evidence loop, verify loop.
+description: Platform primitives - task() dispatch, approval() decision UI (8 card rules), interview() consensus, graph-scheduler tool detection, tool schemas (serena/jcodemunch/graph-scheduler). Use when dispatching sub-agents, presenting decisions, executing main-phase work, authoring execution skills, or mentions tool schema, tool call, evidence loop, verify loop.
 argument-hint: none (reference skill)
 disable-model-invocation: true
 user-invocable: false
-version: 2.15.0
-last_updated: '2026-08-09'
+version: 2.17.0
+last_updated: '2026-08-19'
 ---
 
 > **Runtime constraints** - **Layer**: atom - runtime primitives.
 
-Platform primitives - task()/judge()/approval()/interview()/todo() contracts + HLT registry, single source for graph-node execution.
+Platform primitives - task()/approval()/interview()/todo() contracts + tool schemas (tool discipline pointer in §Tool Discipline), single source for graph-node execution.
 
 # Atom-Kernel
 
@@ -19,33 +19,44 @@ Platform primitives - task()/judge()/approval()/interview()/todo() contracts + H
 |Primitive|Type|Maps to|
 |-|-|-|
 |`task()`|**Callable**|platform `task` tool - dispatches sub-agents|
-|`judge()`|**Callable**|platform one-shot LLM judgment - when/eval evaluation|
-|`approval()`|**Behavior Contract**|Agent-implemented - mode-aware single decision; card branch invokes the platform's decision-UI tool, auto branch executes the recommendation in-context|
+|`approval()`|**Behavior Contract**|Agent-implemented - single-form decision card; invokes the platform's decision-UI tool|
 |`interview()`|**Behavior Contract**|Agent-implemented - confirmation conversation, explicit participation (mandatory \| as-needed); turns via approval() without recommendation|
 
-> `task()`, `judge()` are tool-mapped callables - direct invocation, platform-mapped (see §Platform Spellings). `approval()` and `interview()` are behavior contracts - agent-implemented; calling them like functions fails with `ReferenceError`. `approval()` reads run-mode context (card or auto-execute); `interview()` implements turns via `approval()` WITHOUT recommendation (card in any mode - never auto-gated).
+> `task()` is a tool-mapped callable - direct invocation, platform-mapped (see §Platform Spellings). `approval()` and `interview()` are behavior contracts - agent-implemented; calling them like functions fails with `ReferenceError`. `approval()` presents the single-form decision card (always shown); `interview()` implements turns via `approval()` WITHOUT recommendation (card always - never auto-gated).
 
 ## Platform Spellings
 
-Primitive contracts platform-neutral - never assumed exact; skills reference contract names only. Mapping table: (see HLT-REGISTRY.md §Platform Spellings).
+Primitive contracts platform-neutral. Mappings vary per platform - never assumed exact. Skills reference contract names only.
+
+|Primitive|Contract|Mapping|
+|-|-|-|
+|`task()`|Sub-agent dispatch - batch in `tasks[]`, shared `context`, agent-hint selection|platform's sub-agent dispatch tool|
+|`approval()`|Single-form decision card - header/options/custom + recommendation/rationale; card always presented (options + custom free input, recommendation marked)|platform's decision-UI tool|
+|`interview()`|Confirmation conversation - explicit participation (mandatory \| as-needed), turns via approval() without recommendation|agent-implemented using approval() turns|
+|`todo()`|State-machine task list - pending/in_progress/completed; boundary clear at execution-unit boundaries; no-todo platform -> no-op|platform's todo tool|
+
+Platform rows (extension point — one row per platform, no skill changes):
+
+|Platform|task()|approval()|Default agent (hint fallback)|
+|-|-|-|-|
+|opencode|Task tool — agent vocabulary `build` / `plan` / `general` / `explore` / `scout`|decision-UI primitive|`general`|
+|OMP|`task` tool|decision-UI primitive|`task`|
 
 ---
 
 # Graph-Scheduler Tool Detection
 
-MCP tool name detection - resolve by substring, never assumed exact. Before any graph operation, scan the tool list; find each substring -> record exact name: `graph_start` / `graph_advance` / `graph_status` / `graph_list` / `graph_assets` / `graph_force_end` / `graph_jump` / `graph_init` / `graph_clean_completed` / `graph_clean_all`. Use detected names for all subsequent calls.
-
----
-
-# judge() - One-Shot Judgment
-
-One-shot constrained-answer LLM judgment - gate jump condition evaluation. Failure -> conservative default (gate eval: `'false'` no-match - never auto-decide on uncertainty, falls through). Prompt format + failure table: (see HLT-REGISTRY.md §judge()).
+MCP tool name detection - resolve by exact-name set, never substring matching. Before any graph operation, scan the tool list; find the exact names: `graph_start` / `graph_advance` / `graph_status` / `graph_list` / `graph_assets` / `graph_force_end` / `graph_jump` / `graph_init` / `graph_clean_completed` / `graph_clean_all`. Use detected names for all subsequent calls.
 
 ---
 
 # todo() - Boundary Clear
 
-Clears the platform todo list at execution-unit boundaries - per-execution scratchpad, never session-persistent; in-node create/update stays native. Contract + state machine + consumer: (see HLT-REGISTRY.md §todo()).
+Clear the platform todo list at execution-unit boundaries - per-execution scratchpad, never session-persistent. In-node create/update stays native platform tooling; skills reference the `todo()` contract.
+
+- **Semantics**: unconditional clear. No-todo platform -> no-op, no error.
+- **State machine**: pending -> in_progress -> completed (+ optional blocked/cancelled) - state-machine semantics + per-platform spellings in §Platform Spellings; the contract is the state machine, never the op names.
+- **Consumer**: atom-phase-handler enforces the node-boundary lifecycle (dispatch + completion clears) - the only caller.
 
 ---
 
@@ -61,11 +72,15 @@ task({ i, context, tasks })
 - `context` - shared constraints. Format: `# Goal`, `# Constraints`, `# Contract`.
 - `tasks` - array. Each: `name` (CamelCase <=32), `agent` (specialist type), `task` (self-contained).
 
-`agent` takes one concrete type. Graph main-phase context may carry `## Agent hints: [<type-1>, …]` (from atom-phase-handler, priority-ordered). Pick the **first** hint available in the current platform (§Platform Spellings); none -> platform default. Hints advisory; batch may mix types.
+`agent` takes one concrete type. The node's task text names the agent type when a specialist is required; otherwise the platform default applies. Batch may mix types.
+
+**Agent hints preference** - when a main node's dispatch carries a `## Agent hints:` block (from `node.agent` — peer-level advisory, priority-ordered), prefer those types when dispatching sub-agents for that node: first available wins, fallback platform default. Advisory only — never a control.
 
 Capture agent ID via the platform's artifact mechanism.
 
-**Output contract (receipt contract)** - every task SHALL declare its return fields (in the task text or an outputSchema). Sub-agents yield a compact structured receipt: status + the declared fields + artifact references (`agent://<id>` / file paths), compressed, no process narrative. Results enter the main context ONCE as the receipt; full transcripts stay addressable via the platform artifact/history mechanisms — never re-injected wholesale.
+**Output contract (receipt contract)** - every task SHALL declare its return fields (in the task text or an outputSchema). Sub-agents yield a compact structured receipt: status + the declared fields + output-location pointer(s) + artifact references, compressed, no process narrative. The output-location pointer SHALL follow the typed-pointer contract: file path (cross-run primary carrier) / `agent://<id>` (same-session sub-agent final output) / `artifact://<id>` (overflow tool output) / `history://<id>` (transcript reference) — never plain-text location descriptions. Results enter the main context ONCE as the receipt; full transcripts stay addressable via the platform artifact/history mechanisms — never re-injected wholesale.
+
+**Result report (handoff)** - every graph run produces a unified two-element result report via the single root `__handoff` node (graph-handoff-result-report; subgraph composition is deleted — no per-level `<composing>/__handoff` exists): `tasks_done` = what the run accomplished, `outputs` = a typed pointer to the durable outputs. The result returns to the session — no report file is written (content/accounting separation per R9). Facts with their own single sources (tickets / files / tests) are NOT re-accounted in the report — reachable via the output pointer. The result-report contract wording is SINGLE-SOURCED in `task-templates/handoff.ts` — this skill references it, never re-encodes it (debt Card 15/23).
 
 **Zero on-disk writes** - sub-agents SHALL NOT write persistent files (run state, docs, reports). Deliverable-worthy content is returned in the receipt; the owning main node persists durable artifacts per the output model (session + durable artifacts; scheduler holds progress only).
 
@@ -75,7 +90,7 @@ Capture agent ID via the platform's artifact mechanism.
 
 # approval() - Decision UI
 
-Single decision per call, mode-aware. The one decision primitive - question() absorbed. Cold detail (mode dispatch, 8 format rules): see APPROVAL-CARDS.md.
+Single decision per call. The one decision primitive. Cold detail (card rules): see APPROVAL-CARDS.md.
 
 ```
 approval({ header, options, custom, recommendation?, rationale? }) → decision
@@ -83,12 +98,9 @@ approval({ header, options, custom, recommendation?, rationale? }) → decision
 
 Decision shape: (see sibling APPROVAL-CARDS.md §IApprovalDecision Shape).
 
-- Mode source: `## Run Mode: <mode>` block (every dispatch; absent -> `manual` - absence never auto).
-- Manual / absent / no recommendation -> decision card (options + custom). Return the user's choice.
-- Auto + recommendation -> execute the recommendation: no card; record the decision + rationale (observability). Return it.
-- Auto without recommendation -> decision card (never guess; card line per APPROVAL-CARDS.md).
-
-**Run mode consumption boundary** - mode controls SINGLE-DECISION presentation only: approval nodes and main-node approval() checkpoints. Mode is NEVER consumed elsewhere: gate conditions evaluate declared jump conditions only (judge() - mode plays no part); interview turns and grilling rounds are never auto-gated (cards in any mode). Graph task texts and gate conditions SHALL NOT extend mode consumption beyond this boundary.
+- Card ALWAYS presented - options + custom free input + recommendation marked. Single-form: no mode dispatch, no auto-execution.
+- `recommendation` present -> shown as a marked option (recommendation + rationale); absent -> plain card (interviews, consensus turns). Recommendation is a suggestion - the user chooses.
+- Return the user's choice; the recommendation is never executed without the user picking it.
 
 ---
 
@@ -102,7 +114,7 @@ interview({ goal, context?, participation: 'mandatory' | 'as-needed' }) → cons
 
 - `goal` - interview goal. First consensus point.
 - `context` - background. Discoverable facts - look up, do not ask.
-- `participation` - REQUIRED caller-declared strategy: `'as-needed'` (context fully covers the goal -> return consensus directly - the former zero-question degradation, now explicit; never inferred) | `'mandatory'` (at least one question round regardless of context coverage).
+- `participation` - REQUIRED caller-declared strategy: `'as-needed'` (context fully covers the goal -> return consensus directly - explicit strategy, never inferred) | `'mandatory'` (at least one question round regardless of context coverage).
 - Returns `consensus` `{ decisions: [{ decision, rationale }] }`.
 
 ## Behavior Contract
@@ -111,55 +123,26 @@ interview({ goal, context?, participation: 'mandatory' | 'as-needed' }) → cons
 2. **Fact lookup** - discoverable facts looked up, never asked.
 3. **Recommendation first** - recommended answer first option, from context analysis.
 4. **Dependency resolution** - prerequisite before dependent.
-5. **Single question discipline** - one question per turn; wait for response.
+5. **Single question discipline** - one question per turn; wait for response; each turn via `approval()` WITHOUT recommendation - card always, never auto-gated, no turn skipped.
 6. **Shared understanding gate** - no action until user confirms shared understanding.
 
 **Goal consensus**: even when explicitly given, the goal itself is confirmed first.
 
-**Turn mechanics**: each turn presents via `approval()` WITHOUT recommendation - card in any run mode (never auto-gated; mode never skips a turn).
-
 **Participation semantics**: `as-needed` -> context covers all aspects of goal -> return consensus directly (explicit strategy, never inferred from context); `mandatory` -> at least one question round always - no zero-question degradation.
+
+**Direct end** - optional caller-declared end capability, available on ANY main confirmation interview whose gated content can be empty (nothing to adopt / accept / confirm / review). Declared via node task text (`direct end: <label>`, entry case: atom-scope-interview §Input). The final confirm card options follow the gated-content state: content EMPTY → the card SHALL offer `nothing to adopt (recommended)` and `<label>` (e.g. "end this round (direct end)"); content NON-EMPTY → the card SHALL offer the adoption/confirmation action as the recommended option and `<label>` as the alternative — the `nothing to adopt` wording SHALL NOT appear when content exists. Choosing EITHER direct-end option (`nothing to adopt` or the `<label>`) SHALL end the round directly: the node report carries `direct_end: true` and the pilot advances the node with the end decision (`graph_advance(runId, nodeId, end: true)`) - the run drains via natural drain to `completed`; never a normal loop advance, never `graph_force_end` (that tool serves abnormal termination only). The end options share one semantics: directly end. The end option is an extra choice on the final card - it NEVER replaces a mandatory turn (mandatory rounds still run first).
 
 **Design flows**: solve-style goals (research -> think -> confirm) are flow composition by the CALLER - research/design steps run outside interview(); interview() confirms decisions only. No contract mode, no research/design parameters.
 
 ---
 
-# High-Level Tool Registry
+# Tool Discipline
 
-**Core Requirement** — the distilled must-follow contract (single source; the graph-fidelity resident block carries a compressed copy; detail cold-read from HLT-REGISTRY.md). Distillation judgment: load-bearing = violation cost × frequency — the rest is operational detail.
-
-```text
-HLT core requirement (must-follow on every call):
-- State-changing work executes as registered calls {intent, tool, args, bound} — declared scope, no overreach
-- In-project code → serena (locate may route through jcodemunch); single engine, no fallback
-- Verify after every write (verify-after-write)
-- Code cells fail loudly — never silent degrade
-- Registered tool capability is never restricted (deny covers redundant platform paths only)
-- Detail: HLT-REGISTRY.md (cold-read)
-```
-
-Closed set of high-level tools - the single execution contract for main-phase work. An execution = registered call `{ intent, tool, args, bound }`: registry entry supplies I/O contract, chain, verify + index obligations. Unknown tool names fail at analyze (candidate list). Legacy 8-field protocol fields REJECTED (details: HLT-REGISTRY.md §Protocol). Read-only calls end without writes; write calls verify per `Entry: verify` BEFORE reporting success.
-
-**Adapter rule (single home — one static rule, no enumeration)**: target domain decides the adapter family, operation decides the chain:
-
-- in-project code → serena (locate: jcodemunch → serena; read/write/verify: serena)
-- in-project text-indexed → jcodemunch for locate; platform-native read/write (permissive)
-- in-project text-unindexed / special / out-of-project → platform-native (permissive)
-- run → platform shell; compress → headroom (DISABLED — R2 cost economy suspended); review/archive/graph-ops/register_edit → platform-native (utility, permissive)
-
-Operation obligations (verify-after-write + conditional register_edit, read chain, evidence loop bound 3, loud-failure fault tolerance, n/a rules): see HLT-REGISTRY.md §Operation Obligations (cold — read on demand, never for the hot surface).
-
-**Scenario structure** (cold detail): key = scenario `(target domain x operation)` → exactly one adapter + obligations + n/a rules; the rule above is the derivation, the cold table is the exceptions. Full table + entries + validation + edge n/a: (see HLT-REGISTRY.md). Discipline mechanics: signal distribution — the run frame is the single out-of-scope channel; TTSR static rules are platform-native in-band reminders; registered capability never restricted — deny covers redundant platform write paths only, a registered engine is never denied. Adapter unavailable -> loud failure (see HLT-REGISTRY.md §Fault Tolerance).
-
-**Evidence Loop**: re-enter while unsatisfied AND count < bound (default 3, per-call override); exceeded -> call FAILS with evidence-gap list (missing files/symbols), no write. Layering: call-internal = this contract; cross-call rework = graph gates (atom-graph-spec).
+Tool discipline is delivered by the resident Tool Discipline prompt - scenario-keyed hints (find/read/write/verify/run), post-hoc primary, zero deny. Kernel §Tool Schemas are the parameter reference. Kernel primitives (task / approval / interview / todo) are platform contracts - unaffected by the tool-discipline layer.
 
 ## Fault Tolerance
 
-Failure semantics: (see HLT-REGISTRY.md §Fault Tolerance). Schema-first - parameter names NEVER guessed; read full tool docs first. Errors repair + retry ONCE; after edit -> `register_edit` while index mounted AND target indexed (else `n/a: not indexed`).
-
-## Registry Entries
-
-Closed registry - rule + obligations views + validation: (see HLT-REGISTRY.md §Adapter Rule / §Operation Obligations).
+Schema-first - parameter names NEVER guessed; read full tool docs first. Errors repair + retry ONCE; after edit -> `mcp__jcodemunch_register_edit` while index mounted AND target indexed (else `n/a: not indexed`).
 
 ---
 
@@ -167,46 +150,27 @@ Closed registry - rule + obligations views + validation: (see HLT-REGISTRY.md §
 
 ## serena
 
-LSP-powered code navigation + editing. All paths relative to project root. Symbol address = name path (e.g. `MyClass/my_method`; overloads append `[i]`). LSP per `.serena/project.yml` `languages`; missing LSP -> FS tier silently. Full tables + examples: (see SERENA-SCHEMAS.md).
+LSP-powered code navigation + editing. All paths relative to project root. Symbol address = name path (e.g. `MyClass/my_method`; overloads append `[i]`). LSP per `.serena/project.yml` `languages`; missing LSP -> FS tier silently.
 
-- LSP navigation: `find_symbol`, `find_declaration`, `find_referencing_symbols`, `find_implementations`
-- Structure/diagnostics/reads: `get_symbols_overview`, `get_diagnostics_for_file`, `search_for_pattern`, `find_file`, `list_dir`, `read_file`
-- Edits: `replace_content`, `replace_in_files`, `replace_symbol_body`, `rename_symbol`, `insert_before_symbol`/`insert_after_symbol`, `safe_delete_symbol`, `create_text_file`
-
-Compact params (full: SERENA-SCHEMAS.md):
+Compact params (hot tools; full tables + examples: see SERENA-SCHEMAS.md):
 
 |Tool|Key params|Guard|
 |-|-|-|
 |`replace_content`|relative_path, needle, repl, mode (literal\|regex)|ambiguity -> error, revise needle|
 |`replace_in_files`|needle, repl, mode, paths_include/exclude_glob, dry_run, occurrence_ids, expected_count|dry-run preview + expected_count mismatch -> error|
-|`create_text_file`|relative_path, content|diagnostics-wrapped|
 |`read_file`|relative_path, start_line, end_line, max_answer_chars|sliced reads|
 |`get_diagnostics_for_file`|relative_path (or symbol), min_severity|LSP-covered languages only|
 |`search_for_pattern`|pattern, relative_path, paths_include/exclude_glob|project-internal regex, FS tier|
 
 ## jcodemunch
 
-Index-backed code intelligence, read-only by charter - adapter for locate/search/analyze on in-project indexed targets. `repo` required on nearly every call; unindexed target -> `n/a: not indexed`. Full + compact tables for all registry-referenced tools: (see JCODEMUNCH-SCHEMAS.md).
+Index-backed code intelligence, read-only by charter - adapter for locate/search/analyze on in-project indexed targets. `repo` required on nearly every call; unindexed target -> `n/a: not indexed`.
 
-- `register_edit` - post-edit cache invalidation
-- `search_symbols`, `find_references` - symbol search, import-graph references
-
-Compact params (full: JCODEMUNCH-SCHEMAS.md):
+Compact params (hot tools; full tables: see JCODEMUNCH-SCHEMAS.md):
 
 |Tool|Key params|Guard|
 |-|-|-|
+|`register_edit`|repo, file_paths, reindex|indexed targets only; unindexed -> n/a|
 |`search_symbols`|repo, query, kind, language, max_results, token_budget, detail_level|confidence/freshness metadata|
 |`find_references`|repo, identifier\|identifiers, max_results, include_call_chain|import-graph refs|
-|`check_references`|repo, name (or symbol path)|referenced anywhere?|
-|`get_blast_radius`|repo, symbol or file|files affected by change|
-|`register_edit`|repo, file_paths, reindex|indexed targets only; unindexed -> n/a|
-|`search_text`|repo, query, is_regex, context_lines, limit|ReDoS-guarded, indexed corpus only|
 |`get_file_content`|repo, path, start_line, end_line|non-indexed -> File not found + verdict|
-
-## headroom
-
-DISABLED — R2 cost economy suspended. Contract (MCP authoritative), class-driven trigger, schema + health gate retained as redesign reference: see HLT-REGISTRY.md §headroom (single home).
-
-## graph-scheduler
-
-Graph lifecycle CRUD - 10 tools, names per §Graph-Scheduler Tool Detection; params/returns/examples: atom-pilot SKILL.md §MCP Reference. Output stays in session - never passed to graph_advance (main-node default; approval/gate output is parsed by the pilot and drives routing). Approval/gate decisions persist run-scoped (see atom-phase-handler).

@@ -1,14 +1,9 @@
 name: e2e-minimal
+description: 'Minimal E2E: main → main confirmation loop'
 $schema: ../schemas/workflow.schema.json
 version: 1.0.0
-# Node overview table (atom inventory). Bounded compound goals:
-# connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS (AND/OR/IF/
-# THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR operands,
-# conditional paths ≤ 3. Entry shape { id, type, goal, constraints? } — goal
-# states the atom's intent; mechanism lives in the goal (flow entries state
-# "expands <use> subgraph"). constraints: one-sentence prose rules — general
-# boundaries + explicit non-goals, ≤ 5 per atom, never machine-validated.
-# User-maintained.
+flow:
+  - 'approval-review -->|rework| agent-echo'
 inventory:
   - id: agent-echo
     type: main
@@ -16,10 +11,12 @@ inventory:
     constraints:
       - demo only — echoes the input, no real work
   - id: approval-review
-    type: approval
-    goal: Accept the demo result OR end the run
+    type: main
+    goal: Confirms the echo result — accept IF correct, ELSE regenerate
     constraints:
-      - re-runs the echo until accepted — no other route
+      - re-runs the echo until accepted — no automatic retry
+constraints:
+  - "rework bound: the rework re-entry (approval-review -->|rework| agent-echo) is bounded by the user's acceptance decision — never automatic; the run drains on accept"
 phases:
   - id: agent-echo
     type: main
@@ -31,10 +28,14 @@ phases:
       Output contract: greeting (random-language hello text).
 
   - id: approval-review
-    type: approval
+    type: main
     dependsOn: [agent-echo]
+    operations: []
     task: |
-      Approval Review
+      Echo result review.
 
-      Decision: accept when the agent output is correct; regenerate
-      otherwise.
+      Interview: confirm the agent output is correct. IF correct — accept
+      (no condition; the run drains). IF not — report the rework condition
+      ('rework' — the flow edge re-enters agent-echo for regeneration) —
+      no automatic retry. End the demo early — direct end.
+      direct end: end the round.

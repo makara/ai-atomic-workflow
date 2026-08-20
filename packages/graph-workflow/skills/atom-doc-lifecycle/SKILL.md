@@ -26,7 +26,7 @@ End-of-workflow lifecycle closure. One contract `close({ change_name, adr_create
 
 ### Reference skills
 
-<!-- none - atom-kernel excluded (atom-graph-spec §Contract Rules 6 - platform primitives, always available) -->
+<!-- none -->
 
 ### Operation classes
 

@@ -9,7 +9,8 @@
  * Name resolution: registry first (graph-loader), then schema probing
  * of the workflow dirs (suffix-free, declared-name match).
  *
- * Flow flattening lives in flow-flatten.ts — this module is load + validate only.
+ * Load + validate only — subgraph composition (flow flattening) is deleted
+ * (graph-subgraph-route-unify); this module loads a single graph definition.
  *
  * Layer 1 capability module: uses Effect-TS FileSystem Tag for I/O seam
  * (imported from ./filesystem.js). Single-method interface — caller passes

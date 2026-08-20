@@ -1,14 +1,11 @@
 name: openspec-apply
+description: 'OpenSpec apply workflow — implement change tasks, dual-axis review, bounded inline rework loop, plain archive.'
 $schema: ../schemas/workflow.schema.json
 version: 1.0.0
-# Node overview table (atom inventory). Bounded compound goals:
-# connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS (AND/OR/IF/
-# THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR operands,
-# conditional paths ≤ 3. Entry shape { id, type, goal, constraints? } — goal
-# states the atom's intent; mechanism lives in the goal (flow entries state
-# "expands <use> subgraph"). constraints: one-sentence prose rules — general
-# boundaries + explicit non-goals, ≤ 5 per atom, never machine-validated.
-# User-maintained.
+flow:
+  - 'change-review -->|fail| apply-change'
+  - 'change-review -->|pass| archive'
+  - 'change-review --> archive'
 inventory:
   - id: apply-change
     type: main
@@ -17,26 +14,18 @@ inventory:
       - implements tasks only — never produces specs (adopt stage owns them)
   - id: change-review
     type: main
-    goal: Runs code-review over the applied diff THEN reports findings
+    goal: Runs code-review over the applied diff THEN reports the round condition (overall pass | fail — fail routes the flow self-edge re-entry)
     constraints:
       - reports findings — never fixes inline
-  - id: change-gate
-    type: gate
-    goal: Jump back to apply-change IF review fails AND retry bound is not reached
-    constraints:
-      - machine judgment only — never decides beyond declared jump conditions
-  - id: change-accept
-    type: approval
-    goal: Accept the implementation IF review passes AND the gate is clean
-    constraints:
-      - routes only — never edits the change
   - id: archive
     type: main
     goal: Executes openspec-archive-change to finalize and archive the change
     constraints:
       - finalize + archive only — never re-implements
+constraints:
+  - "loop bound: the flow self-edge re-entry (change-review -->|fail| apply-change) is bounded by the review condition 'pass' or the retry bound (2 rounds — retryCount tracks re-entries, never zeroed); past the bound the review drains (continues to archive)"
+  - 'round condition vocabulary: fail | pass — flow-defined, matched mechanically (zero machine validation axis; governance = graph-maintain flow audit + user maintenance)'
 phases:
-  # Apply — implement the confirmed openspec change (entry contract).
   - id: apply-change
     type: main
     dependsOn: []
@@ -48,22 +37,18 @@ phases:
       Implement tasks from the confirmed openspec change per
       openspec-apply-change.
 
-      Spec standards per affected domain — deterministic mapping rule:
-      graph → atom-graph-spec, skill → atom-skill-spec, doc →
-      atom-doc-maintain. Determine the change's affected files (delta
-      spec domains / openspec instructions apply contextFiles), load each
-      corresponding spec skill BEFORE writing, and validate the
-      implementation against its rule classes (deterministic rules →
-      validation errors, heuristic rules → warnings) while writing.
+      Spec standards per affected domain — per atom-skill-spec §Domain Spec
+      Standards Mapping.
 
-      Change name resolution — NEVER ask: {args.changeName} → openspec list
-      --json single active → apply_status: blocked + candidates. Re-run
-      rounds: fix every change-review finding FIRST, then continue.
+      Change name resolution — per the single source
+      (task-templates/contracts.ts CHANGE_NAME_RESOLUTION_RULE); never
+      re-encode the rule body here.
+      Re-run rounds: fix every prior change-review finding FIRST, then
+      continue.
 
       Output contract: change_name, apply_status (complete | blocked |
       partial), changed_files, spec_paths, blocked_reason.
 
-  # Review — dual-axis audit of the implementation.
   - id: change-review
     type: main
     dependsOn: [apply-change]
@@ -77,40 +62,23 @@ phases:
       (use ## Agent hints for axis sub-agents). Spec: the change's delta
       specs — every SHALL requirement implemented.
 
-      Spec standards per affected domain — deterministic mapping rule:
-      graph → atom-graph-spec, skill → atom-skill-spec, doc →
-      atom-doc-maintain. Determine the change's affected files, load each
-      corresponding spec skill, validate the implementation against its rule
-      classes (deterministic rules → validation errors, heuristic rules →
-      warnings) + repo-documented coding standards.
+      Spec standards per affected domain — per atom-skill-spec §Domain Spec
+      Standards Mapping + repo-documented coding standards.
+
+      Round condition: report overall (pass | fail) — the flow-defined
+      round condition: 'fail' → the flow self-edge re-enters apply-change
+      (re-runs the apply+review round with the review findings); 'pass'
+      (or no condition) → the normal chain continues to archive. The
+      retry bound (2 rounds — retryCount, never zeroed) caps re-entries;
+      past the bound the review drains (report pass) so the run
+      continues to archive.
 
       Output contract: report (machine-parseable YAML, overall:
       pass | fail).
 
-  # Gate — bounded rework on FAIL (backward jump to apply-change).
-  - id: change-gate
-    type: gate
-    dependsOn: [change-review]
-    jumps:
-      - when: 'change-review output shows overall: fail AND apply-change retryCount < 2'
-        to: apply-change
-
-  # Accept — decision confirmation.
-  - id: change-accept
-    type: approval
-    dependsOn: [change-gate]
-    channels:
-      - node:change-review
-    task: |
-      Accept the implementation?
-
-      Decision: continue (approve + archive) when the implementation passes
-      review; revise/restart otherwise.
-  # Archive — plain change archival (minimal track: no reverse-validation,
-  # no ADR fold — the original openspec-archive-change contract).
   - id: archive
     type: main
-    dependsOn: [change-accept]
+    dependsOn: [change-review]
     skill: openspec-archive-change
     operations: [read, run, archive]
     channels:
@@ -118,8 +86,9 @@ phases:
     task: |
       Archive the completed openspec change per openspec-archive-change
       (plain archive — no reverse-validation; advisory context only).
-      Change name: apply-change output change_name (echo); run only when
-      apply_status is complete or partial (implemented portions archived).
+      Change name: apply-change's reported change_name (echo); run only
+      when the final apply_status (apply-change) is complete or partial
+      (implemented portions archived).
 
       Output contract: archive_status (success | failed | blocked),
       change_name, validation_result, message.

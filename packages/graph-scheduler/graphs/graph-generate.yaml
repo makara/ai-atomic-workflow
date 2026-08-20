@@ -1,15 +1,22 @@
 name: graph-generate
+description: 'Graph production maker journey — scope interview, graph design + accept, implement + review as an inline flow loop.'
 $schema: ../schemas/workflow.schema.json
 version: 1.0.0
-# Node overview table (atom inventory). Bounded compound goals:
-# connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS (AND/OR/IF/
-# THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR operands,
-# conditional paths ≤ 3. Entry shape { id, type, goal, constraints? } — goal
-# states the atom's intent; mechanism lives in the goal (flow entries state
-# "expands <use> subgraph"). constraints: one-sentence prose rules — general
-# boundaries + explicit non-goals, ≤ 5 per atom, never machine-validated.
-# User-maintained. Maker self-demonstration.
+flow:
+  - 'startup --> entry'
+  - 'entry --> spec'
+  - 'spec --> spec-accept'
+  - 'spec-accept --> implement'
+  - 'implement --> review'
+  - 'review -->|fail| implement'
+  - 'review -->|pass| __handoff'
 inventory:
+  - id: startup
+    type: main
+    goal: Runs the startup template — constraints session load + serena activation + jcodemunch indexing (full startup — designs against existing graph conventions)
+    constraints:
+      - graph entry — dependsOn empty; entry depends on it
+      - no user questions — self-decide startup steps
   - id: entry
     type: main
     goal: Executes atom-scope-interview to confirm the graph name, topology scope and save location
@@ -21,45 +28,34 @@ inventory:
     constraints:
       - designs only — never writes the graph file
   - id: spec-accept
-    type: approval
-    goal: Accept the graph design OR route rework
+    type: main
+    goal: Confirms the graph design — accept when complete, rework otherwise
     constraints:
-      - routes only — never edits the design
+      - confirms only — never edits the design
   - id: implement
     type: main
-    goal: Executes atom-graph-writer to generate the YAML with inventory, registry entry and attached doc
+    goal: Executes atom-graph-writer to generate the YAML with inventory and registry entry
     constraints:
-      - writes the three-path bundle only — never co-produces skills
+      - writes the two-path bundle only — never co-produces skills
       - creation only — never edits existing graphs
   - id: review
     type: main
-    goal: Runs code-review over the produced graph THEN reports findings
+    goal: Runs code-review over the produced graph THEN reports the round condition (overall pass | fail — fail routes the flow self-edge re-entry)
     constraints:
       - reports findings — never fixes inline
-  - id: gate
-    type: gate
-    goal: Jump back to implement IF review fails AND retry bound is not reached
-    constraints:
-      - machine judgment only — never decides beyond declared jump conditions
-  - id: accept
-    type: approval
-    goal: Accept the produced graph OR end the run
-    constraints:
-      - routes only — never edits the produced graph
-# Maker journey — produces workflow YAML graphs (name states the operation).
-description: Maker journey — produces workflow YAML graph artifacts for end-user projects.
-# Graph-level ambient context — phases consume atom-graph-spec without
-# per-node declaration. Three-tier channel model: CONTEXT.md arrives via the
-# platform convention layer (absence-tolerant — foreign projects degrade to
-# direct scoping).
+constraints:
+  - "loop bound: the flow self-edge re-entry (review -->|fail| implement) is bounded by the review condition 'pass' or the retry bound (2 rounds — retryCount tracks re-entries, never zeroed); past the bound the review drains"
+  - 'round condition vocabulary: fail | pass — flow-defined, matched mechanically (zero machine validation axis; governance = graph-maintain flow audit + user maintenance)'
 context:
   - skill:atom-graph-spec
 phases:
-  # Maker journey — concrete graph production (single kind=graph, single
-  # operation=create). No skeleton, no kind switch, no skill co-production.
-  - id: entry
+  - id: startup
     type: main
     dependsOn: []
+    template: startup
+  - id: entry
+    type: main
+    dependsOn: [startup]
     skill: atom-scope-interview
     operations: []
     task: |
@@ -74,8 +70,6 @@ phases:
 
       Output contract: graph_name, scope, save_location, scope_complete.
 
-  # Spec — design the phase topology per atom-graph-design (design flow);
-  # the skill contract derives the atom-graph-spec reference channel.
   - id: spec
     type: main
     dependsOn: [entry]
@@ -87,23 +81,29 @@ phases:
       confirmation rounds (participation: mandatory), present design
       decisions one at a time.
 
+      Confirm run-ending semantics per atom-graph-spec §Run Completion —
+      consult, do not restate; propose no end phase and no `end` routing
+      action.
+
       Output contract: design, graph_name (echo), save_location (echo),
       scope_complete (echo).
 
-  # Spec accept — design confirmed before any write (spec-first).
   - id: spec-accept
-    type: approval
+    type: main
     dependsOn: [spec]
+    operations: []
     channels:
       - node:spec
     task: |
-      Accept the graph design?
+      Accept the graph design? (inline interview — human confirms at this
+      boundary; branch choice via IF/ELSE.)
 
-      Decision: design per atom-graph-spec — accept when complete; revise
-      otherwise.
+      Decision: accept when the design is complete per atom-graph-spec;
+      revise otherwise — iterate the design in-conversation (present the
+      revised decisions) before the implement phase dispatches; stop the
+      journey mid-way — direct end.
+      direct end: end the round.
 
-  # Implement — write artifact + registry entry + attached doc (one write
-  # node = one rework target).
   - id: implement
     type: main
     dependsOn: [spec-accept]
@@ -112,25 +112,24 @@ phases:
     channels:
       - node:spec
       - node:entry
+      - node:review
     task: |
       Execute atom-graph-writer graph mode per atom-graph-writer skill —
       produce the graph artifact per the confirmed design + atom-graph-spec.
 
-      Three-path bundle (project convention, writer skill cannot know it):
+      Two-path bundle (project convention, writer skill cannot know it):
       graph file at .graph-scheduler/graphs/<name>.yaml (default
       save_location) with the $schema + version self-description header,
-      registry entry in .graph-scheduler/graphs/registry.json,
-      attached usage doc at .graph-scheduler/docs/<name>.md.
+      registry entry in .graph-scheduler/graphs/registry.json.
 
       Load-probe validation: graph_start the produced graph → expect a node
       return (problems field carries load-time machine warnings, if any) → then graph_force_end the probe run.
       Report the probe result; deviations from design SHALL be reported, not
       negotiated.
 
-      Output contract: artifact_path, registry_path, doc_path, validation
+      Output contract: artifact_path, registry_path, validation
       (passed | failed + details), graph_name (echo), summary.
 
-  # Review — kind standards injected; one review phase.
   - id: review
     type: main
     dependsOn: [implement]
@@ -138,8 +137,7 @@ phases:
     operations: [locate, read, review]
     agent: [reviewer, explore, task, general]
     channels:
-      - node:entry
-      - node:spec
+      - node:implement
     task: |
       Review the produced graph per code-review (use ## Agent hints for
       axis sub-agents; forward the injected ## Reference blocks — axis
@@ -147,25 +145,17 @@ phases:
       atom-graph-spec (graph definitions) + repo-documented coding
       standards. Spec: artifact matches the confirmed design.
 
+      Round condition: report overall (pass | fail) — the flow-defined
+      round condition: 'fail' → the flow self-edge re-enters implement
+      (re-runs the implement+review round with the review findings);
+      'pass' → drain. The retry bound (2 rounds — retryCount, never
+      zeroed) caps re-entries; past the bound the review drains (report
+      pass) so the run continues.
+
+      Ownership obligation (on 'pass'): SHALL state that the produced
+      graph is user-maintained from this point (FL3 ownership split — AI
+      MAY have created it; once created, only the user maintains it;
+      changes go through graph-maintain).
+
       Output contract: report (machine-parseable YAML, overall:
       pass | fail).
-
-  # Gate — bounded rework on FAIL (backward jump to implement).
-  - id: gate
-    type: gate
-    dependsOn: [review]
-    jumps:
-      - when: 'review output shows overall: fail AND implement retryCount < 2'
-        to: implement
-
-  # Accept — final artifact approval.
-  - id: accept
-    type: approval
-    dependsOn: [gate]
-    channels:
-      - node:review
-    task: |
-      Accept the graph?
-
-      Decision: accept when the artifact passes review; revise/redesign
-      otherwise.

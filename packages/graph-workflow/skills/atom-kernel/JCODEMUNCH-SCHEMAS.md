@@ -10,7 +10,7 @@ Jcodemunch tool parameter tables. Pure reference - loaded via pointer from atom-
 |`file_paths`|yes|string[]|Edited files|
 |`reindex`|no|boolean|Also reindex files|
 
-Required after every mutation on indexed targets (in-project code + indexed non-code-text subtypes) while the index is mounted - unconditional within scope; skipping = stale BM25/search caches. Unindexed target (markdown/plain text, out-of-project) -> `n/a: not indexed`; index unmounted -> `n/a: jcodemunch not in use` (never silent).
+Required after every mutation on indexed targets (in-project code + indexed non-code-text subtypes) while the index is mounted - unconditional within scope; skipping = stale BM25/search caches. Executed as the MCP tool call `mcp__jcodemunch_register_edit` with `{repo, file_paths, reindex?}`; the graph-fidelity discipline module emits the post-edit reminder hint on every serena write-tool result (ADR 0194). Unindexed target (markdown/plain text, out-of-project) -> `n/a: not indexed`; index unmounted -> `n/a: jcodemunch not in use` (never silent).
 
 Example: `{"repo": "ai-atomic-workflow", "file_paths": ["src/app.ts", "src/lib.ts"]}`
 
@@ -47,7 +47,7 @@ Example: `{"repo": "ai-atomic-workflow", "identifier": "resolveChannels", "max_r
 
 ## Registry-referenced tools - compact tables
 
-Registry entries (HLT-REGISTRY.md) reference these tools; compact param tables (key params only). Full docs: platform tool docs (Protocol: schema-first - no entry -> read platform docs).
+Compact param tables (key params only). Full docs: platform tool docs (Protocol: schema-first - no entry -> read platform docs).
 
 ### check_edit_safe - edit-safety preflight
 

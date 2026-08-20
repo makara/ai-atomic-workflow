@@ -1,130 +1,49 @@
 name: adopt-with-docs
+description: 'Non-interactive adoption spec-production graph — self-deciding openspec-propose pipeline consuming the framework-hosted adoption consensus via graph_start args.'
 $schema: ../schemas/workflow.schema.json
 version: 1.0.0
-# Node overview table (atom inventory). Bounded compound goals:
-# connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS (AND/OR/IF/
-# THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR operands,
-# conditional paths ≤ 3. Entry shape { id, type, goal, constraints? } — goal
-# states the atom's intent; mechanism lives in the goal (flow entries state
-# "expands <use> subgraph"). constraints: one-sentence prose rules — general
-# boundaries + explicit non-goals, ≤ 5 per atom, never machine-validated.
-# User-maintained.
+interaction: none
+flow:
+  - 'spec-propose --> __handoff'
 inventory:
-  - id: adopt-scope
-    type: main
-    goal: Executes atom-scope-interview to confirm the adoption goal and trace intent
-    constraints:
-      - does not propose scope — the adoption goal comes from the review report
-      - never asks for the output path — derived
-  - id: adopting
-    type: main
-    goal: Runs grilling rounds to settle the adoption decisions THEN appends the record
-    constraints:
-      - never auto-gated — cards in any mode
-      - never zero-question — whole frontier per round
-  - id: adopt-accept
-    type: approval
-    goal: Accept the adoption consensus OR route rework
-    constraints:
-      - routes only — never changes the record
   - id: spec-propose
     type: main
     goal: Executes openspec-propose to create the change with proposal, specs, design and tasks
     constraints:
       - planning only — never edits project code
       - never guesses the change name — blocked + candidates instead
-# Graph-level ambient context — domain modeling vocabulary for the adoption
-# conversation. Three-tier channel model: conventions (CONTEXT.md) and ADR
-# records arrive via platform convention layer / config.json context.
+      - consumes the adoption consensus from the composing framework graph via channels — never re-conducts the conversation
 context:
   - skill:domain-modeling
 phases:
-  # Adoption stage — conversation then spec production.
-  - id: adopt-scope
-    type: main
-    dependsOn: []
-    skill: atom-scope-interview
-    operations: []
-    task: |
-      Execute scope interview per atom-scope-interview.
-
-      Topics: idea_goal (raw, unfogged), doc_trace_intent.
-
-      Behavior: confirm=mandatory; output path=derived.
-
-      Input document resolution: composed → input_document = upstream report
-      path; standalone (raw-idea) → input_document: none.
-
-      Output contract: scope_complete, idea_goal, doc_trace_intent,
-      input_document (path | none).
-
-  # Adoption conversation — grilling explores and adopts the produced
-  # requirements (encapsulation contract — upstream skill untouched).
-  - id: adopting
-    type: main
-    dependsOn: [adopt-scope]
-    skill: grilling
-    operations: []
-    task: |
-      Execute grilling per grilling skill. Graph dispatch encapsulation
-      contract: MANDATORY question rounds — at least one round, whole
-      frontier per round, never zero-question, never auto-gated (cards in
-      any mode); output shape { decisions: [{ decision, rationale }],
-      shared_understanding: boolean } — never 'consensus'. End with the
-      mandatory closing question "Anything to add?" (recommended: no/complete)
-      — shared_understanding only after the user confirms the frontier is
-      empty and nothing is missing.
-
-      Input document (from adopt-scope output): present → record appends to it
-      (appended_to set); absent → record_path grilling-derived — never asked.
-      No-content rule: adopt-scope output shows idea_goal: none (user confirmed
-      nothing to adopt) → append NO record (no appendix section), change_name
-      empty, adr_created false — zero side effects.
-      Domain-modeling side effects (user-confirmed, never autonomous):
-      CONTEXT.md term updates; ADR decision — always asked, three-condition
-      test shapes the recommendation, never the decision.
-
-      Output contract: decisions, shared_understanding, change_name,
-      adr_created, adr_path, input_document, appended_to, record_path.
-
-  # Adoption approval — Continue → spec production; re-adopt/restart dynamic.
-  - id: adopt-accept
-    type: approval
-    dependsOn: [adopting]
-    task: |
-      Adoption consensus accepted?
-
-      Review the adoption record (record_path) before deciding. Continue —
-      adopted requirements materialize as the OpenSpec change (spec-propose),
-      then implementation (spec-implement). No-content rule: adopting output
-      change_name empty (nothing to adopt) → recommend end (end action
-      completes the run — auto mode ends automatically).
-  # Spec production — upstream openspec-propose. Reads the adoption record
-  # (change_name / adr_created / decisions) via the adopting stream — declared
-  # read edge (composition: sibling phase; standalone: stripped at dispatch).
   - id: spec-propose
     type: main
-    dependsOn: [adopt-accept]
+    dependsOn: []
     skill: openspec-propose
     operations: [read, write, run]
-    channels:
-      - node:adopting
     task: |
       Generate delta spec change per the upstream openspec-propose skill.
 
-      Change name from adopting output change_name (echo); change exists →
-      update the existing change in place (no duplicates). No change name
-      from adopting and no {args.changeName} and no single active openspec
-      change → output spec_status: blocked with the candidate list —
-      never guess a name. Material ambiguity not resolved by the adoption
-      conversation → record reasonable assumptions in the planning
-      artifacts per the skill guardrails. Delta authoring: read the
-      target main spec's requirement names before writing
-      specs/<capability-path>/spec.md; MODIFIED
+      Change name from the framework-hosted adoption consensus — the
+      launching router passes the change name + scope + ADR judgment +
+      decisions via graph_start args ({args.changeName} / {args.adrCreated}
+      / {args.decisions}); change exists → update the existing change in
+      place (no duplicates).
+      Change name resolution — per the single source
+      (task-templates/contracts.ts CHANGE_NAME_RESOLUTION_RULE); never
+      re-encode the rule body here.
+      Material ambiguity not resolved by the adoption consensus → record
+      reasonable assumptions in the planning artifacts per the skill
+      guardrails. Delta authoring: read the target main spec's requirement
+      names before writing specs/<capability-path>/spec.md; MODIFIED
       references an existing requirement name as-read — never an
       invented name; ADDED/REMOVED describe genuine additions/removals
       relative to the main spec as-read. Echo adr_created + decisions
       (track gate + workflow-done consume).
+
+      No-content rule: the framework-hosted adoption scope reports nothing
+      to adopt → append NO adoption record (no appendix section),
+      change_name empty, adr_created false — zero side effects.
 
       Output contract: change_name, domains, file_paths, validation_result,
       spec_status, adr_created (echo), decisions (echo).

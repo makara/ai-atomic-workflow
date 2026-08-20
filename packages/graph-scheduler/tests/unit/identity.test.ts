@@ -97,7 +97,7 @@ describe('registry project-first precedence', () => {
   beforeEach(async () => {
     // Project registry shadows a same-named builtin entry.
     const registry = JSON.stringify({
-      graphs: [{ name: 'e2e-minimal', path: 'e2e-minimal.yaml', description: 'project shadow' }],
+      graphs: [{ name: 'e2e-minimal', path: 'e2e-minimal.yaml' }],
     });
     fix = await makeFixture(
       {

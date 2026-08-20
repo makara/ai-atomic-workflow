@@ -1,12 +1,15 @@
 /**
  * E2E at-rest validation for the concrete maker graph (identity redesign):
- * graph-generate is a self-contained 7-phase production graph —
+ * graph-generate is a self-contained 6-phase production graph —
  * no skeleton, no flow composition, no kind switch, no skill co-production.
  * Name states the operation; description declares the purpose; spec/implement
  * phases carry skill declarations (contract-driven spec injection).
+ * The implement+review round is inlined (former generate-review-body loop
+ * body) and the loop is the flow self-edge review -->|fail| implement
+ * (graph-flow — loop/rework = flow self-edge, never a subgraph sibling run).
  *
  * Validates graph definition correctness — schema compliance, topology safety,
- * channel contracts, gate hygiene — without requiring MCP server runtime.
+ * channel contracts, rework-decision shape — without requiring MCP server runtime.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,7 +20,7 @@ import type { Workflow } from '../../src/graph-definition.js';
 import { WorkflowSchema } from '../../src/schemas/workflow.js';
 import type { Phase } from '../../src/types.js';
 
-const VALID_PHASE_TYPES: Record<string, true> = { main: true, approval: true, gate: true, flow: true };
+const VALID_PHASE_TYPES: Record<string, true> = { main: true };
 
 function loadGraph(name: string): Workflow {
   const pkgRoot = join(__dirname, '..', '..');
@@ -36,13 +39,13 @@ describe('graph-generate — schema compliance', () => {
     expect(graph.name).toBe('graph-generate');
     expect(graph.description).toMatch(/maker journey/i);
     expect(graph.phases).toBeDefined();
-    expect(graph.phases.length).toBe(7);
+    expect(graph.phases.length).toBe(6);
   });
 
-  it('has expected 7 phases for the concrete maker journey (spec-first workflow)', () => {
+  it('has expected 6 phases for the concrete maker journey (startup template + spec-first + inlined round)', () => {
     const graph = loadGraph('graph-generate');
     const phaseIds = graph.phases.map((p) => p.id);
-    expect(phaseIds).toEqual(['entry', 'spec', 'spec-accept', 'implement', 'review', 'gate', 'accept']);
+    expect(phaseIds).toEqual(['startup', 'entry', 'spec', 'spec-accept', 'implement', 'review']);
   });
 
   it('every phase type is valid and phases are acyclic', () => {
@@ -68,12 +71,15 @@ describe('graph-generate — schema compliance', () => {
     expect(visited.size).toBe(phases.length);
   });
 
-  it('entry is an entry node with the shared scope-interview skill', () => {
+  it('startup template node is the entry; entry carries the shared scope-interview skill', () => {
     const graph = loadGraph('graph-generate');
+    const startup = graph.phases.find((p) => p.id === 'startup');
+    expect(startup!.type).toBe('main');
+    expect(startup!.template).toBe('startup');
+    expect(startup!.dependsOn).toEqual([]);
     const entry = graph.phases.find((p) => p.id === 'entry');
-    expect(entry!.type).toBe('main');
     expect(entry!.skill).toBe('atom-scope-interview');
-    expect(entry!.dependsOn).toEqual([]);
+    expect(entry!.dependsOn).toEqual(['startup']);
   });
 
   it('spec phase declares atom-graph-design — contract-driven spec injection', () => {
@@ -82,7 +88,7 @@ describe('graph-generate — schema compliance', () => {
     expect(spec!.skill).toBe('atom-graph-design');
   });
 
-  it('implement phase declares atom-graph-writer — contract-driven spec injection', () => {
+  it('implement phase declares atom-graph-writer — contract-driven spec injection (inlined round)', () => {
     const graph = loadGraph('graph-generate');
     const implement = graph.phases.find((p) => p.id === 'implement');
     expect(implement!.skill).toBe('atom-graph-writer');
@@ -107,41 +113,62 @@ describe('graph-generate — schema compliance', () => {
 });
 
 describe('graph-generate — topology validity', () => {
-  it('single entry and no end marker', () => {
+  it('single entry (startup template node) and no end marker', () => {
     const graph = loadGraph('graph-generate');
     const entries = graph.phases.filter((p) => (p.dependsOn ?? []).length === 0);
-    expect(entries.map((p) => p.id)).toEqual(['entry']);
+    expect(entries.map((p) => p.id)).toEqual(['startup']);
     expect(graph.phases.some((p) => p.type === ('end' as never))).toBe(false);
   });
 
-  it('gate is bounded rework to the implement writer, no default', () => {
+  it('the loop is the flow self-edge review -->|fail| implement — round terminal, no loop node, no gate', () => {
     const graph = loadGraph('graph-generate');
-    const gate = graph.phases.find((p) => p.id === 'gate');
-    expect(gate!.type).toBe('gate');
-    expect(gate!.dependsOn).toEqual(['review']);
-    const jumps = gate!.jumps ?? [];
-    expect(jumps).toHaveLength(1);
-    expect(String(jumps[0].when)).toMatch(/overall: fail AND implement retryCount < 2/);
-    expect(jumps[0].to).toBe('implement');
+    // Loop/rework semantics are flow self-edges (graph-flow): the review
+    // round terminal reports the flow-defined condition; 'fail' re-enters
+    // implement via the transition table.
+    expect(graph.flow).toEqual([
+      'startup --> entry',
+      'entry --> spec',
+      'spec --> spec-accept',
+      'spec-accept --> implement',
+      'implement --> review',
+      'review -->|fail| implement',
+      'review -->|pass| __handoff',
+    ]);
+    const review = graph.phases.find((p) => p.id === 'review');
+    expect(review!.type).toBe('main');
+    expect(review!.dependsOn).toEqual(['implement']);
+    expect(review!.template).toBeUndefined();
+    expect(String(review!.task)).toMatch(/flow-defined\s+round condition/);
+    expect(String(review!.task)).toMatch(/flow self-edge re-enters implement/);
+    // no loop template node and no gate — the flow self-edge owns iteration
+    expect(graph.phases.some((p) => p.id === 'loop')).toBe(false);
+    expect(graph.phases.some((p) => p.template === 'loop')).toBe(false);
+    expect(graph.phases.find((p) => p.id === 'gate')).toBeUndefined();
   });
 
-  it('two approvals only — spec-accept and final accept', () => {
+  it('single decision phase only — spec-accept (main, empty operations)', () => {
     const graph = loadGraph('graph-generate');
-    const approvals = graph.phases.filter((p) => p.type === 'approval');
-    expect(approvals.map((p) => p.id)).toEqual(['spec-accept', 'accept']);
-    for (const a of approvals) {
-      expect(a.routing).toBeUndefined();
+    const decisions = graph.phases.filter((p) => p.id === 'spec-accept');
+    expect(decisions.map((p) => p.id)).toEqual(['spec-accept']);
+    for (const a of decisions) {
+      expect(a.type).toBe('main');
+      expect(a.operations).toEqual([]);
+      // routing field no longer exists in the schema (branchTo removed —
+      // decisions express in task text; strict rejection covers legacy keys)
+      expect('routing' in a).toBe(false);
     }
   });
 
-  it('implement declares the three-path output contract + load-probe validation', () => {
+  it('implement declares the two-path output contract + load-probe validation (inlined)', () => {
     const graph = loadGraph('graph-generate');
     const implement = graph.phases.find((p) => p.id === 'implement');
     const task = String(implement!.task ?? '');
     expect(task).toMatch(/artifact_path/);
     expect(task).toMatch(/registry_path/);
-    expect(task).toMatch(/doc_path/);
-    expect(task).toMatch(/\.graph-scheduler\/docs\//);
+    // attached doc deleted — two-path bundle (two-path single-sourcing)
+    expect(task).not.toMatch(/doc_path/);
+    expect(task).not.toMatch(/\.graph-scheduler\/docs\//);
+    expect(task).toMatch(/two-path bundle/i);
     // load-probe validation replaces graph_init misuse
     expect(task).toMatch(/graph_start/);
     expect(task).toMatch(/graph_force_end/);
@@ -152,7 +179,7 @@ describe('graph-generate — topology validity', () => {
     const graph = loadGraph('graph-generate');
     const review = graph.phases.find((p) => p.id === 'review');
     expect(review!.skill).toBe('code-review');
-    expect(review!.channels).toEqual(expect.arrayContaining(['node:entry', 'node:spec']));
+    expect(review!.channels).toEqual(expect.arrayContaining(['node:implement']));
     // atom-graph-spec moved to graph-level ambient scope (global channel)
     expect(review!.channels).not.toContain('skill:atom-graph-spec');
     expect(graph.context).toEqual(expect.arrayContaining(['skill:atom-graph-spec']));

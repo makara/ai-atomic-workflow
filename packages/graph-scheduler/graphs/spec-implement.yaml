@@ -1,14 +1,11 @@
 name: spec-implement
+description: 'Non-interactive implementation graph — extract the produced change, route to the minimal/detailed track, judge completion.'
 $schema: ../schemas/workflow.schema.json
 version: 1.0.0
-# Node overview table (atom inventory). Bounded compound goals:
-# connectors AND/THEN/IF-ELSE/OR — structural keywords ALL-CAPS (AND/OR/IF/
-# THEN/ELSE), prose and/or lowercase, ≤ 5 steps, gates ≤ 3 AND/OR operands,
-# conditional paths ≤ 3. Entry shape { id, type, goal, constraints? } — goal
-# states the atom's intent; mechanism lives in the goal (flow entries state
-# "expands <use> subgraph"). constraints: one-sentence prose rules — general
-# boundaries + explicit non-goals, ≤ 5 per atom, never machine-validated.
-# User-maintained.
+interaction: none
+flow:
+  - 'spec-extract --> track-accept'
+  - 'track-accept --> workflow-done'
 inventory:
   - id: spec-extract
     type: main
@@ -17,102 +14,64 @@ inventory:
       - extraction only — spec production lives in the adopt stage
       - never fabricates the change name — blocked + candidates instead
   - id: track-accept
-    type: approval
-    goal: Select the track — minimal IF no ADR exists, detailed IF an ADR exists
+    type: main
+    goal: Selects the track — minimal IF no ADR exists, detailed IF an ADR exists
     constraints:
       - routes only — never re-derives the ADR fact
-  - id: minimal-track
-    type: flow
-    goal: Expands openspec-apply subgraph
-    constraints:
-      - composition only — child rules live in the subgraph
-  - id: detailed-track
-    type: flow
-    goal: Expands openspec-engineer subgraph
-    constraints:
-      - composition only — child rules live in the subgraph
+      - starts exactly one track graph as a sibling run — never both
   - id: workflow-done
     type: main
     goal: Judges track completion THEN reports archive success OR incomplete judgment
     constraints:
       - judges only — never re-opens the pipeline
 phases:
-  # Spec extract — machinery entry: resolves the produced change, extraction
-  # only (spec production lives in the adopt stage).
   - id: spec-extract
     type: main
     dependsOn: []
     operations: [read]
-    channels:
-      # Composition read edges — the produced change + adoption record arrive
-      # via these streams when composed (adopt stage); standalone runs strip
-      # them at dispatch (run-scope gate) and resolve via {args.changeName}.
-      - node:adopt/spec-propose
-      - node:adopt/adopting
     task: |
       Extract the implementation scope from the produced OpenSpec change.
 
-      Change resolution: upstream channel when composed; {args.changeName}
-      standalone (confirm exists); unresolvable → spec_status: blocked +
-      candidates — never fabricate. adr_created ECHOES the adoption record
-      (node:adopt/adopting), never re-derived.
+      Change resolution: {args.changeName} — the launching router sibling
+      passes the change name + adoption echo (adr_created, decisions) via
+      graph_start args (confirm the change exists);
+      Change name resolution — per the single source
+      (task-templates/contracts.ts CHANGE_NAME_RESOLUTION_RULE); never
+      re-encode the rule body here.
+      adr_created ECHOES the adoption record (passed via args), never
+      re-derived.
 
       Output contract: scope_complete: true, input_source, change_name,
       affected_domains, spec_plan, adr_created, decision_summary, decisions,
       spec_status, candidates?.
 
-  # Track gate — branch-route: minimal (no ADR) vs detailed (ADR).
   - id: track-accept
-    type: approval
+    type: main
+    template: router
+    template_args:
+      paths:
+        - openspec-apply
+        - openspec-engineer
     dependsOn: [spec-extract]
-    task: |
-      Change quality gate
+    channels:
+      - node:spec-extract
 
-      Track criterion (from spec-extract adr_created echo): no ADR → minimal
-      track (apply directly); ADR → detailed track (engineer).
-    routing:
-      actions:
-        - action: continue
-          target: minimal-track
-          value: minimal-track
-          label: 'Minimal track — apply directly'
-          description: 'No ADR created — implement the change without engineering ceremony'
-        - action: continue
-          target: detailed-track
-          value: detailed-track
-          label: 'Detailed track — engineer'
-          description: 'ADR created — full spec-to-tickets engineering workflow'
-
-  # Branch routes — explicit (route-first).
-  - id: minimal-track
-    type: flow
-    use: openspec-apply
-    route: minimal-track
-    dependsOn: [track-accept]
-
-  - id: detailed-track
-    type: flow
-    use: openspec-engineer
-    route: detailed-track
-    dependsOn: [track-accept]
-
-  # Terminal — any-join over the tracks; unselected route never blocks.
   - id: workflow-done
     type: main
-    dependsOn: [minimal-track, detailed-track]
-    join: any
+    dependsOn: [track-accept]
     operations: [read]
     channels:
       - node:spec-extract
-      - node:minimal-track/archive
-      - node:detailed-track/openspec-archive
+      - node:track-accept
     task: |
       Track complete.
 
       Incomplete judgment check: spec-extract reports spec_status: blocked →
       judgment_incomplete: true + suggest graph_jump back to the entry node;
-      never present as a completed implementation. Archive echo: archive_succeeded
-      true when either track terminal shows archive_status: success.
+      never present as a completed implementation. Router result: track-accept
+      reports chosen_graph (openspec-apply | openspec-engineer), run_id,
+      result_summary, outputs; archive echo: archive_succeeded true when the
+      chosen run reports archive_status: success.
 
       Output contract: track (minimal | detailed | none), adr_created,
       change_name, candidates (echo when blocked), decisions (echo),

@@ -46,15 +46,15 @@ describe('built-in assets', () => {
     expect(graph.name).toBe('e2e-minimal');
     expect(graph.phases).toHaveLength(2);
     expect(graph.phases[0].type).toBe('main');
-    const approval = graph.phases[1];
-    expect(approval.type).toBe('approval');
-    // route-first redesign — run completes by natural drain after the approval;
-    // no end node, no written routing actions (default card = Accept + free input + AI options)
-    expect(approval.task).toBeTruthy();
-    expect(approval.routing).toBeUndefined();
+    const review = graph.phases[1];
+    expect(review.type).toBe('main');
+    // run completes by natural drain after the decision phase; no end node,
+    // no routing surface (route-first redesign — inline interview semantics)
+    expect(review.task).toBeTruthy();
+    expect(review.routing).toBeUndefined();
   });
 
-  it('built-in graph-generate.yaml is valid YAML with 7 phases — concrete maker graph', () => {
+  it('built-in graph-generate.yaml is valid YAML with 6 phases — concrete maker graph (startup template entry + inlined implement+review round)', () => {
     const { readFileSync } = require('node:fs');
     const { join } = require('node:path');
     const pkgRoot = join(__dirname, '..');
@@ -62,38 +62,71 @@ describe('built-in assets', () => {
     const raw = readFileSync(graphPath, 'utf-8');
     const graph = parseYaml(raw);
     expect(graph.name).toBe('graph-generate');
-    expect(graph.phases).toHaveLength(7);
-    // Concrete maker journey phase sequence (spec-first, no skeleton)
+    expect(graph.phases).toHaveLength(6);
+    // Concrete maker journey phase sequence (startup template + spec-first;
+    // implement+review inlined — the former generate-review-body round body)
     const phaseIds = graph.phases.map((p: { id: string }) => p.id);
-    expect(phaseIds).toEqual(['entry', 'spec', 'spec-accept', 'implement', 'review', 'gate', 'accept']);
+    expect(phaseIds).toEqual(['startup', 'entry', 'spec', 'spec-accept', 'implement', 'review']);
     // no flow composition — the maker graph is self-contained
     expect(graph.phases.some((p: { type: string }) => p.type === 'flow')).toBe(false);
+    // the loop is the flow self-edge review -->|fail| implement — no loop
+    // template node; full coverage — sequence section declared
+    expect(graph.flow).toEqual([
+      'startup --> entry',
+      'entry --> spec',
+      'spec --> spec-accept',
+      'spec-accept --> implement',
+      'implement --> review',
+      'review -->|fail| implement',
+      'review -->|pass| __handoff',
+    ]);
+    expect(graph.phases.some((p: { template?: string }) => p.template === 'loop')).toBe(false);
     // entry is the entry node with the shared scope-interview skill
     const entryPhase = graph.phases.find((p: { id: string }) => p.id === 'entry');
     expect(entryPhase.skill).toBe('atom-scope-interview');
-    // implement output contract — three-path bundle (graph + registry + doc)
+    // implement + review live inline (round body inlined from the deleted
+    // generate-review-body loop body); no gate
     const implementPhase = graph.phases.find((p: { id: string }) => p.id === 'implement');
-    expect(String(implementPhase.task)).toMatch(/artifact_path/);
-    expect(String(implementPhase.task)).toMatch(/registry_path/);
-    expect(String(implementPhase.task)).toMatch(/doc_path/);
-    // gate carries bounded rework jumps (route-first: no branches/default)
-    const gatePhase = graph.phases.find((p: { id: string }) => p.id === 'gate');
-    expect(gatePhase.eval, 'gate eval').toBeUndefined();
-    expect(Array.isArray(gatePhase.jumps), 'gate jumps').toBe(true);
-    expect(gatePhase.jumps.length).toBeGreaterThanOrEqual(1);
-    expect(gatePhase.default, 'gate default').toBeUndefined();
-    const jumpText = gatePhase.jumps.map((j: { when: string }) => j.when).join(' ');
-    expect(jumpText).toContain('overall: fail');
-    expect(jumpText).toContain('retryCount < 2');
-    expect(jumpText).not.toContain('DEBT');
-    // two approval layers only — spec-accept + final accept, both pure cards
-    const approvals = graph.phases.filter((p: { type: string }) => p.type === 'approval');
-    expect(approvals.map((p: { id: string }) => p.id)).toEqual(['spec-accept', 'accept']);
-    for (const a of approvals) {
+    expect(implementPhase).toBeDefined();
+    expect(implementPhase.skill).toBe('atom-graph-writer');
+    expect(graph.phases.find((p: { id: string }) => p.id === 'review')).toBeDefined();
+    expect(graph.phases.find((p: { id: string }) => p.id === 'gate')).toBeUndefined();
+    // one decision layer only — spec-accept (the review auto-iterates via the
+    // flow self-edge; no final accept card) with the mandatory empty
+    // operations declaration
+    const decisions = graph.phases.filter((p: { id: string }) => p.id === 'spec-accept');
+    expect(decisions.map((p: { id: string }) => p.id)).toEqual(['spec-accept']);
+    for (const a of decisions) {
+      expect(a.type).toBe('main');
+      expect(a.operations).toEqual([]);
       expect(a.routing).toBeUndefined();
       expect(a.branches).toBeUndefined();
       expect(a.eval).toBeUndefined();
     }
+  });
+
+  it('generate-review-body.yaml is deleted — the implement + review round is inlined in graph-generate', () => {
+    const { existsSync, readFileSync } = require('node:fs');
+    const { join } = require('node:path');
+    const pkgRoot = join(__dirname, '..');
+    // the former loop body is gone — its phases live in the parent graph
+    expect(existsSync(join(pkgRoot, 'graphs', 'generate-review-body.yaml'))).toBe(false);
+    const raw = readFileSync(join(pkgRoot, 'graphs', 'graph-generate.yaml'), 'utf-8');
+    const graph = parseYaml(raw);
+    const phaseIds = graph.phases.map((p: { id: string }) => p.id);
+    expect(phaseIds).toEqual(['startup', 'entry', 'spec', 'spec-accept', 'implement', 'review']);
+    // implement output contract — two-path bundle (graph + registry; attached doc deleted)
+    const implementPhase = graph.phases.find((p: { id: string }) => p.id === 'implement');
+    expect(String(implementPhase.task)).toMatch(/artifact_path/);
+    expect(String(implementPhase.task)).toMatch(/registry_path/);
+    expect(String(implementPhase.task)).not.toMatch(/doc_path/);
+    expect(String(implementPhase.task)).not.toMatch(/\.graph-scheduler\/docs\//);
+    // review is the round-terminal reviewer — code-review skill, node input,
+    // flow-defined round condition (fail → flow self-edge re-entry)
+    const reviewPhase = graph.phases.find((p: { id: string }) => p.id === 'review');
+    expect(reviewPhase.skill).toBe('code-review');
+    expect(String(reviewPhase.task)).toMatch(/overall:/);
+    expect(String(reviewPhase.task)).toMatch(/flow self-edge re-enters implement/);
   });
 
   it('deleted artifact-workflow/skill-workflow files are gone — no thin compositions', () => {

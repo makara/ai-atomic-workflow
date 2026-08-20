@@ -55,21 +55,39 @@ export const WorkflowSchema = z
       })
       .optional(),
     /**
-     * Graph-level ambient context — the global channel. Merged once at load
-     * with the config default layer (config first, dedup) and injected into
-     * every flattened phase. Entries follow graph-level rules: explicit
-     * `skill:`/`node:` prefix or file-glob shape; bare names are load-time
-     * errors (no execution-skill contract exists at this scope). `node:`
-     * entries promote the named node's output stream into the global channel
-     * (the owning node skips its own promoted stream).
-     */
-    context: z.array(z.string()).optional(),
-    /**
      * Removed field — renamed to `context` (two-scope context model). Declared
      * so legacy graphs fail loudly with a rename hint instead of silent
      * strip. Never consumed.
      */
     channels: z.unknown().optional(),
+    /**
+     * Graph interaction declaration — asserts AND forbids user-interaction
+     * features for THIS graph file. Enum `none` | `enabled` (absent =
+     * `enabled`). `none` declares the graph has no user-interaction features
+     * and is not allowed to have any; `enabled` permits them. Declared
+     * member, zero behavior branching — the backend performs no load-time
+     * enforcement and no content judgment (interaction lives in agent-side
+     * task prose and skills). The declaration constrains only the declaring
+     * graph's own file — every graph is standalone (composition is deleted;
+     * no propagation clause exists). Compliance is audited by
+     * graph-maintain (non-interactive compliance scan).
+     */
+    interaction: z.enum(['none', 'enabled']).optional(),
+    /**
+     * Flow transitions — the graph's conditional-routing edges (mermaid
+     * subset: `A --> B` unlabeled sequence default, `A -->|condition| B`
+     * condition-matched). Compiled into the per-node transition table
+     * (node × condition → target) at load; condition values are flow-defined
+     * vocabulary (zero machine validation axis — governance is the
+     * graph-maintain flow audit + user maintenance, mirroring the inventory
+     * regime). Loop/rework semantics are self-edges (`A -->|fail| A`) —
+     * inline bounded loops, never a subgraph/task-template mechanism. The
+     * field is a declared member — malformed entries fail load loudly,
+     * never passthrough-swallowed. Canonical layout: declared BEFORE
+     * `inventory`, `constraints` declared AFTER `inventory` (graph-flow
+     * layout — the derived JSON Schema mirrors the file order).
+     */
+    flow: z.array(z.string()).optional(),
     /**
      * Graph inventory — the node overview table (dedicated schema key; the
      * term "atom" does not name the key). Each entry describes one atom
@@ -78,13 +96,15 @@ export const WorkflowSchema = z
      * mismatches are load-time warnings (never blocking, never silent). No
      * `skill` field — the phase-level `skill` field is the single source;
      * the execution mechanism lives in the goal (skill-bound main nodes
-     * name it in verb form; flow entries state "expands <use> subgraph").
+     * name it in verb form; nested-stage entries state "Launches the
+     * <graph> graph as a sibling run (router template — single path
+     * auto-select)").
      * A legacy `skill` key is ignored (stripped at parse). `goal` is a
      * bounded compound sentence stating the atom's intent (what the atom
      * accomplishes) per the format reference (structural keywords
      * AND/THEN/IF-ELSE/OR ALL-CAPS, prose and/or lowercase; ordinary nodes
-     * ≤ 5 steps; gates ≤ 3 AND/OR operands — retryCount bound not counted;
-     * conditional paths ≤ 3). `constraints` (optional) is an array of
+     * ≤ 5 steps; rework-decision conditions ≤ 3 paths — retryCount bound
+     * not counted; conditional paths ≤ 3). `constraints` (optional) is an array of
      * one-sentence prose rules — general boundaries plus explicit non-goals
      * ("what the atom does NOT do / which approaches are NOT adopted");
      * ≤ 5 entries per atom (convention bound, user-calibratable), prose
@@ -100,8 +120,8 @@ export const WorkflowSchema = z
         z.object({
           /** phase id the entry describes — must exist in `phases` */
           id: z.string(),
-          /** phase type — must match the referenced phase's declared type */
-          type: z.enum(['main', 'approval', 'gate', 'flow']),
+          /** phase type — must match the referenced phase's declared type (main) */
+          type: z.enum(['main']),
           /** bounded compound intent statement — what the atom accomplishes, incl. its execution mechanism when one exists */
           goal: z.string(),
           /** optional one-sentence prose rules — boundaries and explicit non-goals (≤ 5 per atom, convention; never machine-validated) */
@@ -128,6 +148,16 @@ export const WorkflowSchema = z
      * pipeline is separate and retained.
      */
     constraints: z.array(z.string()).optional(),
+    /**
+     * Graph-level ambient context — the global channel. Merged once at load
+     * with the config default layer (config first, dedup) and injected into
+     * every phase. Entries follow graph-level rules: explicit
+     * `skill:`/`node:` prefix or file-glob shape; bare names are load-time
+     * errors (no execution-skill contract exists at this scope). `node:`
+     * entries promote the named node's output stream into the global channel
+     * (the owning node skips its own promoted stream).
+     */
+    context: z.array(z.string()).optional(),
     /** phase/node definitions — at least one required */
     phases: z.array(PhaseSchema),
   })

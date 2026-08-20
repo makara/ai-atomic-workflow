@@ -1,5 +1,5 @@
 /**
- * Graph contract checks — dispatch, approval routing, guard hygiene,
+ * Graph contract checks — dispatch, routing, guard hygiene,
  * user-supplement layer existence validation.
  *
  * Pure functions (validateGraphContracts) plus config-layer existence
@@ -14,37 +14,11 @@
 
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  isConventionFile,
-  isGlobShape,
-  isWorkflowArtifactGlob,
-  mergeChannelScopes,
-  normFile,
-  stripPrefix,
-} from './resolve-channels.js';
+import { isConventionFile, isGlobShape, isWorkflowArtifactGlob, normFile, stripPrefix } from './resolve-channels.js';
 
 /** safe string coercion — never String(object) (schema-validated in production path) */
 function str(v: unknown, fallback: string): string {
   return typeof v === 'string' ? v : fallback;
-}
-
-/**
- * Judgment-domain node scope — ONE formula shared by the gate condition
- * check, task-text injection claims, and (via mergeChannelScopes) the
- * dispatch path: direct dependsOn outputs ∪ node: targets of the effective
- * channels (global channel = graph `context:` entries + phase `channels:`).
- */
-function nodeScope(
-  deps: readonly string[],
-  graphContext: readonly string[] | undefined,
-  phaseChannels: readonly string[] | undefined,
-): Set<string> {
-  const out = new Set(deps);
-  const effective = mergeChannelScopes(undefined, graphContext, phaseChannels) ?? [];
-  for (const c of effective) {
-    if (typeof c === 'string' && c.startsWith('node:')) out.add(c.slice('node:'.length));
-  }
-  return out;
 }
 
 /**
@@ -71,10 +45,7 @@ function upstreamClosure(id: string, byId: Map<string, Record<string, unknown>>)
   return seen;
 }
 
-/** sibling-output-existence guard pattern: e.g. "no <node> output present" */
-const SIBLING_OUTPUT_EXISTENCE_RE = /no\s+[\w-]+\s+output\s+present/i;
-
-/** contract checks beyond WorkflowSchema — dispatch, routing, guard hygiene */
+/** contract checks beyond WorkflowSchema — dispatch, guard hygiene */
 export function validateGraphContracts(
   graph: Record<string, unknown>,
   filePath: string,
@@ -120,9 +91,13 @@ export function validateGraphContracts(
     const prefixed = stripPrefix(c);
     if (prefixed) {
       if (prefixed.type === 'node') {
-        if (!byId.has(prefixed.target)) {
+        // Source-graph check (v2 — no flatten, no composition since
+        // graph-subgraph-route-unify): a target must be a phase in this
+        // graph — no subgraph-member (`composing/child`) resolution exists.
+        const target = prefixed.target;
+        if (!byId.has(target)) {
           errors.push(
-            `${filePath}: graph-level node: context entry "${c}" targets missing phase '${prefixed.target}' — graph-level entries resolve against the flattened node set`,
+            `${filePath}: graph-level node: context entry "${c}" targets missing phase '${prefixed.target}' — graph-level entries resolve against this graph's own phase set`,
           );
         }
       }
@@ -150,117 +125,27 @@ export function validateGraphContracts(
   }
 
   // NOTE: graph inventory consistency is not checked in this pure pass — the
-  // contract pass runs on the FLATTENED graph (flow phases replaced by
-  // prefixed children), which would make flow inventory entries unresolvable.
+  // contract pass runs per source graph (v2 — no flatten; composition is
+  // compile-time subgraph assembly), so each graph's inventory validates
+  // against its own phase declarations.
   // Inventory validation (validateGraphInventory) runs per source graph inside
-  // runContractsPass (graph-loader) — post-flatten timing, source-graph pairing.
+  // runContractsPass (graph-loader) — source-graph pairing.
 
   for (const phase of phases) {
     const id = str(phase.id, '?');
-    const type = str(phase.type, '');
     const deps = (phase.dependsOn ?? []) as string[];
     const prefix = `${filePath}: phases.${id}`;
 
-    // target existence: every routing/jump target must resolve in the graph.
-    // Pre-flatten graphs may reference flow phase ids (remapped at flatten) or
-    // flattened-style '<flow>/<child>' ids — both valid; route ids (declared
-    // `route:` values and flow ids as routes) resolve for approval targets.
-    const flowIds = new Set(phases.filter((p) => str(p.type, '') === 'flow').map((p) => str(p.id, '')));
-    const routeIds = new Set(
-      phases
-        .map((p) => str(p.route, ''))
-        .filter((r) => r !== '')
-        .concat([...flowIds]),
-    );
-    function targetResolvable(t: string): boolean {
-      return byId.has(t) || routeIds.has(t) || [...flowIds].some((f) => t.startsWith(`${f}/`));
-    }
+    // Backtick-target machinery retired (graph-flow capability): rework/
+    // branch targets are declared in the top-level `flow` block (labeled
+    // edges — flow-defined condition vocabulary), never task-text quoting.
+    // Flow-edge endpoint validation (compile-time) is the single machine
+    // axis for target resolvability; no task-text target checks exist.
 
-    // 2.0 — enabled type set: unregistered type fails at load via
-    // toWorkflowGraph (resolvePhaseHandler → UnknownPhaseTypeError →
-    // GraphDefinitionError). No separate static gate — one enforcement path.
-
-    // Field-type contract enforced by PhaseSchema superRefine only
-    // (single enforcement point — schema rejects before this layer runs).
-
-    // Task-text content checks moved agent-side (estate-maintain consistency
-    // gate) — the engine validates shapes only.
-
-    // 2.2 — approval: declared branch-route/retry targets resolvable; retry/jump
-    // targets may be absent (AI dynamic options — no written actions needed)
-    if (type === 'approval') {
-      const actions = ((phase.routing as Record<string, unknown> | undefined)?.actions ?? []) as Array<
-        Record<string, unknown>
-      >;
-      for (const action of actions) {
-        const actionType = str(action.action, '');
-        const target = str(action.target, '');
-        if (target && !targetResolvable(target)) {
-          errors.push(
-            `${prefix} — routing action '${actionType}' (${str(action.label, '')}) targets missing phase/route '${target}'; declare an existing phase id or route id`,
-          );
-        }
-        if ((actionType === 'retry' || actionType === 'jump') && !target) {
-          warnings.push(
-            `${prefix} — routing action '${actionType}' (${str(action.label, '')}) lacks explicit target; re-run target is resolved at runtime from context`,
-          );
-        }
-      }
-    }
-
-    // 2.2 — gate jump hygiene (route-first): jumps are backward-only rework —
-    // target must sit upstream of the gate; bounded by target retryCount
-    if (type === 'gate') {
-      const jumps = (phase.jumps ?? []) as Array<Record<string, unknown>>;
-      const gateUpstream = upstreamClosure(str(phase.id, ''), byId);
-      for (const jump of jumps) {
-        const jumpTarget = str(jump.to, '');
-        const whenText = str(jump.when, '');
-        const targetPhase = byId.get(jumpTarget);
-        // Jump semantics: the target sits upstream of the gate — routing back
-        // re-executes the target + downstream (JUMP). Forward targets are a
-        // graph-definition error (approval decides forward routing).
-        const isUpstream = targetPhase !== undefined && gateUpstream.has(jumpTarget);
-        if (!isUpstream && jumpTarget !== '') {
-          errors.push(
-            `${prefix} — gate jump targets '${jumpTarget}' which is NOT upstream of the gate; gates are backward-only rework nodes — forward routing is an approval branch-route decision`,
-          );
-        }
-        if (isUpstream && whenText && !/retryCount/i.test(whenText)) {
-          warnings.push(
-            `${prefix} — jump is unbounded (no retryCount bound); auto-rework risks an infinite loop — add 'AND <target> retryCount < N' per atom-graph-spec §Auto-Rework (gate) Rules.`,
-          );
-        }
-        if (isUpstream && targetPhase) {
-          const depends = (phase.dependsOn ?? []) as string[];
-          // Reviewer = code-review dispatch or review-named node. Jumping it
-          // re-runs unchanged artifacts — same verdict, wasted cycle. Integrity
-          // gates (scope-confirm/spec-scope style writers) are not reviewers.
-          const isReviewNode = str(targetPhase.skill, '') === 'code-review' || jumpTarget.includes('review');
-          if (isReviewNode && depends.includes(jumpTarget)) {
-            warnings.push(
-              `${prefix} — jump targets reviewer node '${jumpTarget}' (the gate's direct dependency); re-running the reviewer over unchanged artifacts reproduces the same verdict — target the writer node instead per atom-graph-spec §Auto-Rework (gate) Rules.`,
-            );
-          }
-        }
-      }
-    }
-
-    if (type === 'gate') {
-      for (const jump of (phase.jumps ?? []) as Array<Record<string, unknown>>) {
-        const jumpTarget = str(jump.to, '');
-        if (jumpTarget && !targetResolvable(jumpTarget)) {
-          errors.push(
-            `${prefix} — gate jump targets missing phase '${jumpTarget}'; declare an existing phase id (flow ids remap to the flow's flattened entry)`,
-          );
-        }
-      }
-    }
-
-    // 2.2b — redundant transitive dependencies rejected for ALL phases
-    // (graph-scheduling §DependsOn #3). The gate exemption is removed —
-    // judgment context declares via channels node: entries, never by padding
-    // dependsOn with transitive nodes.
+    // Redundant transitive dependencies rejected for ALL phases
+    // (graph-scheduling §DependsOn #3). Judgment context declares via
+    // channels node: entries, never by padding dependsOn with transitive
+    // nodes.
     for (let i = 0; i < deps.length; i++) {
       for (let j = 0; j < deps.length; j++) {
         if (i === j) continue;
@@ -273,93 +158,7 @@ export function validateGraphContracts(
         }
       }
     }
-
-    // 2.3 — gate jump conditions reference observable declared-context fields
-    // only. Scope = the judgment-domain formula (direct dependsOn ∪ node:
-    // targets of graph context + phase channels). Jump targets are in scope
-    // for their retryCount bound ONLY (snapshot data, always present) —
-    // output-field references to a jump target require a channel declaration
-    // (dispatch injects dependsOn + channels + global streams, never jump
-    // targets). One formula shared with dispatch (nodeScope helper).
-    if (type === 'gate') {
-      const contextScope = nodeScope(deps, graphContext, phase.channels as readonly string[] | undefined);
-      const jumpTargets = new Set(
-        ((phase.jumps ?? []) as Array<Record<string, unknown>>).map((j) => str(j.to, '')).filter((t) => t !== ''),
-      );
-      for (const jump of (phase.jumps ?? []) as Array<Record<string, unknown>>) {
-        const jumpWhen = str(jump.when, '');
-        if (jumpWhen) {
-          if (SIBLING_OUTPUT_EXISTENCE_RE.test(jumpWhen)) {
-            errors.push(
-              `${prefix} — gate jump condition depends on sibling output existence ('no … output present'); conditions must reference observable fields of the declared judgment context (direct dependsOn ∪ channels node: targets ∪ global-context node: streams).`,
-            );
-          }
-          for (const id of byId.keys()) {
-            const esc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const mentioned = new RegExp(`(?<![\\w/-])${esc}(?![\\w/-])`).test(jumpWhen);
-            if (!mentioned) continue;
-            if (contextScope.has(id)) continue;
-            if (jumpTargets.has(id)) {
-              // Jump targets are snapshot data (retryCount) — an output-field
-              // reference would validate but never inject; require the bound.
-              const boundMention = new RegExp(`(?<![\\w/-])${esc}\\s+retryCount`).test(jumpWhen);
-              if (!boundMention) {
-                errors.push(
-                  `${prefix} — gate jump condition references jump target '${id}' beyond its retryCount bound; jump targets are in scope for their retryCount only — declare channels: [node:${id}] to read its output`,
-                );
-              }
-              continue;
-            }
-            errors.push(
-              `${prefix} — gate jump condition references '${id}' which is outside the declared judgment context (direct dependsOn ∪ channels node: targets ∪ global-context node: streams); declare it via channels: [node:${id}] or drop the reference`,
-            );
-          }
-        }
-      }
-    }
-
-    // 2.4 — join:any is the branch-route convergence pattern: direct upstreams
-    // must span at least two distinct routes (a single-route any-join has
-    // nothing to converge and hides a deadlock-prone mistake).
-    if (phase.join === 'any') {
-      const upstreamRoutes = new Set(deps.map((d) => str(byId.get(d)?.route, '') || '__default__'));
-      if (upstreamRoutes.size < 2) {
-        errors.push(
-          `${prefix} — join: any requires direct upstreams spanning at least 2 distinct routes (branch-route convergence); upstreams sit on: ${[...upstreamRoutes].join(', ')}`,
-        );
-      }
-    }
   }
-
-  // Route hygiene (route-first): a declared route unreferenced by any written
-  // routing action has a soft activation path — only an AI-dynamic approval
-  // recommendation can activate it (approval branchTo with a route id). That
-  // is legal but fragile (a missed target silently leaves the route dormant),
-  // so it surfaces as a warning: declare a routing action or delete the route.
-  const routeIds = new Set(phases.map((p) => str(p.route, '')).filter((r) => r !== ''));
-  const referencedRoutes = new Set<string>();
-  for (const phase of phases) {
-    if (str(phase.type, '') !== 'approval') continue;
-    const actions = ((phase.routing as Record<string, unknown> | undefined)?.actions ?? []) as Array<
-      Record<string, unknown>
-    >;
-    for (const action of actions) {
-      if (str(action.action, '') === 'continue' && str(action.target, '') !== '') {
-        referencedRoutes.add(str(action.target, ''));
-      }
-    }
-  }
-  for (const routeId of routeIds) {
-    if (!referencedRoutes.has(routeId)) {
-      warnings.push(
-        `${filePath}: route '${routeId}' is declared but no written routing action targets it — activation depends on AI-dynamic judgment (soft path); declare a routing action or delete the route`,
-      );
-    }
-  }
-
-  // Run Mode — decided per activation at graph_start (args.mode); graphs
-  // declare nothing. The entry-topic heuristic was removed with the topic
-  // blocks themselves.
 
   return { errors, warnings };
 }
@@ -380,8 +179,9 @@ export function validateGraphContracts(
  * accepted (schema rejects stale entries — no backward compatibility).
  *
  * SHALL run per source graph (against its OWN phase declarations) inside
- * the post-flatten contract pass (runContractsPass — graph-loader): flow
- * entries resolve against the source graph's pre-flatten phase set.
+ * the contract pass (runContractsPass — graph-loader): inventory entries
+ * resolve against the source graph's own phase set (composition is
+ * compile-time subgraph assembly — no flatten rewrite exists).
  */
 export function validateGraphInventory(graph: Record<string, unknown>, filePath: string): string[] {
   const warnings: string[] = [];
@@ -410,46 +210,107 @@ export function validateGraphInventory(graph: Record<string, unknown>, filePath:
 }
 
 /**
- * Registry description drift — description-to-topology consistency.
+ * Graph description drift — description-to-topology consistency.
  *
- * Checks a registry entry's `description` against the graph's phase set:
- * a description mentioning a phase name that does not exist in the graph
- * surfaces a warning (relocated from the retired CLI validate to the
- * load-time contract pass). Warning-level, never blocks loading.
+ * Checks the graph definition's top-level `description` (catalog single
+ * source — registry entries carry no description) against the graph's own
+ * phase set: a description mentioning a phase name that does not exist in
+ * the graph surfaces a warning (relocated from the retired CLI validate to
+ * the load-time contract pass). Warning-level, never blocks loading.
+ */
+/**
+ * Drift-candidate extraction.
  *
  * Phase-name candidates are backtick-quoted identifiers in the
  * description (`\`phase-id\``) — the explicit reference form the retired
  * validate check and the delta-spec scenarios use. Bare kebab-case words
- * are NOT candidates: prose, skill names, and graph names are also
- * kebab-case, so matching them would fabricate drift on healthy graphs
- * (verified: 10/11 builtin graphs would otherwise report spurious
- * problems at every start). A candidate not in the phase set is a drift
- * warning (the description references a phase that does not exist in the
- * topology).
+ * are NOT candidates in general: prose, skill names, and graph names are
+ * also kebab-case, so matching them would fabricate drift on healthy
+ * graphs (verified: 10/11 builtin graphs would otherwise report spurious
+ * problems at every start).
+ *
+ * Safe bare-prose subset: a description word that EXACTLY equals a phase
+ * id (full id or its last path segment) — case-normalized, word-boundary,
+ * common-prose words excluded. This RECOGNIZES existing-phase mentions
+ * (a graph's own prose naming its own phases passes clean) and never
+ * fabricates drift on non-phase prose (skill names, graph names — the
+ * engine reads zero prose and cannot distinguish a stale phase name from
+ * a skill/graph name; see the delta scenario "Plain-prose phase mention
+ * recognized"). Backtick-quoted references remain the explicit stale-name
+ * detection surface.
+ *
+ * A candidate not in the phase set is a drift warning (the description
+ * references a phase that does not exist in the topology).
  *
  * Runs per source graph against its OWN phase declarations (same
  * scoping as validateGraphInventory).
  */
-export function validateGraphRegistryDrift(
+
+/** Common prose words excluded from bare-prose matching — they are not phase references. */
+const COMMON_BARE_WORDS = new Set([
+  'graph',
+  'phase',
+  'node',
+  'entry',
+  'review',
+  'accept',
+  'main',
+  'approval',
+  'gate',
+  'loop',
+  'flow',
+  'report',
+  'scope',
+  'adopt',
+  'implement',
+  'requirement',
+  'run',
+  'done',
+  'pending',
+  'active',
+  'the',
+  'and',
+  'or',
+]);
+
+export function validateGraphDescriptionDrift(
   graph: Record<string, unknown>,
-  registryDescription: string | undefined,
+  description: string | undefined,
   filePath: string,
 ): string[] {
-  if (!registryDescription) return [];
+  if (!description) return [];
   const warnings: string[] = [];
   const phases = (graph.phases ?? []) as Array<Record<string, unknown>>;
   const phaseIds = new Set(phases.map((p) => str(p.id, '')).filter((id) => id !== ''));
   if (phaseIds.size === 0) return warnings;
 
   // Extract candidate phase-name references: backtick-quoted identifiers
-  // only (the explicit reference form — see the drift-candidate note).
+  // (the explicit reference form — see the drift-candidate note) plus the
+  // safe bare-prose subset (a description word exactly equal to a phase id
+  // or its last path segment, common words excluded).
   const candidates = new Set<string>();
-  for (const m of registryDescription.matchAll(/`([a-zA-Z0-9-]+)`/g)) candidates.add(m[1]);
+  for (const m of description.matchAll(/`([a-zA-Z0-9-]+)`/g)) candidates.add(m[1]);
+
+  const bareWords = new Set<string>();
+  for (const m of description.matchAll(/[a-zA-Z0-9][a-zA-Z0-9-]*/g)) {
+    const w = m[0].toLowerCase();
+    if (!COMMON_BARE_WORDS.has(w)) bareWords.add(w);
+  }
+  for (const id of phaseIds) {
+    const lastSegment = id.includes('/') ? id.slice(id.lastIndexOf('/') + 1) : id;
+    const idsToMatch = new Set([id.toLowerCase(), lastSegment.toLowerCase()]);
+    for (const bare of bareWords) {
+      if (idsToMatch.has(bare)) {
+        candidates.add(id);
+        break;
+      }
+    }
+  }
 
   for (const candidate of candidates) {
     if (!phaseIds.has(candidate)) {
       warnings.push(
-        `${filePath}: registry description references "${candidate}" which is not a phase in this graph — description drift`,
+        `${filePath}: graph description references "${candidate}" which is not a phase in this graph — description drift`,
       );
     }
   }

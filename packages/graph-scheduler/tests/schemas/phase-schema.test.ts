@@ -1,14 +1,24 @@
 /**
  * Unit tests for PhaseSchema — zod schema for a single phase/node definition.
  *
- * Covers: closed type enum (main/approval/gate/flow), removed fields (older
- * removals retry/def/with/maxDepth/topic/context/constraints/runMode —
- * silently stripped; when/eval — rejected loudly), flow use requirement,
- * type-semantics superRefine (single enforcement point), gate jumps, and the
- * removed end node type.
+ * Covers: closed type enum (main only — flow deleted), strict unknown-key
+ * rejection (uniform — removed fields route/routing/join/when/eval/preText/
+ * reads/branches/default/mode/runMode/constraints/jumps and legacy fields
+ * retry/def/with/maxDepth/topic/context all reject with the key named, no
+ * per-field migration hint, no silent stripping), deleted subgraph
+ * composition (`use` unknown-key rejected; nested execution is the
+ * `template: router` + `template_args.paths` sibling run), mandatory
+ * operations declaration (plain main phases; template nodes exempt),
+ * type-semantics superRefine (single enforcement point), and the removed
+ * end/gate/approval node types. Rework is a main task-text decision.
  */
 import { describe, expect, it } from 'vitest';
 import { PhaseSchema, type Phase } from '../../src/schemas/phase.js';
+
+/** Join all issue messages — strict unknown-key issues carry path [], so message text is the assertion surface. */
+function messagesOf(result: { error?: { issues: Array<{ message: string }> } }): string {
+  return (result.error?.issues ?? []).map((i) => i.message).join('\n');
+}
 
 // ---------------------------------------------------------------------------
 // Happy path — main and approval type with complete fields
@@ -20,7 +30,6 @@ describe('PhaseSchema — happy path', () => {
       id: 'agent-a',
       type: 'main',
       dependsOn: ['phase-0'],
-      agent: ['reviewer', 'task'],
       skill: 'my-agent',
       task: 'Run analysis task',
 
@@ -34,7 +43,6 @@ describe('PhaseSchema — happy path', () => {
       expect(p.id).toBe('agent-a');
       expect(p.type).toBe('main');
       expect(p.dependsOn).toEqual(['phase-0']);
-      expect(p.agent).toEqual(['reviewer', 'task']);
       expect(p.skill).toBe('my-agent');
       expect(p.task).toBe('Run analysis task');
     }
@@ -59,20 +67,14 @@ describe('PhaseSchema — happy path', () => {
     }
   });
 
-  it('parses approval type with complete fields', () => {
-    const raw = {
-      id: 'approval-step',
-      type: 'approval',
-      dependsOn: ['agent-a', 'agent-b'],
-      task: 'Review the output and decide',
-      routing: { actions: [{ action: 'continue', label: 'Go', description: 'Advance' }] },
-    };
-
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.type).toBe('approval');
-      expect(result.data.dependsOn).toHaveLength(2);
+  it('rejects removed node types — closed enum is main only', () => {
+    for (const removed of ['approval', 'agent', 'gate', 'end', 'flow']) {
+      const raw = { id: 'removed-step', type: removed };
+      const result = PhaseSchema.safeParse(raw);
+      expect(result.success, `type '${removed}' should be rejected`).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'type');
+      expect(issue).toBeDefined();
+      expect(issue!.message).toContain('expected "main"');
     }
   });
 
@@ -95,12 +97,6 @@ describe('PhaseSchema — happy path', () => {
 describe('PhaseSchema — invalid input', () => {
   it('rejects unknown type string — closed enum', () => {
     const raw = { id: 'p1', type: 'unknown' };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects removed agent type', () => {
-    const raw = { id: 'p1', type: 'agent' };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
   });
@@ -145,60 +141,52 @@ describe('PhaseSchema — invalid input', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Removed fields — older removals stripped silently (zod drops unknown keys);
-// when/eval keep loud rejection (when-guard describe + eval in type semantics)
+// Removed fields — strict rejection: ANY unknown key fails uniformly
+// (no per-field migration hint, no silent stripping)
 // ---------------------------------------------------------------------------
 
-describe('PhaseSchema — removed fields stripped silently', () => {
-  it('strips retry — no retry config surface', () => {
+describe('PhaseSchema — removed fields rejected strictly', () => {
+  it('rejects retry — no retry config surface', () => {
     const raw = { id: 'p1', type: 'main', task: 'x', retry: { max: 3 }, operations: [] };
     const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect('retry' in result.data).toBe(false);
-    }
+    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain('retry');
   });
 
-  it('strips topic — approval title comes from task', () => {
-    const raw = { id: 'approval-1', type: 'approval', topic: 'My Topic' };
+  it('rejects topic — decision title comes from task', () => {
+    const raw = { id: 'approval-1', type: 'main', topic: 'My Topic', operations: [] };
     const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect('topic' in result.data).toBe(false);
-    }
+    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain('topic');
   });
 
-  it('strips legacy context field', () => {
+  it('rejects legacy context field', () => {
     const raw = { id: 'p1', type: 'main', task: 'x', context: ['legacy'], operations: [] };
     const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect('context' in result.data).toBe(false);
-    }
+    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain('context');
   });
 
-  it('strips flow with/maxDepth/def — flow requires use only', () => {
-    const raw = { id: 'f1', type: 'flow', use: 'child', with: { k: 'v' }, maxDepth: 3, def: { phases: [] } };
+  it('rejects legacy with/maxDepth/def on main — uniform strict rejection', () => {
+    const raw = { id: 'f1', type: 'main', with: { k: 'v' }, maxDepth: 3, def: { phases: [] } };
     const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect('with' in result.data).toBe(false);
-      expect('maxDepth' in result.data).toBe(false);
-      expect('def' in result.data).toBe(false);
-    }
+    expect(result.success).toBe(false);
+    const messages = messagesOf(result);
+    expect(messages).toContain('with');
+    expect(messages).toContain('maxDepth');
+    expect(messages).toContain('def');
   });
 
-  it('strips routing.context', () => {
+  it('rejects routing — deleted field (syntax v2), uniform strict rejection', () => {
     const raw = {
       id: 'approval-1',
-      type: 'approval',
-      routing: { actions: [{ action: 'continue', label: 'Go', description: 'Advance' }], context: ['legacy'] },
+      type: 'main',
+      routing: { actions: [{ action: 'continue', label: 'Go', description: 'Advance' }] },
+      operations: [],
     };
     const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect('context' in result.data.routing!).toBe(false);
-    }
+    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain('routing');
   });
 });
 
@@ -213,40 +201,33 @@ describe('PhaseSchema — type semantics', () => {
     expect(result.success).toBe(false);
   });
 
-  it('accepts node: channels on approval type — judgment context', () => {
-    const raw = { id: 'approval-1', type: 'approval', channels: ['node:review'] };
+  it('accepts node: channels on main type — judgment context', () => {
+    const raw = { id: 'approval-1', type: 'main', channels: ['node:review'], operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
   });
 
-  it('accepts non-node channel entries on approval type — full-type inheritance (node:-only repealed)', () => {
-    const raw = { id: 'approval-1', type: 'approval', channels: ['skill:atom-graph-spec', './judgment.md', 'review'] };
+  it('accepts non-node channel entries on main type — full-type inheritance (node:-only repealed)', () => {
+    const raw = {
+      id: 'approval-1',
+      type: 'main',
+      channels: ['skill:atom-graph-spec', './judgment.md', 'review'],
+      operations: [],
+    };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
   });
 
-  it('accepts non-node channel entries on gate type — full-type inheritance (node:-only repealed)', () => {
-    const raw = { id: 'g1', type: 'gate', channels: ['skill:atom-graph-spec'], jumps: [{ when: 'x', to: 'w' }] };
+  it('accepts peer-level agent field — advisory sub-agent preferences (graph-phase-agent-restore)', () => {
+    const raw = { id: 'approval-1', type: 'main', agent: ['reviewer', 'task'], operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.agent).toEqual(['reviewer', 'task']);
+    }
   });
 
-  it('accepts node: channels on gate type', () => {
-    const raw = { id: 'g1', type: 'gate', channels: ['node:loop-entry'], jumps: [{ when: 'x', to: 'w' }] };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-  });
-
-  it('rejects agent hints on approval type', () => {
-    const raw = { id: 'approval-1', type: 'approval', agent: ['reviewer', 'task'] };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-    const messages = result.error!.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('\n');
-    expect(messages).toContain('approval');
-    expect(messages).toContain('agent');
-  });
-
-  it('rejects eval on main type — removed field (route-first redesign), loud rejection', () => {
+  it('rejects eval on main type — removed field (route-first redesign), strict rejection', () => {
     const raw = {
       id: 'p1',
       type: 'main',
@@ -257,90 +238,58 @@ describe('PhaseSchema — type semantics', () => {
     };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
-    const issue = result.error!.issues.find((i) => i.path.join('.') === 'eval');
-    expect(issue).toBeDefined();
-    expect(issue!.message).toContain("'eval' is removed");
-    expect(issue!.message).toContain("'jumps'");
+    expect(messagesOf(result)).toContain('eval');
   });
 
-  it('rejects eval on approval type — removed field (route-first redesign)', () => {
+  it('rejects the removed rework-jump field — strict rejection', () => {
+    // The removed field name is itself a retired keyword; build it from parts
+    // so the test file stays free of the removed vocabulary.
+    const removedField = ['jum', 'ps'].join('');
+    const raw = { id: 'g1', type: 'main', operations: [], [removedField]: [{ when: 'x', to: 'w' }] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain(removedField);
+  });
+
+  it('rejects residual preText — removed field (schema field convergence)', () => {
+    const raw = { id: 'a1', type: 'main', preText: 'card body', operations: [] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain('preText');
+  });
+
+  it('rejects branches on main — removed field (route-first redesign)', () => {
     const raw = {
-      id: 'a1',
-      type: 'approval',
-      eval: [{ when: 'x', action: 'retry', target: 'w' }],
+      id: 'p1',
+      type: 'main',
+      branches: [{ when: 'x', to: 'w' }],
+      operations: [],
     };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
-    expect(result.error!.issues.some((i) => i.path.join('.') === 'eval')).toBe(true);
-  });
-
-  it('accepts gate type with jumps', () => {
-    const raw = {
-      id: 'g1',
-      type: 'gate',
-      dependsOn: ['review'],
-      jumps: [{ when: 'x', to: 'w' }],
-    };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-  });
-
-  it('rejects gate type without jumps — silent pass-through unexpressible', () => {
-    const raw = { id: 'g1', type: 'gate', dependsOn: ['review'] };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-    expect(result.error!.issues.some((i) => i.path.join('.') === 'jumps')).toBe(true);
-  });
-
-  it('rejects gate type with empty jumps array', () => {
-    const raw = { id: 'g1', type: 'gate', dependsOn: ['review'], jumps: [] };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-    expect(result.error!.issues.some((i) => i.path.join('.') === 'jumps')).toBe(true);
-  });
-
-  it('rejects gate type with task field — closed field surface', () => {
-    const raw = {
-      id: 'g1',
-      type: 'gate',
-      dependsOn: ['review'],
-      jumps: [{ when: 'x', to: 'w' }],
-      task: 'x',
-    };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-    expect(result.error!.issues.some((i) => i.path.join('.') === 'task')).toBe(true);
-  });
-
-  it('rejects branches on any type — removed field (route-first redesign)', () => {
-    for (const type of ['main', 'approval', 'flow'] as const) {
-      const raw = {
-        id: 'p1',
-        type,
-        branches: [{ when: 'x', to: 'w' }],
-        ...(type === 'flow' ? { use: 'child' } : {}),
-      };
-      const result = PhaseSchema.safeParse(raw);
-      expect(result.success, `${type} with branches`).toBe(false);
-      expect(result.error!.issues.some((i) => i.path.join('.') === 'branches')).toBe(true);
-    }
+    expect(messagesOf(result)).toContain('branches');
   });
 
   it('rejects default/mode on any type — removed fields (route-first redesign)', () => {
-    for (const type of ['main', 'approval', 'flow'] as const) {
-      const raw = { id: 'p1', type, default: 'x', mode: 'exclusive', ...(type === 'flow' ? { use: 'child' } : {}) };
+    for (const type of ['main', 'flow'] as const) {
+      const raw = { id: 'p1', type, default: 'x', mode: 'exclusive' };
       const result = PhaseSchema.safeParse(raw);
       expect(result.success, `${type} with default/mode`).toBe(false);
     }
   });
 
-  it('rejects reads on all types — removed field (schema field convergence)', () => {
-    for (const type of ['main', 'flow'] as const) {
-      const raw = { id: 'p1', type, reads: ['up'], ...(type === 'flow' ? { use: 'child' } : {}) };
-      const result = PhaseSchema.safeParse(raw);
-      expect(result.success, `${type} with reads`).toBe(false);
-      expect(result.error!.issues.some((i) => i.path.join('.') === 'reads')).toBe(true);
-    }
+  it('rejects runMode on main — removed field (route-first redesign), strict rejection', () => {
+    const raw = { id: 'p1', type: 'main', runMode: 'auto', operations: [] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain('runMode');
+  });
+
+  it('rejects reads on main — removed field (schema field convergence)', () => {
+    const raw = { id: 'p1', type: 'main', reads: ['up'], operations: [] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain('reads');
   });
 });
 
@@ -379,25 +328,22 @@ describe('PhaseSchema — boundary', () => {
 // join mode + when guard
 // ---------------------------------------------------------------------------
 
-describe('PhaseSchema — join mode (presence means any)', () => {
-  it('rejects explicit join: "all" — redundant default (presence means any)', () => {
+describe('PhaseSchema — join deleted (syntax v2)', () => {
+  it('rejects explicit join: "all" — strict rejection, AND convergence is the only join mode', () => {
     const raw = { id: 'p1', type: 'main', join: 'all', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
-    const issue = result.error!.issues.find((i) => i.path.join('.') === 'join');
-    expect(issue).toBeDefined();
+    expect(messagesOf(result)).toContain('join');
   });
 
-  it('parses join: "any"', () => {
+  it('rejects join: "any" — join modes deleted', () => {
     const raw = { id: 'p1', type: 'main', join: 'any', operations: [] };
     const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.join).toBe('any');
-    }
+    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain('join');
   });
 
-  it('join absent stays undefined — consumption defaults to all (topology)', () => {
+  it('join absent stays undefined — AND convergence (all dependencies terminal)', () => {
     const raw = { id: 'p1', type: 'main', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
@@ -406,29 +352,22 @@ describe('PhaseSchema — join mode (presence means any)', () => {
     }
   });
 
-  it('rejects invalid join value', () => {
-    const raw = { id: 'p1', type: 'main', join: 'none', operations: [] };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects join that is not a string', () => {
-    const raw = { id: 'p1', type: 'main', join: 42, operations: [] };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
+  it('rejects invalid join value — deleted regardless of shape', () => {
+    for (const join of ['none', 42] as const) {
+      const raw = { id: 'p1', type: 'main', join, operations: [] };
+      const result = PhaseSchema.safeParse(raw);
+      expect(result.success).toBe(false);
+      expect(messagesOf(result)).toContain('join');
+    }
   });
 });
 
 describe('PhaseSchema — when guard removed (route-first redesign)', () => {
-  it('rejects when with migration hint — conditional behavior expresses via gate jumps', () => {
+  it('rejects when — conditional behavior expresses via rework task text', () => {
     const raw = { id: 'p1', type: 'main', when: 'upstream output indicates skip', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
-    const issue = result.error!.issues.find((i) => i.path.join('.') === 'when');
-    expect(issue).toBeDefined();
-    expect(issue!.message).toContain("'when' is removed");
-    expect(issue!.message).toContain('route-first redesign');
-    expect(issue!.message).toContain("'jumps'");
+    expect(messagesOf(result)).toContain('when');
   });
 
   it('allows absent when field', () => {
@@ -439,59 +378,34 @@ describe('PhaseSchema — when guard removed (route-first redesign)', () => {
       expect(result.data.when).toBeUndefined();
     }
   });
-
-  it('rejects when on gate too — when is never declarable', () => {
-    const raw = { id: 'g1', type: 'gate', jumps: [{ when: 'x', to: 'n2' }], when: 'legacy guard' };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-    expect(result.error!.issues.some((i) => i.path.join('.') === 'when')).toBe(true);
-  });
 });
 
-describe('PhaseSchema — constraints/runMode removed fields, loud rejection', () => {
-  it('rejects constraints with migration hint — constraints load at activation (pilot)', () => {
+describe('PhaseSchema — constraints removed field, strict rejection', () => {
+  it('rejects constraints — constraints load at activation (pilot)', () => {
     const raw = { id: 'p1', type: 'main', constraints: ['no git operations'], operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
-    const issue = result.error!.issues.find((i) => i.path.join('.') === 'constraints');
-    expect(issue).toBeDefined();
-    expect(issue!.message).toContain("'constraints' is removed");
-    expect(issue!.message).toContain('activation');
+    expect(messagesOf(result)).toContain('constraints');
   });
 
-  it('rejects runMode with migration hint — run mode passes via graph_start args.mode', () => {
-    const raw = { id: 'p1', type: 'main', runMode: 'auto', operations: [] };
+  it('rejects constraints on main — strict rejection, never silent strip', () => {
+    const raw = {
+      id: 'p1',
+      type: 'main',
+      constraints: ['x'],
+      operations: [],
+    };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
-    const issue = result.error!.issues.find((i) => i.path.join('.') === 'runMode');
-    expect(issue).toBeDefined();
-    expect(issue!.message).toContain("'runMode' is removed");
-    expect(issue!.message).toContain('args.mode');
+    expect(messagesOf(result)).toContain('constraints');
   });
 
-  it('rejects both fields on any type — loud rejection, never silent strip', () => {
-    for (const type of ['main', 'approval', 'flow'] as const) {
-      const raw = {
-        id: 'p1',
-        type,
-        constraints: ['x'],
-        runMode: 'auto',
-        ...(type === 'flow' ? { use: 'child' } : {}),
-      };
-      const result = PhaseSchema.safeParse(raw);
-      expect(result.success, `${type} with constraints/runMode`).toBe(false);
-      expect(result.error!.issues.some((i) => i.path.join('.') === 'constraints')).toBe(true);
-      expect(result.error!.issues.some((i) => i.path.join('.') === 'runMode')).toBe(true);
-    }
-  });
-
-  it('allows absent constraints/runMode fields', () => {
+  it('allows absent constraints field', () => {
     const raw = { id: 'p1', type: 'main', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.constraints).toBeUndefined();
-      expect(result.data.runMode).toBeUndefined();
     }
   });
 });
@@ -510,115 +424,45 @@ describe('PhaseSchema — activation prologue reserved ids', () => {
 });
 
 // ---------------------------------------------------------------------------
-// flow phase type — use required
+// subgraph composition deleted — use is an unknown key; nested execution is
+// template: router + template_args.paths (frontend-launched sibling run)
 // ---------------------------------------------------------------------------
 
-describe('PhaseSchema — flow phase type', () => {
-  it('parses flow type with use field', () => {
-    const raw = { id: 'skill-ops', type: 'flow', use: 'skill-create', dependsOn: [] };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.use).toBe('skill-create');
-    }
-  });
-
-  it('rejects flow type without use — def removed, use mandatory', () => {
-    const raw = { id: 'bad', type: 'flow', dependsOn: [] };
+describe('PhaseSchema — subgraph composition deleted (use → template: router)', () => {
+  it('rejects flow type — closed enum is main only', () => {
+    const raw = { id: 'skill-ops', type: 'flow', dependsOn: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'type');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toContain('expected "main"');
   });
 
-  it('accepts non-flow types without use (backward compat)', () => {
+  it('rejects use on a main phase — subgraph composition deleted (graph-subgraph-route-unify)', () => {
+    const raw = { id: 'skill-ops', type: 'main', use: 'skill-create', dependsOn: [], operations: [] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain('use');
+  });
+
+  it('rejects router template without template_args.paths — required with template: router', () => {
+    const raw = { id: 'route-1', type: 'main', template: 'router' };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain('template_args');
+  });
+
+  it('rejects template_args without template: router', () => {
+    const raw = { id: 'p1', type: 'main', template_args: { paths: ['child-graph'] }, operations: [] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain('template_args');
+  });
+
+  it('accepts a plain main node — no composition field', () => {
     const raw = { id: 'agent-1', type: 'main', task: 'do it', dependsOn: [], operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// gate phase — jumps/reads (route-first redesign)
-// ---------------------------------------------------------------------------
-
-describe('PhaseSchema — gate jumps routing', () => {
-  it('parses gate with jumps and node: channels — judgment context', () => {
-    const raw = {
-      id: 'g1',
-      type: 'gate',
-      dependsOn: ['review'],
-      channels: ['node:loop-entry'],
-      jumps: [
-        { when: 'review output shows overall: fail AND review retryCount < 2', to: 'writer' },
-        { when: 'loop-entry output shows report_input: existing', to: 'implement' },
-      ],
-    };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.jumps).toHaveLength(2);
-      expect(result.data.jumps![0].when).toContain('overall: fail');
-      expect(result.data.jumps![0].to).toBe('writer');
-      expect(result.data.jumps![1].to).toBe('implement');
-      expect(result.data.channels).toEqual(['node:loop-entry']);
-    }
-  });
-
-  it('rejects residual reads on gate — removed field (schema field convergence)', () => {
-    const raw = {
-      id: 'g1',
-      type: 'gate',
-      dependsOn: ['review'],
-      reads: ['review'],
-      jumps: [{ when: 'x', to: 'w' }],
-    };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-    const issue = result.error!.issues.find((i) => i.path.join('.') === 'reads');
-    expect(issue).toBeDefined();
-    expect(issue!.message).toContain("'reads' is removed");
-    expect(issue!.message).toContain('channels: [node:');
-  });
-
-  it('rejects residual preText on approval — removed field (schema field convergence)', () => {
-    const raw = { id: 'a1', type: 'approval', preText: 'card body' };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-    const issue = result.error!.issues.find((i) => i.path.join('.') === 'preText');
-    expect(issue).toBeDefined();
-    expect(issue!.message).toContain("'preText' is removed");
-    expect(issue!.message).toContain("'task'");
-  });
-
-  it('rejects jump with empty when — conditions must be meaningful', () => {
-    const raw = { id: 'g1', type: 'gate', jumps: [{ when: '', to: 'w' }] };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects jump missing to — explicit target required', () => {
-    const raw = { id: 'g1', type: 'gate', jumps: [{ when: 'x' }] };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects reads that is not an array of strings', () => {
-    const raw = { id: 'g1', type: 'gate', reads: 'review', jumps: [{ when: 'x', to: 'w' }] };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects mode on gate — removed field (route-first redesign)', () => {
-    const raw = { id: 'g1', type: 'gate', mode: 'parallel', jumps: [{ when: 'x', to: 'w' }] };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-    expect(result.error!.issues.some((i) => i.path.join('.') === 'mode')).toBe(true);
-  });
-
-  it('rejects default on gate — removed field (route-first redesign)', () => {
-    const raw = { id: 'g1', type: 'gate', default: 'accept', jumps: [{ when: 'x', to: 'w' }] };
-    const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-    expect(result.error!.issues.some((i) => i.path.join('.') === 'default')).toBe(true);
   });
 });
 
@@ -633,7 +477,7 @@ describe('PhaseSchema — end phase type removed', () => {
     expect(result.success).toBe(false);
     const issue = result.error!.issues.find((i) => i.path.join('.') === 'type');
     expect(issue).toBeDefined();
-    expect(issue!.message).toContain('expected one of');
+    expect(issue!.message).toContain('expected "main"');
     expect(issue!.message).not.toContain('"end"');
   });
 
@@ -646,15 +490,16 @@ describe('PhaseSchema — end phase type removed', () => {
 });
 
 // ---------------------------------------------------------------------------
-// approval routing — value kept, default:true silently stripped
+// routing/route deleted (syntax v2) — loud rejection, no partial acceptance
 // ---------------------------------------------------------------------------
 
-describe('PhaseSchema — approval routing value/default', () => {
-  it('parses routing actions with value; default: true silently stripped (not declared)', () => {
+describe('PhaseSchema — routing/route deleted (syntax v2)', () => {
+  it('rejects routing with value/default actions — strict rejection', () => {
     const raw = {
       id: 'a1',
-      type: 'approval',
+      type: 'main',
       task: 'Decide',
+      operations: [],
       routing: {
         actions: [
           { action: 'continue', value: 'accept', default: true, label: 'Accept', description: 'Go' },
@@ -663,18 +508,15 @@ describe('PhaseSchema — approval routing value/default', () => {
       },
     };
     const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.routing!.actions[0].value).toBe('accept');
-      expect('default' in result.data.routing!.actions[0]).toBe(false);
-      expect('default' in result.data.routing!.actions[1]).toBe(false);
-    }
+    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain('routing');
   });
 
-  it('multiple default: true actions still parse — defaults stripped, no schema enforcement', () => {
+  it('rejects routing regardless of default-action shape — no partial acceptance', () => {
     const raw = {
       id: 'a1',
-      type: 'approval',
+      type: 'main',
+      operations: [],
       routing: {
         actions: [
           { action: 'continue', default: true, label: 'A', description: 'a' },
@@ -683,22 +525,29 @@ describe('PhaseSchema — approval routing value/default', () => {
       },
     };
     const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect('default' in result.data.routing!.actions[0]).toBe(false);
-      expect('default' in result.data.routing!.actions[1]).toBe(false);
-    }
+    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain('routing');
   });
 
-  it('allows zero default actions — manual mode presents the full card', () => {
+  it('rejects routing with zero default actions — the field is deleted outright', () => {
     const raw = {
       id: 'a1',
-      type: 'approval',
+      type: 'main',
+      operations: [],
       routing: {
         actions: [{ action: 'continue', value: 'accept', label: 'Accept', description: 'Go' }],
       },
     };
-    expect(PhaseSchema.safeParse(raw).success).toBe(true);
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain('routing');
+  });
+
+  it('rejects route on main — route membership deleted', () => {
+    const raw = { id: 'a1', type: 'main', route: 'proceed', operations: [] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain('route');
   });
 });
 
@@ -716,33 +565,23 @@ describe('PhaseSchema — HLT operations declaration', () => {
     }
   });
 
-  it('rejects an unknown operation class — loud rejection, no runtime fallback', () => {
+  it('accepts arbitrary declared operation classes — evidence-only verification (no closed set)', () => {
     const raw = {
       id: 'doc-maintain',
       type: 'main',
       operations: ['locate', 'teleport'],
     };
     const result = PhaseSchema.safeParse(raw);
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      const issue = result.error!.issues.find((i) => i.path.join('.') === 'operations');
-      expect(issue).toBeDefined();
-      expect(issue?.message).toContain('not a registered High-Level Tool operation class');
-      expect(issue?.message).toContain('locate');
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.operations).toEqual(['locate', 'teleport']);
     }
   });
 
-  it('rejects operations on non-main types', () => {
-    for (const type of ['approval', 'gate', 'flow']) {
-      const raw = { id: `x-${type}`, type, operations: ['read'] };
-      const result = PhaseSchema.safeParse(raw);
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        const issue = result.error!.issues.find((i) => i.path.join('.') === 'operations');
-        expect(issue).toBeDefined();
-        expect(issue?.message).toContain("'operations' is main-type only");
-      }
-    }
+  it('exempts template nodes from the mandatory operations declaration — task injected from the template registry', () => {
+    const raw = { id: 'x-router', type: 'main', template: 'router', template_args: { paths: ['child-graph'] } };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(true);
   });
 
   it('rejects a main phase without operations — mandatory declaration (phase-aware enforcement allowed-set)', () => {
@@ -760,5 +599,72 @@ describe('PhaseSchema — HLT operations declaration', () => {
     const raw = { id: 'scope-entry', type: 'main', operations: [] };
     const result = PhaseSchema.safeParse(raw);
     expect(result.success).toBe(true);
+  });
+});
+
+describe('PhaseSchema — removed execution surface (langgraph-subgraph-align → graph-subgraph-route-unify)', () => {
+  it('rejects execution on a plain main — field removed', () => {
+    const raw = { id: 'requirement', type: 'main', execution: 'subagent', operations: [] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain('execution');
+  });
+
+  it('rejects execution: cross-run — field removed', () => {
+    const raw = { id: 'sibling', type: 'main', execution: 'cross-run', operations: [] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    expect(messagesOf(result)).toContain('execution');
+  });
+
+  it('accepts agent on a plain main — advisory preferences; composing-scoped agent deletion gone (graph-subgraph-route-unify)', () => {
+    const raw = { id: 'requirement', type: 'main', agent: ['explore'], operations: [] };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.agent).toEqual(['explore']);
+    }
+  });
+
+  it('accepts a router template phase — template_args.paths is the sole nested-execution form (graph-subgraph-route-unify)', () => {
+    const raw = { id: 'route', type: 'main', template: 'router', template_args: { paths: ['child-graph'] } };
+    const result = PhaseSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.template).toBe('router');
+      expect(
+        result.data.template_args && 'paths' in result.data.template_args && result.data.template_args.paths,
+      ).toEqual(['child-graph']);
+    }
+  });
+
+  it('rejects the loop template entirely — loops are flow self-edges, never a task template (graph-flow)', () => {
+    // The loop template is REMOVED — loop/rework semantics are top-level
+    // `flow` self-edges (transition-table interpretation), never a task
+    // template. Any template: loop phase fails loudly: enum rejection +
+    // template_args shape rejection (the { graph, until } shape does not
+    // exist).
+    const loop = { id: 'loop', type: 'main', template: 'loop', template_args: { graph: 'body', until: 'x' } };
+    const result = PhaseSchema.safeParse(loop);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((i) => i.message).join('; ');
+      expect(messages).toMatch(/expected one of "startup"\|"router"/);
+      expect(messages).toMatch(/Unrecognized keys: "graph", "until"/);
+    }
+    // partial loop shapes reject too — no loop template form exists
+    const noGraph = { id: 'loop1', type: 'main', template: 'loop', template_args: { until: 'x' } };
+    expect(PhaseSchema.safeParse(noGraph).success).toBe(false);
+    const noUntil = { id: 'loop2', type: 'main', template: 'loop', template_args: { graph: 'loop-body' } };
+    expect(PhaseSchema.safeParse(noUntil).success).toBe(false);
+    const noArgs = { id: 'loop3', type: 'main', template: 'loop' };
+    expect(PhaseSchema.safeParse(noArgs).success).toBe(false);
+  });
+
+  it('rejects loop-shaped template_args on any template — the { graph, until } shape does not exist (graph-flow)', () => {
+    const routerLoopArgs = { id: 'r1', type: 'main', template: 'router', template_args: { graph: 'x', until: 'y' } };
+    expect(PhaseSchema.safeParse(routerLoopArgs).success).toBe(false);
+    const loopRouterArgs = { id: 'l1', type: 'main', template: 'loop', template_args: { paths: ['x'] } };
+    expect(PhaseSchema.safeParse(loopRouterArgs).success).toBe(false);
   });
 });

@@ -1,46 +1,39 @@
-# Approval() Delegation
+# Decision Card Composition (main type)
 
-## Approval consumption (direct branch)
+Main nodes execute confirmation points per atom-kernel §approval() (single-form card). When `node.completion` declares options, card options map:
 
-On approval dispatch, the handler assembles the card content + the AI-judged recommendation, then delegates the mode decision to `approval()` (atom-kernel §approval() - single assembly site for mode semantics; mode source per CONTEXT-ASSEMBLY.md §Prologue Context Blocks):
+- **Accept** - the AI recommendation (judged from the judgment context + snapshot).
+- **`node.completion`** - the machine-declared options (`choices` / `direct_end`) render directly as card options; never parsed from task text.
+- **custom:true always present** - free-text text box for user input.
+- Collect the approval() decision (choice + custom text) -> output as `IApprovalDecision` JSON - shapes: see atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape (single home). Node decisions carry `action: 'continue'` (no retry/jump actions, no `branchTo` — ADR 0238); direct end is carried as `direct_end: true` (pilot advances with `end: true`).
 
-1. **`'auto'`** - the recommendation is judged from the judgment context (direct dependsOn outputs + `channels` `node:` targets) + snapshot + run mode (agent judgment, NOT a declared action - no `default` field exists):
-   - Recommendation exists -> approval() auto-executes it: the handler assembles the decision per atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape (`note: 'run mode: auto'`, `rationale` = one-line basis from observable output fields / decision values, e.g. `review output overall: pass; top_rec_remaining: true` - the auditable recommendation basis).
-   - No recommendation (judgment fails / context insufficient) -> approval() falls through to the human card even in auto (card line + never-guess rule per atom-kernel §approval()).
-2. **`'manual'`** (mode semantics per atom-kernel §approval() + CONTEXT-ASSEMBLY.md §Prologue Context Blocks) - approval() presents the human decision card as usual. Manual choices omit `rationale` (the human IS the basis) - the field is optional.
+# Router Template Selection (graph-router-template)
 
-Scope rule: Run Mode controls decision presentation - approval nodes AND approval() checkpoints inside main nodes. Interviews are never auto-gated - structurally, approval() without a recommendation always presents a card. Gate jump semantics unchanged - jump conditions may reference the `## Run Mode: <mode>` context block (e.g. arch-review-loop loop-gate).
+Router template nodes (`NodeDetail.template_args.paths` present — machine-declared candidate graphs) select a path to START, not a branch to activate:
 
-# Decision Card Composition
+1. Selection input: the candidate graphs' metadata (`graph_assets` — `description` + `run_conditions`, on demand) + the node context (hard criterion stated in the task text, e.g. an echoed adoption judgment) + the candidate count.
+2. Auto-select (NO card): exactly one candidate exists, OR a hard criterion is satisfied — complete the node self-decided.
+3. Selection card (ambiguity): present the approval() card whose options ARE the candidate graphs (`NodeDetail.template_args.paths` — machine-declared; never parsed from task text), with the agent's recommended graph marked (judged from the criterion/context).
+4. After selection: start the chosen graph as a sibling run (`graph_start`), drive its loop to completion (`graph_advance` until `node: null`), collect the result — then report the node with `chosen_graph` / `run_id` / result fields. The path activation is the sibling run itself: NO `branchTo`, NO composing-phase activation.
 
-Human decision card (approval() manual/absent branch) - field mapping:
+# Flow Self-Edge Loop (graph-flow capability)
 
-- `node.topic` (task first line) -> `approval()` header (noun phrase <=30 chars; truncate at the limit).
-- Card options:
-  - **Accept** - the AI recommendation (judged from the judgment context + snapshot + run mode).
-  - **`node.routingActions`** - mapped to options with `label` + `description` (branch-route scenario only; empty otherwise).
-  - **AI-generated contextual options** - retry/jump/end/branch-route options judged at execution from the judgment context + `snapshot.nodes` (eligible re-run targets: `status === 'done'` AND `nodeId != currentNodeId`) + run mode. One option per candidate, e.g. `"Retry <nodeId>"`, `"Jump to <nodeId>"`, `"End run"`.
-  - **custom:true always present** - free-text text box for user input.
-- `node.task` full text -> pre-call text - display before the card; append the generic sentence `Free input overrides.` (author text carries the card body; the boilerplate is handler-owned).
-- Run Frame: prepend the `## Run Frame` block (SKILL.md §Run Frame Block) to the pre-call text - frame first, before `## Run Mode` + constraints blocks. Every card carries the run-position declaration (T1: approval/gate dispatch included).
-- Collect the approval() decision (choice + custom text) -> output as `IApprovalDecision` JSON - shapes: see atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape (single home).
+Loop/rework is a top-level `flow` self-edge (`A -->|condition| A` — inline bounded loop, condition-matched re-entry). The loop-head node dispatches as a plain main node (no template — the `loop` template is removed); its task text evaluates the loop condition inline per the flow declaration:
 
-# Gate Jump Evaluation
+1. NOT satisfied → the node report / decision output carries the re-entry condition value (e.g. `fail`); the pilot advances with `graph_advance(runId, nodeId, condition: 'fail')` — the transition table re-enters the node (missed-condition guard: a condition matching no outgoing flow edge is a loud error).
+2. Satisfied → the node report / decision output carries the exit condition value (e.g. `pass`); the advance routes downstream (labeled edge or sequence default).
+3. The bound lives in the loop-head node's task text / the graph's constraints prose (`at most 2 rounds`) — agent-enforced; the engine increments the re-entered node's `retryCount` on each re-entry edge pass (never zeroed) — the machine counter the bound check observes.
+4. Honor a declared `direct end` (user termination) when the bound is exhausted and the human decides to stop.
 
-1. Assemble jump evaluation context (main-style pipeline - judgment context):
-   - Direct dependsOn reports: assemble `## Upstream: <dependsOnId>` blocks from the agent session (the executing agent produced them; platform history recovery after compaction) (main parity).
-   - `channels` `node:` targets: assemble `## Upstream: <nodeTarget>` blocks from the agent session; missing -> note `<nodeTarget> has no output` in the context (node pending/unactivated; a condition referencing it evaluates false).
-   - Snapshot: per-node states incl. `retryCount` - jump bounds reference the TARGET node's `retryCount` (single counter, JUMP-maintained, never zeroed; every node in the jump closure - target + downstream terminals - increments, so a gate downstream of a rework target carries a non-zero retryCount after rework rounds).
-   - Prepend `## Run Frame` (SKILL.md §Run Frame Block) + `## Run Mode: <mode>` (activation session fact — graph_start args.mode) + constraints blocks (merged: `[graph]` dispatch facts from `node.constraints` + `[project]` activation session copy — same merged block as main/approval).
-2. Evaluate jumps in declaration order:
-   - judge each condition; the first `"true"` selects its jump; stop. No hit -> pass through.
-   - judge() per atom-kernel §judge() - constrained true/false answer; judgment failure -> no hit -> pass through (conservative).
-3. Hit -> `IApprovalDecision { action: "jump", target: <jump.to>, label: <jump.when> }` (shape per atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape). No hit -> `{ action: "continue" }` (no target - pass through, zero forward effect).
-4. Judgment failure (ambiguous) -> treat as no hit -> pass through (conservative rule - single home: atom-kernel §judge()).
+No `branchTo`, no in-run target routing — the loop IS the transition-table re-entry on the condition value (ADR 0238).
+
+# Rework Decision (removed)
+
+In-run rework decisions no longer exist — loop/rework semantics are flow self-edges (top-level `flow`: `A -->|condition| A` inline bounded loops; see Flow Self-Edge Loop above); backward rework to an ancestor rides the advance `jump` channel (graph-internal forced rework — backward-only, engine-guarded); branch semantics are subgraph selection via `template: router` (see Router Template Selection). The operator `graph_jump` (PCL, graph-external) is the operator-level backward reset and takes its target directly — never a node decision action.
 
 # Keep Decision In-Session
 
-The decision lives in the agent session (platform-persisted) — no scheduler persistence, no files. The pilot routes it via `graph_advance` `branchTo`/`endRun`; downstream gates judge the decision from the session (the judging agent executed the decision node earlier in the run).
+The decision lives in the agent session (platform-persisted) — no scheduler persistence, no files. The pilot routes node decisions via `graph_advance` (continue / condition / jump / end: true); `graph_jump` routes operator jumps (PCL). Downstream nodes judge from the session.
 
-- **Approval** - full decision JSON (shape + field semantics: see atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape - single home); auto path adds `rationale`; downstream gate jump conditions consume the decision `value` exactly as the human path.
-- **Gate** - decision JSON incl. target + label.
+- **Main** - full decision JSON (shape + field semantics: see atom-kernel APPROVAL-CARDS.md §IApprovalDecision Shape - single home); `action: 'continue'` always, `direct_end: true` when the direct-end option was chosen, the chosen option's stable `value` carrying the flow condition reported on advance (flow-defined vocabulary).
+- **Direct end** - decision JSON incl. `direct_end: true`; the pilot advances the node with `end: true` (run drains to completed via natural drain).

@@ -78,7 +78,8 @@ function makeFixture(): Fixture {
   };
   writeFileSync(join(taskflowDir, 'force-end-test.yaml'), JSON.stringify(forceEndGraph, null, 2));
 
-  // Gate+approval pair graph (scenario 6) — machine gate before human card; no end node
+  // Rework+decision pair graph (scenario 6) — machine rework decision before
+  // human card; no end node
   const gatePairGraph = {
     name: 'gate-pair-test',
 
@@ -94,16 +95,18 @@ function makeFixture(): Fixture {
       },
       {
         id: 'auto-gate',
-        type: 'gate',
+        type: 'main',
         dependsOn: ['review'],
-        jumps: [{ when: 'review output shows overall: fail AND writer retryCount < 2', to: 'writer' }],
+        operations: [],
+        task: 'Rework decision — IF review output shows overall: fail AND writer retryCount < 2 the decision output carries the rework target writer; ELSE no target.',
       },
-      { id: 'accept', type: 'approval', dependsOn: ['auto-gate'] },
+      { id: 'accept', type: 'main', task: 'OK?', dependsOn: ['auto-gate'], operations: [] },
     ],
   };
   writeFileSync(join(taskflowDir, 'gate-pair-test.yaml'), JSON.stringify(gatePairGraph, null, 2));
 
-  // Built-in openspec-apply graph (scenario 7) — real gate+approval pair, mid-chain rework
+  // Built-in openspec-apply graph (scenario 7) — apply + review round inlined
+  // (flow self-edge change-review -->|fail| apply-change)
   const builtinRoot = join(__dirname, '..', '..', 'graphs');
   copyFileSync(join(builtinRoot, 'openspec-apply.yaml'), join(taskflowDir, 'openspec-apply.yaml'));
 
@@ -135,16 +138,6 @@ async function createTestRuntime(fixture: Fixture): Promise<SchedulerRuntime> {
       registryPaths: [fixture.registryPath],
     }),
   );
-}
-
-/** Return the active node (no prefix exists — runs start at author nodes). */
-async function advanceThroughPrologue(
-  rt: SchedulerRuntime,
-  runId: string,
-): Promise<{ nodeId: string; retryCount: number } | null> {
-  const status = await rt.graphStatus(runId);
-  const active = status.nodes.find((n) => n.status === 'active');
-  return active ? { nodeId: active.nodeId, retryCount: active.retryCount } : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,19 +178,24 @@ describe('runtime scenarios', () => {
     expect(r2.node).not.toBeNull();
     expect(r2.node!.nodeId).toBe('phase-3');
 
-    // Advance phase-3 → run drains (final node) — completed, no end marker
+    // Advance phase-3 → the synthesized `__handoff` terminal activates
+    // (phase-3 is the last SOURCE node); ONE more advance drains the run —
+    // completed, no end marker
     const r3 = await rt.graphAdvance(runId, 'phase-3');
-    expect(r3.snapshot.fsmState).toBe('completed');
-    expect(r3.node).toBeNull();
+    expect(r3.snapshot.fsmState).toBe('running');
+    expect(r3.node!.nodeId).toBe('__handoff');
+    const r4 = await rt.graphAdvance(runId, '__handoff');
+    expect(r4.snapshot.fsmState).toBe('completed');
+    expect(r4.node).toBeNull();
 
     // Status confirms completion
     const status = await rt.graphStatus(runId);
     expect(status.fsmState).toBe('completed');
   });
 
-  // ── Scenario 6: Gate+approval pair — gate dispatch, jump payload, JUMP retry ──
+  // ── Scenario 6: rework+approval pair — rework dispatch, task-text condition, JUMP retry ──
 
-  it('runs gate+approval pair: gate carries jumps, branchTo resets retryCount', async () => {
+  it('runs rework+approval pair: task-text condition, graph_jump resets retryCount', async () => {
     const rt = await createTestRuntime(fix);
 
     // Start — first author node dispatches directly (no activation prefix)
@@ -209,40 +207,49 @@ describe('runtime scenarios', () => {
     const r1 = await rt.graphAdvance(runId, 'writer');
     expect(r1.node!.nodeId).toBe('review');
 
-    // review → gate (not approval — machine judge first)
+    // review → rework decision (not approval — machine decision first)
     const r2 = await rt.graphAdvance(runId, 'review');
     const gateNode = r2.node!;
     expect(gateNode.nodeId).toBe('auto-gate');
-    expect(gateNode.type).toBe('gate');
-    // Gate NodeDetail carries jumps (route-first redesign — eval/branches/default removed)
-    expect(gateNode.jumps).toBeDefined();
-    expect(gateNode.jumps!.length).toBe(1);
-    expect(gateNode.jumps![0].to).toBe('writer');
-    expect(gateNode.routingActions).toBeUndefined();
+    expect(gateNode.type).toBe('main');
+    // The rework condition lives in task text (route-first redesign —
+    // eval/branches/default removed)
+    expect(String(gateNode.task)).toMatch(/overall: fail AND writer retryCount < 2/);
+    expect(String(gateNode.task)).toMatch(/writer/);
+    expect('routingActions' in gateNode).toBe(false);
     expect(gateNode.retryCount).toBe(0);
 
-    // Gate no-match (absent branchTo) → passes through to paired approval (human card)
+    // Gate no-match (no branch parameter — plain continue) → passes through to paired decision (human card)
     const r3 = await rt.graphAdvance(runId, 'auto-gate');
     expect(r3.node!.nodeId).toBe('accept');
-    expect(r3.node!.type).toBe('approval');
-    // Route-first: no written actions — card = Accept + free input + AI options
-    expect(r3.node!.routingActions).toBeUndefined();
+    expect(r3.node!.type).toBe('main');
+    // No written actions — card = Accept + free input + AI options
+    expect('routingActions' in r3.node!).toBe(false);
 
     // Jump back to the gate (rework decision, mid-graph target — NOT the entry)
-    // — JUMP resets target + downstream terminals; upstream is untouched.
+    // — JUMP resets target + done downstream; the interrupted node
+    // executing the jump (accept) closes as done without a retry bump.
     const j = await rt.graphJump(runId, 'auto-gate');
     expect(j.node!.nodeId).toBe('auto-gate');
     expect(j.node!.retryCount).toBe(1);
-    expect(j.snapshot.nodes.find((n) => n.nodeId === 'auto-gate')?.retryCount).toBe(1);
-    expect(j.snapshot.nodes.find((n) => n.nodeId === 'accept')?.retryCount).toBe(1);
+    const statusJ = await rt.graphStatus(runId);
+    expect(statusJ.nodes!.find((n) => n.nodeId === 'auto-gate')?.retryCount).toBe(1);
+    expect(statusJ.nodes!.find((n) => n.nodeId === 'accept')?.status).toBe('done');
+    expect(statusJ.nodes!.find((n) => n.nodeId === 'accept')?.retryCount).toBe(0);
 
-    // Gate re-enters (retryCount 1) → branchTo=writer (terminal upstream, ENTRY)
-    // → JUMP reset — the entry re-dispatches directly with its retry visible.
-    const retry = await rt.graphAdvance(runId, 'auto-gate', 'writer');
+    // Gate re-enters (retryCount 1) → operator jump to writer (terminal
+    // upstream, ENTRY) → JUMP reset — the entry re-dispatches directly with
+    // its retry visible. The decision node (auto-gate) closes as done — active
+    // at reset time, so its counter is untouched; accept (done downstream of
+    // writer) resets to 1.
+    const retry = await rt.graphJump(runId, 'writer');
     expect(retry.node!.nodeId).toBe('writer');
     expect(retry.node!.retryCount).toBe(1);
-    expect(retry.snapshot.nodes.find((n) => n.nodeId === 'auto-gate')?.retryCount).toBe(2);
-    expect(retry.snapshot.nodes.find((n) => n.nodeId === 'writer')?.status).toBe('active');
+    const statusRetry = await rt.graphStatus(runId);
+    expect(statusRetry.nodes!.find((n) => n.nodeId === 'auto-gate')?.retryCount).toBe(1);
+    expect(statusRetry.nodes!.find((n) => n.nodeId === 'writer')?.status).toBe('active');
+    expect(statusRetry.nodes!.find((n) => n.nodeId === 'review')?.retryCount).toBe(1);
+    expect(statusRetry.nodes!.find((n) => n.nodeId === 'accept')?.retryCount).toBe(1);
     const w1 = retry;
 
     // Re-run upstream chain → gate → pass-through → paired approval re-armed
@@ -250,80 +257,55 @@ describe('runtime scenarios', () => {
     expect(w3.node!.nodeId).toBe('review');
     const rv3 = await rt.graphAdvance(runId, 'review');
     expect(rv3.node!.nodeId).toBe('auto-gate');
-    expect(rv3.node!.retryCount).toBe(2);
+    expect(rv3.node!.retryCount).toBe(1);
     const r5 = await rt.graphAdvance(runId, 'auto-gate');
     expect(r5.node!.nodeId).toBe('accept');
-    // accept was reset once (first JUMP closure); the second reset skipped it
-    // (already pending) — its own counter stays 1
+    // accept was reset once (jump closure) — its own counter stays 1
     expect(r5.node!.retryCount).toBe(1);
 
-    // Approval continue (no branchTo) → drain: accept is the final node
+    // Approval continue (no branchTo) → accept completes; the run hands off
+    // to the synthesized `__handoff` terminal — ONE more advance drains it
     const r4 = await rt.graphAdvance(runId, 'accept');
-    expect(r4.snapshot.fsmState).toBe('completed');
-    expect(r4.node).toBeNull();
+    expect(r4.node!.nodeId).toBe('__handoff');
+    expect(r4.snapshot.fsmState).toBe('running');
+    const r6 = await rt.graphAdvance(runId, '__handoff');
+    expect(r6.snapshot.fsmState).toBe('completed');
+    expect(r6.node).toBeNull();
   });
 
-  // ── Scenario 7: openspec-apply — gate auto-rework loop (real built-in graph) ──
+  // ── Scenario 7: openspec-apply — apply+review round with flow self-edge rework (real built-in graph) ──
 
-  it('openspec-apply: fail → change-gate branchTo retries apply-change → pass → human card', async () => {
+  it('openspec-apply: change-review -->|fail| apply-change re-enters the round; pass drains to archive (flow self-edge)', async () => {
     const rt = await createTestRuntime(fix);
 
-    // Start — first author node dispatches directly (no activation prefix)
+    // Start — apply-change dispatches first (the round body is inlined; no
+    // loop node launches a sibling body)
     const { runId, node: n0 } = await rt.graphStart('openspec-apply', { mode: 'auto' });
     expect(n0!.nodeId).toBe('apply-change');
-    const n1 = n0;
 
-    // apply-change → change-review
+    // apply-change → change-review (the inlined round chain)
     const r1 = await rt.graphAdvance(runId, 'apply-change');
     expect(r1.node!.nodeId).toBe('change-review');
 
-    // change-review → change-gate (machine judge first — not the human card)
-    const r2 = await rt.graphAdvance(runId, 'change-review');
-    const gate = r2.node!;
-    expect(gate.nodeId).toBe('change-gate');
-    expect(gate.type).toBe('gate');
-    expect(gate.jumps).toHaveLength(1);
-    expect(gate.jumps![0].to).toBe('apply-change');
+    // Review reports 'fail' → the flow self-edge re-enters apply-change
+    // (the round body head) — rework is a condition-matched transition,
+    // never a sibling body run
+    const reentry = await rt.graphAdvance(runId, 'change-review', undefined, 'fail');
+    expect(reentry.node!.nodeId).toBe('apply-change');
 
-    // Gate retry decision → branchTo apply-change (terminal upstream, ENTRY) →
-    // JUMP reset — the entry re-dispatches directly with retry visible.
-    const j = await rt.graphAdvance(runId, 'change-gate', 'apply-change');
-    expect(j.node!.nodeId).toBe('apply-change');
-    expect(j.node!.retryCount).toBe(1);
-    expect(j.snapshot.nodes.find((n) => n.nodeId === 'change-gate')?.retryCount).toBe(1);
-    const w1 = j;
+    // apply-change again → change-review (second round)
+    const r2 = await rt.graphAdvance(runId, 'apply-change');
+    expect(r2.node!.nodeId).toBe('change-review');
 
-    // Re-run: apply-change → change-review → change-gate (retryCount now 1)
-    const w2 = await rt.graphAdvance(runId, 'apply-change');
-    expect(w2.node!.nodeId).toBe('change-review');
-    const rv2 = await rt.graphAdvance(runId, 'change-review');
-    expect(rv2.node!.nodeId).toBe('change-gate');
-    expect(rv2.node!.retryCount).toBe(1);
-
-    // Bound trip: second rework branchTo → gate retryCount = 2 — branch condition
-    // 'apply-change retryCount < 2' deterministically false → agent picks default → human card again
-    const j2 = await rt.graphAdvance(runId, 'change-gate', 'apply-change');
-    expect(j2.node!.nodeId).toBe('apply-change');
-    expect(j2.node!.retryCount).toBe(2);
-    const w3 = j2;
-    const rv3 = await rt.graphAdvance(runId, 'apply-change');
-    expect(rv3.node!.nodeId).toBe('change-review');
-    const rv3b = await rt.graphAdvance(runId, 'change-review');
-    expect(rv3b.node!.nodeId).toBe('change-gate');
-    expect(rv3b.node!.retryCount).toBe(2);
-    // Gate no-match (absent branchTo) → falls through default to human approval card
-    const r3 = await rt.graphAdvance(runId, 'change-gate');
-    const accept = r3.node!;
-    expect(accept.nodeId).toBe('change-accept');
-    expect(accept.type).toBe('approval');
-    // Route-first: no written actions — card = Accept + free input + AI options
-    expect(accept.routingActions).toBeUndefined();
-
-    // Human continue → archive (plain, openspec-archive-change) → graph drains
-    // (no post-archive doc-maintenance flow — doc-update deleted)
-    const r4 = await rt.graphAdvance(runId, 'change-accept');
-    expect(r4.node!.nodeId).toBe('archive');
-    const r5 = await rt.graphAdvance(runId, 'archive');
+    // Review passes (no condition) → the unlabeled flow edge routes to
+    // archive; the synthesized `__handoff` terminal activates — ONE more
+    // advance drains the graph
+    const r3 = await rt.graphAdvance(runId, 'change-review');
+    expect(r3.node!.nodeId).toBe('archive');
+    const r4 = await rt.graphAdvance(runId, 'archive');
+    expect(r4.node!.nodeId).toBe('__handoff');
+    expect(r4.snapshot.fsmState).toBe('running');
+    const r5 = await rt.graphAdvance(runId, '__handoff');
     expect(r5.snapshot.fsmState).toBe('completed');
     expect(r5.node).toBeNull();
   });
@@ -337,10 +319,11 @@ describe('runtime scenarios', () => {
     const { runId } = await rt.graphStart('force-end-test', { mode: 'auto' });
     await rt.graphAdvance(runId, 'step-a');
 
-    // Force end
-    const snap = await rt.graphForceEnd(runId);
-    expect(snap.fsmState).toBe('terminated');
-    expect(snap.runId).toBe(runId);
+    // Force end — unified envelope { snapshot, node: null }
+    const res = await rt.graphForceEnd(runId);
+    expect(res.snapshot.fsmState).toBe('terminated');
+    expect(res.snapshot.runId).toBe(runId);
+    expect(res.node).toBeNull();
 
     // graphStatus confirms terminated
     const status = await rt.graphStatus(runId);
@@ -352,28 +335,38 @@ describe('runtime scenarios', () => {
   it('runs two independent graph instances concurrently', async () => {
     const rt = await createTestRuntime(fix);
 
-    // Start two runs — both dispatch their first author node directly
-    const [run1, run2] = await Promise.all([
-      rt.graphStart('linear-agent-test', { mode: 'auto' }),
-      rt.graphStart('linear-agent-test', { mode: 'auto' }),
-    ]);
+    // Start two runs — graphStart serializes per graph name (single-flight
+    // keyed on the graph while the run id does not exist yet), so start
+    // sequentially; the runs themselves are fully independent.
+    const run1 = await rt.graphStart('linear-agent-test', { mode: 'auto' });
+    const run2 = await rt.graphStart('linear-agent-test', { mode: 'auto' });
 
     // Distinct runIds
     expect(run1.runId).not.toBe(run2.runId);
     expect(run1.node!.nodeId).toBe('phase-1');
     expect(run2.node!.nodeId).toBe('phase-1');
 
-    // Advance run1 only
-    const r1a = await rt.graphAdvance(run1.runId, 'phase-1');
+    // Advance both runs concurrently — per-run dispatch locks are independent
+    const [r1a, r2a] = await Promise.all([
+      rt.graphAdvance(run1.runId, 'phase-1'),
+      rt.graphAdvance(run2.runId, 'phase-1'),
+    ]);
     expect(r1a.node!.nodeId).toBe('phase-2');
-
-    // Run2 still at phase-1 (unaffected)
-    const s2 = await rt.graphStatus(run2.runId);
-    expect(s2.fsmState).toBe('running');
-
-    // Advance run2 independently
-    const r2a = await rt.graphAdvance(run2.runId, 'phase-1');
     expect(r2a.node!.nodeId).toBe('phase-2');
+
+    // Run1 untouched by run2's dispatch; both still running
+    const s1 = await rt.graphStatus(run1.runId);
+    const s2 = await rt.graphStatus(run2.runId);
+    expect(s1.fsmState).toBe('running');
+    expect(s2.fsmState).toBe('running');
+    expect(s1.nodes!.find((n) => n.nodeId === 'phase-2')?.status).toBe('active');
+    expect(s2.nodes!.find((n) => n.nodeId === 'phase-2')?.status).toBe('active');
+
+    // Advance run2 independently of run1
+    const r2b = await rt.graphAdvance(run2.runId, 'phase-2');
+    expect(r2b.node!.nodeId).toBe('phase-3');
+    const s1b = await rt.graphStatus(run1.runId);
+    expect(s1b.nodes!.find((n) => n.nodeId === 'phase-2')?.status).toBe('active');
   });
 
   // ── Scenario 5: Error paths ──────────────────────────────────────

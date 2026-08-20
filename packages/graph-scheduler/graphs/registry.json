@@ -2,58 +2,51 @@
   "graphs": [
     {
       "name": "e2e-minimal",
-      "path": "e2e-minimal.yaml",
-      "description": "Minimal E2E: main → approval loop"
+      "path": "e2e-minimal.yaml"
     },
     {
       "name": "arch-review",
-      "path": "arch-review.yaml",
-      "description": "Requirement production graph, standalone: scope-entry interview (entry node — scope + output path + report input fresh|existing) → arch-review report (improve-codebase-architecture — producer) → review-accept (Continue = requirement ready / Loop again / End). Independently executable requirement production; the loop composes it as its requirement stage (adopt + implement follow in arch-review-loop)."
+      "path": "arch-review.yaml"
     },
     {
       "name": "adopt-with-docs",
-      "path": "adopt-with-docs.yaml",
-      "description": "Requirement adoption (adopt stage) + spec production: adopt-scope (interview: idea/goal or input document) → adopting (grilling conversation, inline domain-modeling side effects) → adopt-accept (adoption approval) → spec-propose (openspec-propose — adopted requirements materialize as the OpenSpec change). Standalone raw idea entry; composed as the loop's adopt stage — receives the produced report as input document and appends its record as a dated appendix section."
+      "path": "adopt-with-docs.yaml"
     },
     {
       "name": "graph-generate",
-      "path": "graph-generate.yaml",
-      "description": "Graph production — the maker journey: entry (atom-scope-interview) → spec (atom-graph-design per atom-graph-spec) → spec-accept → implement (atom-graph-writer: writes .yaml + registry entry + attached doc .graph-scheduler/docs/<name>.md, load-probe validated) → review → gate → accept. Single kind (graph), single operation (create)"
+      "path": "graph-generate.yaml"
     },
     {
       "name": "spec-implement",
-      "path": "spec-implement.yaml",
-      "description": "Implementation graph: spec-extract (produced change — upstream channel when composed / {args.changeName} standalone) → track gate (minimal/detailed) → track-owned closure (plain archive / atom-doc-lifecycle) → workflow-done. Pure implementation of an existing change — no spec generation; rework is the loop in arch-review-loop."
+      "path": "spec-implement.yaml"
     },
     {
       "name": "openspec-apply",
-      "path": "openspec-apply.yaml",
-      "description": "OpenSpec apply workflow: apply change → dual review → bounded auto-rework gate → plain archive (openspec-archive-change)"
+      "path": "openspec-apply.yaml"
     },
     {
       "name": "openspec-engineer",
-      "path": "openspec-engineer.yaml",
-      "description": "OpenSpec detailed implementation: spec synthesis → tickets → tdd implementation → dual review → bounded gate → approval → lifecycle closure (reverse-validated archive + ADR fold + index)"
+      "path": "openspec-engineer.yaml"
     },
     {
       "name": "arch-review-loop",
-      "path": "arch-review-loop.yaml",
-      "description": "Three-stage composition with a single loop: requirement production (arch-review — scope → report → accept) → round-continue content gate (branch-route: continue activates the proceed route / end when no Top Recommendation remains) → adopt (adopt-with-docs — confirms the report, appends dated appendix, produces the OpenSpec change) → implementation (spec-implement — consumes the change → track machinery → archive) → loop-gate (auto jump to requirement/scope-entry while Top Rec remains, bounded) → loop-accept (Loop again default, Complete = user ends)"
+      "path": "arch-review-loop.yaml"
     },
     {
       "name": "estate-maintain",
-      "path": "estate-maintain.yaml",
-      "description": "Estate maintenance graph: entry (trigger classification — domain-change/skill-change/proactive + workstream selection) → domains-index (atom-doc-maintain per atom-domain-spec) / specs-sync (atom-spec-maintain) / adr-align (atom-adr-maintain) → review (consistency gate + reverse-validation + read-only deployment-mirror check) → accept."
+      "path": "estate-maintain.yaml"
     },
     {
       "name": "release-prep",
-      "path": "release-prep.yaml",
-      "description": "Pre-release preparation — propose (release-prep-analyze: version from git tag history, deterministic + idempotent pre-tag, never executes git tag/commit/push) → plan-grill (grilling confirmation of every planned operation — interview, never auto-gated) → apply (release-prep-apply: version bump on release-line surfaces + CHANGELOG [Unreleased] fold per spec + README list sync vs ground truth, overwrite-style + verified) → release-review (approval; continue completes the run — final report prints tag/commit commands, user executes manually; jump re-runs a phase)."
+      "path": "release-prep.yaml"
     },
     {
       "name": "graph-maintain",
-      "path": "graph-maintain.yaml",
-      "description": "Graph file maintenance — the maintenance flow: entry (atom-scope-interview: target graph via graph_assets + maintenance intent) → audit (atom-graph-writer maintain mode: inventory compliance + content-vs-inventory + attached-doc sync) → propose (per-finding fix proposals) → approval (mandatory user gate) → execute (three-path bundle apply + load-probe) → review → gate → accept. Single kind (graph), single operation (maintain)"
+      "path": "graph-maintain.yaml"
+    },
+    {
+      "name": "first-principles-dev",
+      "path": "first-principles-dev.yaml"
     }
   ]
 }

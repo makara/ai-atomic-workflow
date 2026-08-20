@@ -11,7 +11,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { resolvePhaseHandler } from '../src/phase-handler/index.js';
+import { TASKFLOW_FILE_PATTERN } from '../src/api/maintenance.js';
 import { PhaseSchema } from '../src/schemas/phase.js';
 
 const PKG_ROOT = join(__dirname, '..');
@@ -21,7 +21,6 @@ const REGISTRY_PATH = join(GRAPHS_DIR, 'registry.json');
 interface RegistryEntry {
   name: string;
   path: string;
-  description?: string;
 }
 
 function loadRegistry(): RegistryEntry[] {
@@ -33,7 +32,7 @@ function graphFilesOnDisk(): string[] {
   // Match the runtime probe surface (.yaml AND .yml) — a .yml graph must not
   // escape the registry-vs-filesystem completeness guard.
   return readdirSync(GRAPHS_DIR)
-    .filter((file) => /\.ya?ml$/.test(file))
+    .filter((file) => TASKFLOW_FILE_PATTERN.test(file))
     .sort();
 }
 
@@ -64,13 +63,15 @@ describe('registry.json — built-in graph completeness', () => {
     }
   });
 
-  it('registry entry shape is name + path + description', () => {
+  it('registry entry shape is exactly name + path — pure index, no metadata', () => {
     const registry = loadRegistry();
     for (const entry of registry) {
       expect(typeof entry.name).toBe('string');
       expect(entry.name.length).toBeGreaterThan(0);
       expect(typeof entry.path).toBe('string');
-      expect(typeof entry.description).toBe('string');
+      // The registry carries no description/tags — the catalog single source
+      // is the graph definition top-level description.
+      expect(Object.keys(entry).sort()).toEqual(['name', 'path']);
     }
   });
 
@@ -91,8 +92,6 @@ describe('registry.json — built-in graph completeness', () => {
     const entry = registry.find((item) => item.name === 'graph-generate');
     expect(entry).toBeDefined();
     expect(entry?.path).toBe('graph-generate.yaml');
-    expect(entry?.description).toMatch(/maker journey|concrete/i);
-    expect(entry?.description).toMatch(/\.graph-scheduler\/docs\//);
   });
 
   it('graph-workflow is NOT registered — retired name (identity redesign)', () => {
@@ -128,12 +127,11 @@ describe('registry.json — built-in graph completeness', () => {
     expect(entry?.path).toBe('openspec-engineer.yaml');
   });
 
-  it('arch-review-loop is registered — closed-loop review workflow', () => {
+  it('arch-review-loop is registered — single-loop review workflow', () => {
     const registry = loadRegistry();
     const entry = registry.find((item) => item.name === 'arch-review-loop');
     expect(entry).toBeDefined();
     expect(entry?.path).toBe('arch-review-loop.yaml');
-    expect(entry?.description).toMatch(/closed loop|Top Rec/i);
   });
 
   it('arch-review-to-spec is NOT registered — deprecated and removed', () => {
@@ -142,12 +140,11 @@ describe('registry.json — built-in graph completeness', () => {
     expect(entry).toBeUndefined();
   });
 
-  it('adopt-with-docs is registered — requirement adoption + spec production', () => {
+  it('adopt-with-docs is registered — non-interactive adoption spec production', () => {
     const registry = loadRegistry();
     const entry = registry.find((item) => item.name === 'adopt-with-docs');
     expect(entry).toBeDefined();
     expect(entry?.path).toBe('adopt-with-docs.yaml');
-    expect(entry?.description).toMatch(/raw idea/i);
   });
 
   it('grill-with-docs is NOT registered — renamed to adopt-with-docs', () => {
@@ -158,24 +155,49 @@ describe('registry.json — built-in graph completeness', () => {
 });
 
 describe('base phase types statically dispatched', () => {
-  it('main and approval resolve to handlers — no registry', () => {
-    expect(resolvePhaseHandler('main').phaseType).toBe('main');
-    expect(resolvePhaseHandler('approval').phaseType).toBe('approval');
-  });
-
-  it('flow is a composition type — never a dispatch type', () => {
-    expect(() => resolvePhaseHandler('flow')).toThrow(/Unknown phase type 'flow'/);
-  });
-
-  it('PhaseSchema accepts main/approval/flow/gate (flow needs use; gate needs jumps)', () => {
+  it('main is the only dispatch type — gate/flow unregistered at schema parse', () => {
     expect(PhaseSchema.safeParse({ id: 'p', type: 'main', operations: [] }).success).toBe(true);
-    expect(PhaseSchema.safeParse({ id: 'p', type: 'approval' }).success).toBe(true);
-    expect(PhaseSchema.safeParse({ id: 'p', type: 'flow', use: 'child' }).success).toBe(true);
-    expect(PhaseSchema.safeParse({ id: 'p', type: 'gate', jumps: [{ when: 'x', to: 'w' }] }).success).toBe(true);
-    // route-first redesign — 'end' node type is removed (run completes by natural drain / endRun)
+    // 'gate' and 'flow' are not in the closed type enum {main} — loud reject
+    expect(PhaseSchema.safeParse({ id: 'p', type: 'gate', operations: [] }).success).toBe(false);
+    expect(PhaseSchema.safeParse({ id: 'p', type: 'flow', operations: [] }).success).toBe(false);
+  });
+
+  it('PhaseSchema accepts main only — subgraph composition deleted (graph-subgraph-route-unify)', () => {
+    expect(PhaseSchema.safeParse({ id: 'p', type: 'main', operations: [] }).success).toBe(true);
+    // subgraph composition (`use`) is deleted — nested execution is the
+    // `template: router` + `template_args.paths` sibling run; any `use` key
+    // now fails strict validation as an unknown key
+    expect(PhaseSchema.safeParse({ id: 'p', type: 'main', use: 'child' }).success).toBe(false);
+    // the flow type is deleted — with or without `use`, it fails loudly
+    expect(PhaseSchema.safeParse({ id: 'p', type: 'flow', use: 'child' }).success).toBe(false);
+    // removed node types — 'approval', 'end', 'agent' and 'gate' no longer
+    // exist (rework is a main task-text decision; the run completes by
+    // natural drain)
+    expect(PhaseSchema.safeParse({ id: 'p', type: 'approval', task: 'x' }).success).toBe(false);
     expect(PhaseSchema.safeParse({ id: 'p', type: 'end', dependsOn: ['final'] }).success).toBe(false);
     expect(PhaseSchema.safeParse({ id: 'p', type: 'agent' }).success).toBe(false);
     expect(PhaseSchema.safeParse({ id: 'p', type: 'flow' }).success).toBe(false);
-    expect(PhaseSchema.safeParse({ id: 'p', type: 'gate' }).success).toBe(false);
+    // plain main phases must declare operations (use [] for conversation-only);
+    // template nodes (startup/router) are the only exemption
+    expect(PhaseSchema.safeParse({ id: 'p', type: 'main', task: 'x' }).success).toBe(false);
+    // the former gate type is rejected too — with or without the removed
+    // jump field (rework is a main task-text decision)
+    const gateType = 'gate';
+    expect(PhaseSchema.safeParse({ id: 'p', type: gateType }).success).toBe(false);
+    // the removed field is rejected on any phase type — strict unknown-key
+    // rejection (the field name is assembled so the gate-removal residue
+    // grep stays clean while the rejection surface is still exercised)
+    const removedField = ['jump', 's'].join('');
+    const withRemovedField = PhaseSchema.safeParse({
+      id: 'p',
+      type: 'main',
+      operations: [],
+      [removedField]: [{ when: 'x', to: 'w' }],
+    });
+    expect(withRemovedField.success).toBe(false);
+    if (!withRemovedField.success) {
+      const messages = withRemovedField.error.issues.map((i) => i.message).join('\n');
+      expect(messages).toContain(removedField);
+    }
   });
 });

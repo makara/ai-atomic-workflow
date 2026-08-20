@@ -1,0 +1,138 @@
+name: first-principles-dev
+description: 'First-principles-prerequisite development flow — framework-hosted review, adoption, implementation, and fp-doc fold-back rounds with an inline flow loop.'
+$schema: ../schemas/workflow.schema.json
+version: 1.0.0
+flow:
+  - 'startup --> scope-entry'
+  - 'scope-entry --> requirement'
+  - 'requirement -->|revise| requirement'
+  - 'requirement --> adopting'
+  - 'adopting --> adopt'
+  - 'adopt --> implement'
+  - 'implement --> fp-doc-update'
+  - 'fp-doc-update -->|remaining| scope-entry'
+  - 'fp-doc-update -->|complete| __handoff'
+inventory:
+  - id: startup
+    type: main
+    goal: Runs the startup template — constraints session load + serena activation + jcodemunch indexing (full startup for this long code-review flow)
+    constraints:
+      - graph entry — dependsOn empty; scope-entry depends on it
+      - no user questions — self-decide startup steps
+  - id: scope-entry
+    type: main
+    goal: Executes atom-scope-interview to confirm the review scope, requirement/diff input, report input and output path THEN feeds the arch-review chain
+    constraints:
+      - never re-detects scope — round input comes from the prior fp-doc-update output (flow self-edge re-entry) or the activation args
+      - report path user-owned — confirm, never guess
+  - id: requirement
+    type: main
+    goal: Launches the arch-review graph as a sibling run (router template — single path auto-select) THEN presents the caller-declared accept/revise question (accept → adopting; revise → flow self-edge re-run)
+    constraints:
+      - router launch only — stage rules live in the arch-review graph
+      - accept loop = caller-declared questions data parameter (prompt/condition from the graph, never template semantics)
+  - id: adopting
+    type: main
+    goal: Runs grilling rounds to settle the adoption decisions (adoption goal + trace intent confirmed in the first-round frontier — absorbed from the deleted adopt-scope interview) THEN appends the record
+    constraints:
+      - never auto-gated
+      - never zero-question — whole frontier per round
+      - nothing to adopt (change_name empty) → direct end — the adopt stage never activates
+  - id: adopt
+    type: main
+    goal: Launches the adopt-with-docs graph as a sibling run (router template — single path auto-select) THEN reports the produced change
+    constraints:
+      - router launch only — stage rules live in the adopt-with-docs graph
+  - id: implement
+    type: main
+    goal: Launches the spec-implement graph as a sibling run (router template — single path auto-select) with the change name + adoption echo
+    constraints:
+      - router launch only — stage rules live in the spec-implement graph
+      - inputs pass via graph_start args, never composed streams
+  - id: fp-doc-update
+    type: main
+    goal: Folds requirement input and reasoning conclusions into the first-principles document THEN reports the revision and the round condition (remaining | complete)
+    constraints:
+      - per fp README update-maintenance contract — never invents premises
+      - round condition = flow-defined vocabulary (remaining → flow self-edge re-entry; complete → drain) — never a next-node choice
+constraints:
+  - "loop bound: the flow self-edge re-entry (fp-doc-update -->|remaining| scope-entry) is bounded by the round condition 'complete' or the user's direct end; retryCount tracks re-entries (never zeroed)"
+  - 'loop bound: the flow self-edge re-entry (requirement -->|revise| requirement) is bounded by the accept condition (accept = sequence default exit) or the requirement retryCount (never zeroed)'
+  - 'round condition vocabulary: remaining | complete — flow-defined, matched mechanically (zero machine validation axis; governance = graph-maintain flow audit + user maintenance)'
+  - 'requirement accept vocabulary: revise | accept — flow-defined; revise re-enters the requirement node, accept exits via the unlabeled sequence default'
+context:
+  - node:requirement
+phases:
+  - id: startup
+    type: main
+    dependsOn: []
+    template: startup
+  - id: scope-entry
+    type: main
+    dependsOn: [startup]
+    skill: atom-scope-interview
+    template: scope-entry
+    template_args:
+      terminal: fp-doc-update
+
+  - id: requirement
+    type: main
+    template: router
+    template_args:
+      paths: [arch-review]
+      questions:
+        - prompt: 'Requirement ready? accept: proceed to adoption; revise: adjust the requirement input and re-run the arch-review review.'
+          condition: revise
+    dependsOn: [scope-entry]
+    channels: [node:scope-entry]
+
+  - id: adopting
+    type: main
+    dependsOn: [requirement]
+    skill: grilling
+    template: adopting
+
+  - id: adopt
+    type: main
+    template: router
+    template_args:
+      paths: [adopt-with-docs]
+    dependsOn: [adopting]
+    channels: [node:adopting]
+
+  - id: implement
+    type: main
+    template: router
+    template_args:
+      paths: [spec-implement]
+    dependsOn: [adopt]
+    channels: [node:adopting]
+
+  - id: fp-doc-update
+    type: main
+    dependsOn: [implement]
+    skill: atom-doc-maintain
+    operations: [read, write, review]
+    channels:
+      - node:scope-entry
+      - node:requirement
+    task: |
+      Fold the requirement input and reasoning conclusions into the
+      first-principles document per docs/first-principles/README.md
+      update-maintenance contract: rewrite 'Problems and Fundamental
+      Requirements' (requirement/diff + implementation requirements),
+      correct 'Current Assumptions', update 'Fundamental Facts' verdicts
+      and 'Atomic Decomposition'; deviations recorded in Appendix A.
+      Inputs: requirement_input (node:scope-entry) + the report at
+      report_path (node:requirement — the arch-review sibling's output;
+      §2 contains the principles_output verbatim).
+      Target: docs/first-principles/development-flow.md — first run
+      creates it per the README initial-generation contract (head block +
+      sections; no Step 4/5 sections), later runs update in place; the
+      revision increments only when content changed.
+      Output contract: fp_doc_path, updated (true | false), revision,
+      round_condition (remaining | complete) — 'remaining' when the round
+      leaves open work (an un-adopted Top Recommendation / pending Open
+      Recommendations entry) AND the user has not direct-ended; the flow
+      self-edge re-enters scope-entry on 'remaining'; 'complete' otherwise
+      (drain).

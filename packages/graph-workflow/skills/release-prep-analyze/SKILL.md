@@ -8,7 +8,7 @@ version: 1.0.0
 last_updated: '2026-08-09'
 ---
 
-> **Runtime constraints** - load `atom-kernel` for High-Level Tool Registry (operation classes).
+> **Runtime constraints** - load `atom-kernel` for tool schemas (operation classes).
 
 Pre-release analysis - pure read-only function of git state. Version proposal + changelog inventory from one diff scan.
 
@@ -16,7 +16,7 @@ Pre-release analysis - pure read-only function of git state. Version proposal + 
 
 ### From upstream
 
-<!-- none - entry phase, reads git state directly -->
+<!-- none -->
 
 ### Reference skills
 
@@ -28,7 +28,7 @@ Pre-release analysis - pure read-only function of git state. Version proposal + 
 
 ### Files
 
-<!-- none - git state is the input -->
+<!-- none -->
 
 ## Entry
 

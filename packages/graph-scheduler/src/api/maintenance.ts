@@ -10,7 +10,7 @@
  */
 
 import { Effect } from 'effect';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 
@@ -18,15 +18,14 @@ import { validateProjectContext } from '../context/contracts.js';
 import { GraphRepository } from '../lib/db/repository.js';
 import { RegistryLoader } from '../registry-loader.js';
 import { SERVER_STARTED_AT } from '../runtime-start.js';
-import { ConfigFileSchema, WorkflowSchema } from '../schemas/index.js';
+import { ConfigFileSchema, unknownPhaseKeys, WorkflowSchema } from '../schemas/index.js';
 import type { PersistenceError, SchedulerError } from '../types.js';
 
 import type { FileSystem } from '../filesystem.js';
 import { loadGraphWithRegistry } from './graph-loader.js';
-import { dropSnapshotCursor, snapshotCursorCacheClear } from './snapshot.js';
 
-/** Workflow YAML file pattern — suffix-free (schema determines identity, not the file name). */
-const TASKFLOW_FILE_PATTERN = /\.ya?ml$/;
+/** Workflow YAML file pattern — suffix-free (schema determines identity, not the file name). Single source — no inline copies. */
+export const TASKFLOW_FILE_PATTERN = /\.ya?ml$/;
 
 /** Scan inputs — resolved by the runtime facade (config resolution lives there). */
 export interface IGraphInitScan {
@@ -162,12 +161,25 @@ export function graphInit(
           continue;
         }
         // Health check validates against the Workflow schema — not YAML-parse
-        // only: schema violations surface in the health report.
+        // only: schema violations surface in the health report. When schema
+        // validation fails, run the tolerant unknown-key audit — extra phase
+        // keys are reported as per-graph problems (frontend notification →
+        // graph-maintain cleanup) instead of a bare validation error.
         const schemaResult = WorkflowSchema.safeParse(parsed);
         if (!schemaResult.success) {
-          errors.push(
-            `${filePath}: schema validation failed — ${schemaResult.error.issues.map((i) => i.message).join('; ')}`,
-          );
+          const findings = unknownPhaseKeys(parsed);
+          if (findings.length > 0) {
+            const details = findings.map((f) => `${f.phaseId}: ${f.keys.join(', ')}`).join('; ');
+            graphProblems.push({
+              name: typeof (parsed as { name?: unknown }).name === 'string' ? (parsed as { name: string }).name : '',
+              filePath,
+              problems: [`schema-unknown phase keys: ${details} — run graph-maintain to remove the extra fields`],
+            });
+          } else {
+            errors.push(
+              `${filePath}: schema validation failed — ${schemaResult.error.issues.map((i) => i.message).join('; ')}`,
+            );
+          }
           continue;
         }
         const graph = parsed as Record<string, unknown>;
@@ -183,8 +195,18 @@ export function graphInit(
         const name = typeof graph.name === 'string' ? graph.name : '';
         const loaded = yield* Effect.either(loadGraphWithRegistry(name));
         if (loaded._tag === 'Right') {
-          if (loaded.right.resolvedPath === filePath) {
-            graphProblems.push({ name, filePath, problems: loaded.right.problems });
+          if (loaded.right.meta.resolvedPath === filePath) {
+            // Flow-presence machine axis (graph-flow-layout rule): a builtin
+            // graph SHALL declare a top-level `flow` block — the canonical
+            // transition surface. Absence surfaces as a per-graph problem
+            // (frontend notification → graph-maintain cleanup).
+            const problems = [...loaded.right.meta.problems];
+            if (dir === scan.builtinGraphsDir && graph.flow === undefined) {
+              problems.push(
+                "builtin graph declares no top-level 'flow' block (canonical layout — graph-flow-layout rule); declare the transition surface or run graph-maintain",
+              );
+            }
+            graphProblems.push({ name, filePath, problems });
           }
         } else {
           errors.push(`${filePath}: contract validation failed — ${loaded.left.message}`);
@@ -215,7 +237,6 @@ export function graphInit(
  *
  * Deletes all runs with fsm_state = 'completed'. If `before` is provided,
  * only deletes runs whose updated_at is before the given ISO timestamp.
- * The snapshot cursor is dropped for every deleted run.
  *
  * @param before — optional ISO 8601 cutoff; runs updated before this are deleted
  * @returns number of runs deleted
@@ -224,9 +245,6 @@ export function cleanCompleted(before?: string): Effect.Effect<number, Persisten
   return Effect.gen(function* () {
     const repo = yield* GraphRepository;
     const deletedIds = yield* repo.deleteCompletedRuns(before);
-    for (const runId of deletedIds) {
-      dropSnapshotCursor(runId);
-    }
     return deletedIds.length;
   });
 }
@@ -246,9 +264,6 @@ export function cleanAll(): Effect.Effect<number, PersistenceError, GraphReposit
       yield* repo.deleteRun(run.runId);
       count++;
     }
-
-    // Every run deleted — cursors must follow, no stale state left behind
-    snapshotCursorCacheClear();
 
     return count;
   });

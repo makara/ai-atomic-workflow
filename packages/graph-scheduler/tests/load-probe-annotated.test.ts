@@ -8,15 +8,13 @@
  * (convention-layer declaration warn, never error) still fires for bare
  * convention paths declared at graph level.
  */
-import { Effect } from 'effect';
 import { describe, expect, it } from 'vitest';
-import { toWorkflowGraph } from '../src/api/graph-loader.js';
 import { validateGraphContracts } from '../src/context/contracts.js';
-import type { Workflow } from '../src/graph-definition.js';
+import { WorkflowSchema } from '../src/schemas/workflow.js';
 
 describe('load probe — annotated convention entry (reported defect)', () => {
-  it('graph load succeeds with annotated convention entry in phase channels', async () => {
-    const graph: Workflow = {
+  it('graph load succeeds with annotated convention entry in phase channels', () => {
+    const graph = {
       name: 'probe-graph',
 
       phases: [
@@ -36,8 +34,11 @@ describe('load probe — annotated convention entry (reported defect)', () => {
       ],
     };
     // Schema/phase validation passes — the graph adapts cleanly.
-    const adapted = await Effect.runPromise(toWorkflowGraph(graph));
-    expect(adapted.phases.map((p) => p.id)).toEqual(['p']);
+    const parsed = WorkflowSchema.safeParse(graph);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.phases.map((p) => p.id)).toEqual(['p']);
+    }
 
     // Machine checks: phase channels pass through unparsed — annotation never
     // interpreted, no errors, no convention warning at phase level.

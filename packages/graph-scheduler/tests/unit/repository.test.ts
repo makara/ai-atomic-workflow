@@ -1,9 +1,13 @@
 /**
  * Unit tests for lib/db/repository.ts — direct DAO CRUD operations.
  *
- * Uses :memory: libsql for isolation. Tests CRUD round-trips,
- * node state batch ops, and error paths. No Effect Layer wiring needed —
- * buildService + Effect.runPromise directly.
+ * Uses :memory: libsql for isolation. Tests run-record CRUD round-trips,
+ * checkpoint cascade deletion, list/cleanup maintenance, and idempotent
+ * initialization. The node_states table and its routes column are gone
+ * (syntax v2): execution state lives in LangGraph checkpoints, managed by
+ * the adapter — this DAO owns run records only.
+ *
+ * No Effect Layer wiring needed — buildService + Effect.runPromise directly.
  *
  * @module
  */
@@ -13,8 +17,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { migrate } from '../../src/lib/db/migration.js';
 import { buildService, type GraphRepository } from '../../src/lib/db/repository.js';
-import { SCHEMA_VERSION } from '../../src/lib/db/schema.js';
-import type { NotFoundError } from '../../src/types.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -37,6 +39,18 @@ function makeRepo(): GraphRepository['Type'] {
   // Run migration synchronously (DDL is fast, no I/O wait).
   Effect.runSync(migrate(db));
   return buildService(db);
+}
+
+/** Simulate LangGraph checkpoint state for a run thread. */
+function seedCheckpoint(db: ReturnType<typeof Database>, runId: string, checkpointId = 'cp1'): void {
+  db.prepare(
+    `INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata, created_at)
+     VALUES (?, '', ?, NULL, 'json', '{}', '{}', ?)`,
+  ).run(runId, checkpointId, '2026-08-01T00:00:00.000Z');
+  db.prepare(
+    `INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, value)
+     VALUES (?, '', ?, 'task1', 0, 'nodeStatus', 'json', '{}')`,
+  ).run(runId, checkpointId);
 }
 
 // ---------------------------------------------------------------------------
@@ -78,6 +92,24 @@ describe('run CRUD round-trip', () => {
     await expect(Effect.runPromise(repo.getRun('r1'))).rejects.toThrow();
   });
 
+  it('deleteRun cascades — checkpoint rows removed with the run', async () => {
+    const db = new Database(':memory:');
+    Effect.runSync(migrate(db));
+    const repo = buildService(db);
+    await Effect.runPromise(repo.createRun('r1', 'test-graph'));
+    seedCheckpoint(db, 'r1');
+
+    await Effect.runPromise(repo.deleteRun('r1'));
+
+    const cps = db.prepare('SELECT COUNT(*) AS n FROM checkpoints WHERE thread_id = ?').get('r1') as { n: number };
+    expect(cps.n).toBe(0);
+    const writes = db.prepare('SELECT COUNT(*) AS n FROM checkpoint_writes WHERE thread_id = ?').get('r1') as {
+      n: number;
+    };
+    expect(writes.n).toBe(0);
+    await expect(Effect.runPromise(repo.getRun('r1'))).rejects.toThrow();
+  });
+
   it('getRun for nonexistent id throws PersistenceError', async () => {
     try {
       await Effect.runPromise(repo.getRun('nonexistent'));
@@ -85,81 +117,6 @@ describe('run CRUD round-trip', () => {
     } catch (err) {
       expect(errorTag(err)).toBe('PersistenceError');
     }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Node state operations — batch create, read, update
-// ---------------------------------------------------------------------------
-
-describe('node state operations', () => {
-  let repo = makeRepo();
-
-  afterEach(() => {
-    repo = makeRepo();
-  });
-
-  const NODES = [{ nodeId: 'n1' }, { nodeId: 'n2' }, { nodeId: 'n3' }] as const;
-
-  it('createNodeStates → getNodeStates returns all nodes in insertion order', async () => {
-    await Effect.runPromise(repo.createRun('r1', 'test-graph'));
-    await Effect.runPromise(repo.createNodeStates('r1', NODES));
-
-    const states = await Effect.runPromise(repo.getNodeStates('r1'));
-    expect(states.length).toBe(3);
-    expect(states[0].nodeId).toBe('n1');
-    expect(states[1].nodeId).toBe('n2');
-    expect(states[2].nodeId).toBe('n3');
-    // Default status is 'pending'
-    expect(states[0].status).toBe('pending');
-  });
-
-  it('updateNodeState changes status and retryCount', async () => {
-    await Effect.runPromise(repo.createRun('r1', 'test-graph'));
-    await Effect.runPromise(repo.createNodeStates('r1', NODES));
-    await Effect.runPromise(repo.updateNodeState('r1', 'n1', { status: 'active', retryCount: 1 }));
-
-    const states = await Effect.runPromise(repo.getNodeStates('r1'));
-    expect(states[0].status).toBe('active');
-    expect(states[0].retryCount).toBe(1);
-    // Other nodes unchanged
-    expect(states[1].status).toBe('pending');
-    expect(states[2].status).toBe('pending');
-  });
-
-  it('updateNodeState with timestamps sets startedAt/completedAt', async () => {
-    await Effect.runPromise(repo.createRun('r1', 'test-graph'));
-    await Effect.runPromise(repo.createNodeStates('r1', NODES));
-
-    const now = new Date().toISOString();
-    await Effect.runPromise(
-      repo.updateNodeState('r1', 'n2', {
-        status: 'done',
-        startedAt: now,
-        completedAt: now,
-      }),
-    );
-
-    const states = await Effect.runPromise(repo.getNodeStates('r1'));
-    expect(states[1].status).toBe('done');
-    expect(states[1].startedAt).toBe(now);
-    expect(states[1].completedAt).toBe(now);
-  });
-
-  it('getNodeStates for run with no nodes returns empty', async () => {
-    await Effect.runPromise(repo.createRun('r1', 'test-graph'));
-
-    const states = await Effect.runPromise(repo.getNodeStates('r1'));
-    expect(states.length).toBe(0);
-  });
-
-  it('deleteRun cascades — node states removed', async () => {
-    await Effect.runPromise(repo.createRun('r1', 'test-graph'));
-    await Effect.runPromise(repo.createNodeStates('r1', NODES));
-    await Effect.runPromise(repo.deleteRun('r1'));
-
-    const states = await Effect.runPromise(repo.getNodeStates('r1'));
-    expect(states.length).toBe(0);
   });
 });
 
@@ -222,6 +179,25 @@ describe('deleteCompletedRuns', () => {
     const deleted = await Effect.runPromise(repo.deleteCompletedRuns());
     expect(deleted).toEqual([]);
   });
+
+  it('cascades checkpoints for the deleted completed runs', async () => {
+    const db = new Database(':memory:');
+    Effect.runSync(migrate(db));
+    const repo = buildService(db);
+    await Effect.runPromise(repo.createRun('r1', 'g1'));
+    await Effect.runPromise(repo.updateRunStatus('r1', 'completed'));
+    seedCheckpoint(db, 'r1');
+
+    const deleted = await Effect.runPromise(repo.deleteCompletedRuns());
+    expect(deleted).toEqual(['r1']);
+
+    const cps = db.prepare('SELECT COUNT(*) AS n FROM checkpoints WHERE thread_id = ?').get('r1') as { n: number };
+    expect(cps.n).toBe(0);
+    const writes = db.prepare('SELECT COUNT(*) AS n FROM checkpoint_writes WHERE thread_id = ?').get('r1') as {
+      n: number;
+    };
+    expect(writes.n).toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -241,106 +217,129 @@ describe('initialize', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Schema migration — single final shape (SCHEMA_VERSION = 1)
-// No versioned ladder, no interim repairs: FINAL_DDL applies idempotently;
-// a fresh database records version 1; an existing final-shape database is
-// left untouched. mode/constraints never shipped in any version.
+// Schema migration — single final shape (no version meta-table)
+// graph_runs: identity/progress/args/timestamps only (routes column removed,
+// syntax v2). Execution state lives in the LangGraph checkpoint tables.
+// No versioned ladder, no version table, no interim repairs: FINAL_DDL
+// applies idempotently.
 // ---------------------------------------------------------------------------
 
 describe('schema migration — single final shape', () => {
   function finalShapeColumns(db: ReturnType<typeof Database>): {
     runCols: string[];
-    nodeCols: string[];
-    versionCols: string[];
+    checkpointCols: string[];
+    writesCols: string[];
   } {
     return {
       runCols: (db.prepare('PRAGMA table_info(graph_runs)').all() as Array<{ name: string }>).map((c) => c.name),
-      nodeCols: (db.prepare('PRAGMA table_info(node_states)').all() as Array<{ name: string }>).map((c) => c.name),
-      versionCols: (db.prepare('PRAGMA table_info(schema_version)').all() as Array<{ name: string }>).map(
+      checkpointCols: (db.prepare('PRAGMA table_info(checkpoints)').all() as Array<{ name: string }>).map(
+        (c) => c.name,
+      ),
+      writesCols: (db.prepare('PRAGMA table_info(checkpoint_writes)').all() as Array<{ name: string }>).map(
         (c) => c.name,
       ),
     };
   }
 
-  it('migrate on a fresh database creates the final tables and records version 1', () => {
+  it('migrate on a fresh database creates the final tables', () => {
     const db = new Database(':memory:');
 
     Effect.runSync(migrate(db));
 
-    // Version marker records the single final version.
-    const ver = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-    expect(ver.v).toBe(SCHEMA_VERSION);
+    // Final shape — run identity/progress/args/timestamps only; no routes,
+    // mode, or constraints columns; node_states is gone entirely.
+    const { runCols, checkpointCols, writesCols } = finalShapeColumns(db);
+    expect(runCols).toEqual(['run_id', 'graph_name', 'fsm_state', 'args', 'created_at', 'updated_at']);
+    expect(checkpointCols).toEqual(
+      expect.arrayContaining(['thread_id', 'checkpoint_ns', 'checkpoint_id', 'checkpoint', 'metadata', 'created_at']),
+    );
+    expect(writesCols).toEqual(
+      expect.arrayContaining(['thread_id', 'checkpoint_id', 'task_id', 'idx', 'channel', 'value']),
+    );
 
-    // Final shape — routes inline on graph_runs; no legacy artifacts.
-    const { runCols, nodeCols, versionCols } = finalShapeColumns(db);
-    expect(runCols).toContain('routes');
-    expect(runCols).not.toContain('mode');
-    expect(runCols).not.toContain('constraints');
-    expect(nodeCols).not.toContain('topo_order');
-    expect(versionCols).toEqual(['version']);
-    const indexes = db
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_node_states_topo'")
+    // No version meta-table — the schema has no ladder to track.
+    const versionTable = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'")
       .all() as Array<{ name: string }>;
-    expect(indexes).toHaveLength(0);
+    expect(versionTable).toHaveLength(0);
 
-    // New run persists (no mode/constraints params).
+    // node_states and its legacy indexes no longer exist
+    const nodeStates = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'node_states'")
+      .all() as Array<{ name: string }>;
+    expect(nodeStates).toHaveLength(0);
+
+    // New run persists (no mode/constraints/routes params).
     const repo = buildService(db);
     Effect.runSync(repo.createRun('new-run', 'g', { changeName: 'x' }));
     const run = Effect.runSync(repo.getRun('new-run'));
     expect(run.args).toEqual({ changeName: 'x' });
-    expect(run.routes).toEqual({});
+    expect(run).toEqual({
+      runId: 'new-run',
+      graphName: 'g',
+      fsmState: 'idle',
+      args: { changeName: 'x' },
+      createdAt: expect.any(String),
+      updatedAt: expect.any(String),
+    });
 
-    // Idempotent — second migrate is a no-op (version row not duplicated).
-    Effect.runSync(migrate(db));
-    const verAfter = db.prepare('SELECT COUNT(*) AS n FROM schema_version').get() as { n: number };
-    expect(verAfter.n).toBe(1);
+    // Idempotent — second migrate is a no-op.
+    expect(() => Effect.runSync(migrate(db))).not.toThrow();
   });
 
-  it('migrate on an existing final-shape database is idempotent — rows preserved, version untouched', () => {
+  it('migrate on an existing final-shape database is idempotent — rows preserved, shape untouched', () => {
     const db = new Database(':memory:');
-    // Simulate an already-migrated database with data.
+    // Simulate an already-migrated database with data (incl. a legacy
+    // schema_version table from an older bootstrap — left untouched, the
+    // final shape never writes it).
     db.exec(`
       CREATE TABLE graph_runs (
         run_id           TEXT PRIMARY KEY,
         graph_name       TEXT NOT NULL,
         fsm_state        TEXT NOT NULL DEFAULT 'idle',
         args             TEXT,
-        routes           TEXT NOT NULL DEFAULT '{}',
         created_at       TEXT NOT NULL,
         updated_at       TEXT NOT NULL
       );
-      CREATE TABLE node_states (
-        run_id        TEXT NOT NULL,
-        node_id       TEXT NOT NULL,
-        status        TEXT NOT NULL DEFAULT 'pending',
-        retry_count   INTEGER NOT NULL DEFAULT 0,
-        started_at    TEXT,
-        completed_at  TEXT,
-        PRIMARY KEY (run_id, node_id),
-        FOREIGN KEY (run_id) REFERENCES graph_runs(run_id)
+      CREATE TABLE checkpoints (
+        thread_id            TEXT NOT NULL,
+        checkpoint_ns        TEXT NOT NULL DEFAULT '',
+        checkpoint_id        TEXT NOT NULL,
+        parent_checkpoint_id TEXT,
+        type                 TEXT NOT NULL DEFAULT 'json',
+        checkpoint           BLOB NOT NULL,
+        metadata             BLOB NOT NULL,
+        created_at           TEXT NOT NULL,
+        PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
+      );
+      CREATE TABLE checkpoint_writes (
+        thread_id     TEXT NOT NULL,
+        checkpoint_ns TEXT NOT NULL DEFAULT '',
+        checkpoint_id TEXT NOT NULL,
+        task_id       TEXT NOT NULL,
+        idx           INTEGER NOT NULL,
+        channel       TEXT NOT NULL,
+        type          TEXT NOT NULL DEFAULT 'json',
+        value         BLOB NOT NULL,
+        PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
       );
       CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
       INSERT INTO schema_version (version) VALUES (1);
-      INSERT INTO graph_runs (run_id, graph_name, fsm_state, args, routes, created_at, updated_at)
-      VALUES ('old-run', 'legacy-graph', 'completed', NULL, '{}', '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z');
+      INSERT INTO graph_runs (run_id, graph_name, fsm_state, args, created_at, updated_at)
+      VALUES ('old-run', 'legacy-graph', 'completed', NULL, '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z');
     `);
 
     Effect.runSync(migrate(db));
 
-    // Rows preserved, version unchanged, shape untouched.
-    const ver = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-    expect(ver.v).toBe(SCHEMA_VERSION);
-    const verCount = db.prepare('SELECT COUNT(*) AS n FROM schema_version').get() as { n: number };
-    expect(verCount.n).toBe(1);
-    const row = db.prepare('SELECT graph_name, routes FROM graph_runs WHERE run_id = ?').get('old-run') as {
+    // Rows preserved, shape untouched.
+    const row = db.prepare('SELECT graph_name FROM graph_runs WHERE run_id = ?').get('old-run') as {
       graph_name: string;
-      routes: string;
     };
     expect(row.graph_name).toBe('legacy-graph');
-    expect(row.routes).toBe('{}');
-    const { runCols, nodeCols, versionCols } = finalShapeColumns(db);
-    expect(runCols).toContain('routes');
-    expect(nodeCols).not.toContain('topo_order');
-    expect(versionCols).toEqual(['version']);
+    const { runCols, checkpointCols } = finalShapeColumns(db);
+    expect(runCols).toEqual(['run_id', 'graph_name', 'fsm_state', 'args', 'created_at', 'updated_at']);
+    expect(checkpointCols).toEqual(
+      expect.arrayContaining(['thread_id', 'checkpoint_ns', 'checkpoint_id', 'checkpoint', 'metadata', 'created_at']),
+    );
   });
 });

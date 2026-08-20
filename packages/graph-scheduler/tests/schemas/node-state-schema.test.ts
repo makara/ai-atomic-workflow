@@ -60,13 +60,10 @@ describe('NodeStateSchema — happy path', () => {
     expect(result.success).toBe(false);
   });
 
-  it('parses aborted status — FORCE_END termination state (branch-routing redesign, skipped removed)', () => {
+  it('rejects aborted status — force-end writes no per-node status', () => {
     const raw = { runId: 'run-1', status: 'aborted', retryCount: 0 };
     const result = NodeStateSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.status).toBe('aborted');
-    }
+    expect(result.success).toBe(false);
   });
 
   it('rejects skipped status — no skip state exists (branch-routing redesign)', () => {
@@ -149,10 +146,15 @@ describe('NodeStateSchema — boundary', () => {
     }
   });
 
-  it('allows negative retryCount (no range validation by default)', () => {
+  it('rejects negative retryCount — non-negative integer constraint', () => {
     const raw = { runId: 'run-1', status: 'pending', retryCount: -1 };
     const result = NodeStateSchema.safeParse(raw);
-    // z.number() allows negative values by default
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects fractional retryCount — integer constraint', () => {
+    const raw = { runId: 'run-1', status: 'pending', retryCount: 1.5 };
+    const result = NodeStateSchema.safeParse(raw);
+    expect(result.success).toBe(false);
   });
 });

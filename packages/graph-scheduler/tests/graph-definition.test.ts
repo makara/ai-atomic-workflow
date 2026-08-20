@@ -11,9 +11,10 @@
 
 import { Effect, Exit, Layer } from 'effect';
 import { describe, expect, it } from 'vitest';
+import { resolveArgs } from '../src/adapter.js';
 import { FileSystem, FileSystemError } from '../src/filesystem.js';
-import { resolveArgs } from '../src/flow-flatten.js';
 import { loadGraph } from '../src/graph-definition.js';
+import { PhaseSchema } from '../src/schemas/phase.js';
 import type { GraphDefinitionError } from '../src/types.js';
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
@@ -184,6 +185,29 @@ describe('loadGraph — version policy', () => {
     }
   });
 
+  it('rejects an unknown phase key at schema validation — uniform strict rejection', async () => {
+    const filename = 'test-graph.yaml';
+    const yaml = `${validWorkflowYaml()}    routing:\n      actions: []\n`;
+    const exit = await Effect.runPromiseExit(
+      loadGraph('test-graph').pipe(Effect.provide(mockFileSystemLayer({ [filename]: yaml }))),
+    );
+    expect(exit._tag).toBe('Failure');
+    if (exit._tag === 'Failure') {
+      const err = (exit.cause as { _tag: string; error: GraphDefinitionError }).error;
+      expect(err.message).toContain('Schema validation failed');
+      expect(err.violations?.join('\n')).toContain('routing');
+    }
+  });
+
+  it('preserves unknown top-level keys — WorkflowSchema passthrough retained', async () => {
+    const filename = 'test-graph.yaml';
+    const yaml = validWorkflowYaml() + 'customTopLevel:\n  foo: bar\n';
+    const exit = await Effect.runPromiseExit(
+      loadGraph('test-graph').pipe(Effect.provide(mockFileSystemLayer({ [filename]: yaml }))),
+    );
+    expect(exit._tag).toBe('Success');
+  });
+
   it('rejects a malformed $schema reference loudly', async () => {
     const filename = 'test-graph.yaml';
     const yaml = validWorkflowYaml() + '$schema: "bad uri with spaces"\n';
@@ -229,5 +253,72 @@ describe('loadGraph — $schema resolution', () => {
 describe('resolveArgs — {args.X} interpolation', () => {
   it('interpolates args into templates', () => {
     expect(resolveArgs('hello {args.name}', { name: 'world' })).toBe('hello world');
+  });
+});
+
+describe('template enum — one template one file', () => {
+  const phase = (template: string, templateArgs?: unknown) => ({
+    id: 'p1',
+    type: 'main',
+    dependsOn: [],
+    template,
+    ...(templateArgs !== undefined ? { template_args: templateArgs } : {}),
+  });
+
+  it('accepts the per-node templates with their data args', () => {
+    expect(PhaseSchema.safeParse(phase('scope-entry', { terminal: 'round-report' })).success).toBe(true);
+    expect(PhaseSchema.safeParse(phase('adopting')).success).toBe(true);
+  });
+
+  it('rejects the deleted accept and adopt-scope templates', () => {
+    expect(PhaseSchema.safeParse(phase('review-accept')).success).toBe(false);
+    expect(PhaseSchema.safeParse(phase('adopt-accept')).success).toBe(false);
+    expect(PhaseSchema.safeParse(phase('adopt-scope')).success).toBe(false);
+  });
+
+  it('accepts the router questions data parameter', () => {
+    expect(
+      PhaseSchema.safeParse(
+        phase('router', { paths: ['arch-review'], questions: [{ prompt: 'Requirement ready?', condition: 'revise' }] }),
+      ).success,
+    ).toBe(true);
+  });
+
+  it('rejects malformed questions entries', () => {
+    expect(PhaseSchema.safeParse(phase('router', { paths: ['a'], questions: [{ prompt: 'x' }] })).success).toBe(false);
+    expect(PhaseSchema.safeParse(phase('router', { paths: ['a'], questions: 'nope' })).success).toBe(false);
+  });
+
+  it('rejects questions on non-router templates', () => {
+    expect(
+      PhaseSchema.safeParse(
+        phase('scope-entry', { terminal: 'round-report', questions: [{ prompt: 'x', condition: 'y' }] }),
+      ).success,
+    ).toBe(false);
+    expect(PhaseSchema.safeParse(phase('adopting', { questions: [{ prompt: 'x', condition: 'y' }] })).success).toBe(
+      false,
+    );
+  });
+
+  it('rejects the framework-chain factory form', () => {
+    const result = PhaseSchema.safeParse(phase('framework-chain', { node: 'scope-entry', terminal: 'round-report' }));
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects scope-entry without the terminal data parameter', () => {
+    const result = PhaseSchema.safeParse(phase('scope-entry'));
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects the node discriminator in template_args', () => {
+    const result = PhaseSchema.safeParse(phase('scope-entry', { node: 'scope-entry', terminal: 'round-report' }));
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects mixed router/scope-entry args', () => {
+    const result = PhaseSchema.safeParse(phase('scope-entry', { terminal: 'round-report', paths: ['a'] }));
+    expect(result.success).toBe(false);
+    const router = PhaseSchema.safeParse(phase('router', { paths: ['a'], terminal: 'round-report' }));
+    expect(router.success).toBe(false);
   });
 });

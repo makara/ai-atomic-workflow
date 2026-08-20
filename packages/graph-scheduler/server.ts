@@ -1,7 +1,7 @@
 /**
  * Graph-Scheduler MCP Server — stdio transport entry point.
  *
- * Exposes 9 MCP tools (One-Per-Action pattern) wrapping SchedulerRuntime.
+ * Exposes 10 MCP tools (One-Per-Action pattern) wrapping SchedulerRuntime.
  * Lifecycle managed by platform MCP infrastructure (configured via mcp.json).
  *
  * Environment variables:
@@ -42,9 +42,7 @@ const TAG_TO_CODE: Record<string, string> = {
   PersistenceError: 'PERSISTENCE_ERROR',
   FileSystemError: 'FILE_SYSTEM_ERROR',
   RegistryLoadError: 'REGISTRY_LOAD_ERROR',
-  DispatchConfigError: 'DISPATCH_CONFIG_ERROR',
   ConfigError: 'CONFIG_ERROR',
-  ModeRequiredError: 'MODE_REQUIRED',
 };
 
 /** Extract _tag from a tagged error object. */
@@ -79,65 +77,72 @@ export const GraphStartSchema = z
     args: z
       .record(z.string(), z.unknown())
       .optional()
-      .describe(
-        'Optional — graph invocation arguments. Values are referenced as {args.key} in task templates; args.mode (manual | auto) is the activation run mode — REQUIRED at invocation (absent → MODE_REQUIRED)',
-      ),
+      .describe('Optional — graph invocation arguments. Values are referenced as {args.key} in task templates'),
   })
-  .strict()
-  .superRefine((data, ctx) => {
-    // Activation mode — must be manual | auto when present; absence is
-    // handled at the runtime layer (ModeRequiredError, no run created).
-    const mode = data.args?.mode;
-    if (mode !== undefined && typeof mode !== 'string') {
-      ctx.addIssue({ code: 'custom', path: ['args', 'mode'], message: 'args.mode must be a string (manual | auto)' });
-    }
-  });
+  .strict();
 
 export const GraphAdvanceSchema = z
   .object({
     runId: z.string().min(1).describe('Graph run ID — UUID returned by graph_start'),
     nodeId: z.string().min(1).describe('ID of the completed node'),
-    branchTo: z
+    end: z
+      .boolean()
+      .optional()
+      .describe(
+        'Optional — direct-end decision: report the node as done and complete the run as `completed` without resuming the graph (adapter-level completion); unfinished nodes stay pending.',
+      ),
+    condition: z
       .string()
       .min(1)
       .optional()
       .describe(
-        'Optional — routing decision target (route-first). Gate: backward jump target (rework — terminal upstream node). Approval: branch-route target (node or route id — activates the route)',
+        "Optional — the reported flow-defined condition value (normal advance): the backend matches it against the node's outgoing flow-edge labels (transition table) and activates the matched target; a condition matching no edge fails loudly (missed-condition guard). The value is flow vocabulary, never a next-node choice.",
       ),
-    endRun: z
-      .boolean()
+    jump: z
+      .string()
+      .min(1)
       .optional()
-      .describe('Optional — approval `end` action: complete the run immediately (no end node)'),
+      .describe(
+        "Optional — forced rework jump target (graph-internal): restricted to the reported node's topological ancestors plus `__handoff`; forward jumps are rejected loudly. Resets the target and its downstream terminal nodes to pending (retryCount incremented, never zeroed, upstream kept).",
+      ),
   })
   .strict();
 
-const GraphJumpSchema = z.object({
-  runId: z.string().min(1).describe('Graph run ID'),
-  targetPhaseId: z.string().min(1).describe('Target phase ID — execution starts from this node after the jump'),
-});
+export const GraphJumpSchema = z
+  .object({
+    runId: z.string().min(1).describe('Graph run ID'),
+    targetPhaseId: z.string().min(1).describe('Target phase ID — execution starts from this node after the jump'),
+  })
+  .strict();
 
-const GraphForceEndSchema = z.object({
-  runId: z.string().min(1).describe('Graph run ID — the run to force-terminate'),
-});
+export const GraphForceEndSchema = z
+  .object({
+    runId: z.string().min(1).describe('Graph run ID — the run to force-terminate'),
+  })
+  .strict();
 
-const GraphStatusSchema = z.object({
-  runId: z.string().min(1).describe('Graph run ID'),
-});
+export const GraphStatusSchema = z
+  .object({
+    runId: z.string().min(1).describe('Graph run ID'),
+  })
+  .strict();
 
-const GraphListSchema = z.object({});
+export const GraphListSchema = z.object({}).strict();
 
-const GraphInitSchema = z.object({});
+export const GraphInitSchema = z.object({}).strict();
 
-const GraphCleanCompletedSchema = z.object({
-  before: z
-    .string()
-    .optional()
-    .describe('ISO 8601 timestamp — clean up runs completed before this time. Omit to clean all completed runs'),
-});
+export const GraphCleanCompletedSchema = z
+  .object({
+    before: z
+      .string()
+      .optional()
+      .describe('ISO 8601 timestamp — clean up runs completed before this time. Omit to clean all completed runs'),
+  })
+  .strict();
 
-const GraphCleanAllSchema = z.object({});
+export const GraphCleanAllSchema = z.object({}).strict();
 
-const GraphAssetsSchema = z.object({});
+export const GraphAssetsSchema = z.object({}).strict();
 
 // ── MCP Server ───────────────────────────────────────────────────────
 
@@ -177,7 +182,7 @@ server.tool(
   async (args) => {
     const rt = await getRuntime();
     try {
-      const result = await rt.graphAdvance(args.runId, args.nodeId, args.branchTo, args.endRun);
+      const result = await rt.graphAdvance(args.runId, args.nodeId, args.end, args.condition, args.jump);
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result) }],
       };
@@ -195,7 +200,7 @@ server.tool(
 // Tool 3: graph_jump — directed jump to target phase
 server.tool(
   'graph_jump',
-  'Jump to a specific node — re-run a phase after an approval REWORK decision. Resets the target node and its downstream terminal nodes to pending (upstream kept).',
+  'Jump to a specific node — re-run a phase after a rework decision. Resets the target node and its downstream terminal nodes to pending (upstream kept).',
   GraphJumpSchema.shape,
   async (args) => {
     const rt = await getRuntime();
@@ -218,14 +223,14 @@ server.tool(
 // Tool 4: graph_force_end — force terminate a run
 server.tool(
   'graph_force_end',
-  'Force-terminate a graph run. All unfinished nodes are marked aborted; run status becomes terminated. Irreversible.',
+  'Force-terminate a graph run. Run status becomes terminated; irreversible. Completed/terminated runs are a no-op. Returns the unified envelope { snapshot, node: null }.',
   GraphForceEndSchema.shape,
   async (args) => {
     const rt = await getRuntime();
     try {
-      const snapshot = await rt.graphForceEnd(args.runId);
+      const { snapshot, node } = await rt.graphForceEnd(args.runId);
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify(snapshot) }],
+        content: [{ type: 'text' as const, text: JSON.stringify({ snapshot, node }) }],
       };
     } catch (err) {
       const { message, code } = toMcpError(err);
@@ -241,7 +246,7 @@ server.tool(
 // Tool 5: graph_status — query run state
 server.tool(
   'graph_status',
-  'Query the full status snapshot of a run — all node states and retry counts.',
+  'Query the full status snapshot of a run — the shared delta shape: one-line node rows plus full-field changed rows.',
   GraphStatusSchema.shape,
   async (args) => {
     const rt = await getRuntime();
@@ -351,7 +356,7 @@ server.tool(
 // Tool 10: graph_assets — graph asset query (read-only, passive info channel)
 server.tool(
   'graph_assets',
-  'Enumerate graph assets — merged registry entries (project-first) with per-graph load-time problems. Read-only — never creates a run. The passive information channel for graph-workflow: locate graph files, understand graph state and problems.',
+  'Enumerate graph assets — the graph perception list: { id, description, run_conditions, source, problems } per graph from the merged registries (project-first) plus schema-valid workflow YAMLs (source: fallback). Read-only — never creates a run. The passive information channel for graph-workflow: graph selection, run-condition awareness, problem surfacing.',
   GraphAssetsSchema.shape,
   async (_args) => {
     const rt = await getRuntime();

@@ -33,16 +33,25 @@ describe('semantic injection layer — no upstream fork, Decision UI block prese
   it('handler SKILL.md main step 1 prepends the ## Decision UI block', () => {
     const handler = read(join(SKILLS, 'atom-phase-handler/SKILL.md'));
     const mainSection = handler.slice(handler.indexOf('### main type'));
-    expect(mainSection).toMatch(/run-mode block always; decision-UI block main-only/);
+    expect(mainSection).toMatch(/decision-UI block main-only; constraints block per §Constraints Block Format/);
     expect(mainSection).toMatch(/see CONTEXT-ASSEMBLY\.md §Main Inline Context Assembly/);
   });
 
-  it('CONTEXT-ASSEMBLY.md defines the Decision UI block format + prepend order', () => {
+  it('CONTEXT-ASSEMBLY.md defines the Decision UI sub-section + 4-block prepend order', () => {
     const assembly = read(join(SKILLS, 'atom-phase-handler/CONTEXT-ASSEMBLY.md'));
     expect(assembly).toMatch(/# Decision UI Block/);
-    expect(assembly).toMatch(/Every user-confirmation point in this node's execution/);
-    expect(assembly).toMatch(/recommendation present \+ auto -> execute it; no recommendation -> card/);
-    expect(assembly).toMatch(/decision-UI block -> constraints block -> agent hints block/);
+    expect(assembly).toMatch(/explicit-declaration mapping/);
+    expect(assembly).toMatch(/Approval\(\) cards present ONLY at points the node explicitly declares/);
+    expect(assembly).toMatch(
+      /single-form card always presented - options \+\s*custom free input \+ recommendation marked/,
+    );
+    // consolidated 4-block set (adopt-scope-and-handler-blocks): Run Frame
+    // → Context (decision-ui sub-section) → Constraints → Checks → task text
+    expect(assembly).toMatch(/`## Run Frame` \(unconditional, first/);
+    expect(assembly).toMatch(/`## Context` \(conditional, second/);
+    expect(assembly).toMatch(/`## Constraints` \(unconditional, third/);
+    expect(assembly).toMatch(/`## Checks` \(unconditional, last/);
+    expect(assembly).toMatch(/decision-ui:/);
   });
 
   it('kernel approval() contract carries the main-node checkpoint note', () => {
@@ -50,13 +59,15 @@ describe('semantic injection layer — no upstream fork, Decision UI block prese
     expect(kernel).toMatch(/approval\(\) - Decision UI/);
     expect(kernel).toMatch(/see APPROVAL-CARDS\.md/);
     const cards = read(join(SKILLS, 'atom-kernel/APPROVAL-CARDS.md'));
-    expect(cards).toMatch(/approval\(\) - Card Format, Mode Dispatch/);
+    expect(cards).toMatch(/approval\(\) - Card Format/);
+    expect(cards).toMatch(/No mode dispatch, no auto-execution/);
     // Checkpoint interpretation rule is single-sourced in the handler's
     // context assembly (round-4 no-fork ruling) — cards points at the
     // approval() contract, assembly declares the injection semantics.
     const assembly = read(join(SKILLS, 'atom-phase-handler/CONTEXT-ASSEMBLY.md'));
     expect(assembly).toMatch(/confirmation-point interpretation rule/);
     expect(assembly).toMatch(/upstream skills stay untouched/);
+    expect(assembly).toMatch(/explicit-declaration mapping/);
   });
 
   it('no upstream skill content was modified in packages sources (zero fork residue)', () => {
