@@ -9,20 +9,21 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "yarn workspaces foreach --all --no-private run tsup",
-    "check": "yarn check:dist && yarn manifests && yarn typecheck && yarn lint && yarn format:check",
-    "check:ci": "yarn check:dist && yarn manifests && yarn typecheck && yarn lint && yarn format:check && yarn test",
-    "check:dist": "yarn build && vitest run packages/graph-fidelity/test/dist-smoke.test.ts packages/graph-fidelity-context/test/dist-smoke.test.ts",
+    "build": "bun run --workspaces --if-present --sequential build",
+    "check": "bun check:dist && bun check:manifests && bun check:residue && bun typecheck && bun lint && bun format:check",
+    "check:dist": "bun run build && bun vitest run packages/graph-fidelity/test/dist-smoke.test.ts",
+    "check:manifests": "bun run scripts/gen-manifests.mjs --check",
+    "check:residue": "bun run scripts/check-bun-residue.mjs",
+    "ci:check:full": "bun check && bun test",
+    "fix": "eslint --fix .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
-    "lint:fix": "eslint --fix .",
-    "manifests": "node scripts/gen-manifests.mjs --check",
-    "publish:all": "yarn workspaces foreach --all --no-private npm publish --access public",
-    "publish:dry": "yarn workspaces foreach --all --no-private npm publish --dry-run",
+    "publish": "bun publish --cwd packages/platform-hooks-sdk --access public && bun publish --cwd packages/graph-scheduler --access public && bun publish --cwd packages/graph-workflow --access public && bun publish --cwd packages/graph-fidelity --access public",
+    "publish:dry": "bun publish --cwd packages/platform-hooks-sdk --access public --dry-run && bun publish --cwd packages/graph-scheduler --access public --dry-run && bun publish --cwd packages/graph-workflow --access public --dry-run && bun publish --cwd packages/graph-fidelity --access public --dry-run",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "yarn workspaces foreach --all --no-private run typecheck"
+    "typecheck": "bun run --workspaces --if-present --sequential typecheck"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
@@ -38,5 +39,5 @@
     "vite": "^8.2.1",
     "vitest": "^4.1.10"
   },
-  "packageManager": "yarn@4.17.1+sha512.ccbfabf7d7b6b32075088be9386fb9a2e00bb6887ef07fa56effabc890a56d53da1ccc4128d62db245fcbd3961b236d75335bdf7d5320ed6eafb7588b7ad4697"
+  "packageManager": "bun@1.3.14"
 }
