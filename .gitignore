@@ -14,7 +14,6 @@ node_modules
 !/docs/CHANGELOG.zh-CN.md
 !/docs/readme-blueprint.md
 /openspec/*
-!/openspec/specs
 
 # Build output
 /dist
