@@ -1,0 +1,75 @@
+{
+  "name": "agentic-graphjs",
+  "version": "0.1.0",
+  "description": "Durable-step graph runtime: channels with reducers, a super-step interpreter over a compiled graph, router edges, and checkpointed persistence. The DI base is Awilix — the convenience face registers the seven port tokens; persistence, identity, and the clock arrive as injected ports.",
+  "keywords": [
+    "graph",
+    "workflow",
+    "runtime",
+    "interpreter",
+    "checkpoint",
+    "agent"
+  ],
+  "homepage": "https://github.com/makara/ai-atomic-workflow/tree/main/packages/agentic-graphjs#readme",
+  "bugs": {
+    "url": "https://github.com/makara/ai-atomic-workflow/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/makara/ai-atomic-workflow.git",
+    "directory": "packages/agentic-graphjs"
+  },
+  "license": "Apache-2.0",
+  "author": {
+    "name": "makarawang",
+    "email": "makara15@gmail.com"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./internal": {
+      "types": "./dist/internal.d.ts",
+      "import": "./dist/internal.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "src/",
+    "examples/",
+    "docs/",
+    "README.md",
+    "README.zh-CN.md",
+    "CHANGELOG.md",
+    "CHANGELOG.zh-CN.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "example": "bun run examples/memory-e2e.ts && bun run examples/awilix-e2e.ts && bun run examples/read-face-e2e.ts",
+    "prepack": "bun run build && bun run typecheck && bun run test",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "awilix": "13.0.5"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "aiAtomicBuild": {
+    "libraryModule": true
+  },
+  "atomicWorkflow": {}
+}

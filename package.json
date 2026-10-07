@@ -3,10 +3,11 @@
   "version": "0.6.0",
   "private": true,
   "description": "Graph-Engineering for Real Engineers: Graphs define workflows; workflows build graphs. Based on mattpocock/skills.",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "tests/*"
   ],
   "scripts": {
     "build": "bun run --workspaces --if-present --sequential build",
